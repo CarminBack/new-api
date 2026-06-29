@@ -77,7 +77,9 @@ const ModelPricingTable = ({
               ? t('按量计费')
               : modelData?.quota_type === 1
                 ? t('按次计费')
-                : '-',
+                : modelData?.quota_type === 2
+                  ? t('按秒计费')
+                  : '-',
         priceItems: getModelPriceItems(priceData, t, siteDisplayType),
       };
     });
@@ -119,6 +121,7 @@ const ModelPricingTable = ({
         if (text === t('按量计费')) color = 'violet';
         else if (text === t('按次计费')) color = 'teal';
         else if (text === t('动态计费')) color = 'amber';
+        else if (text === t('按秒计费')) color = 'cyan';
         return (
           <Tag color={color} size='small' shape='circle'>
             {text || '-'}
