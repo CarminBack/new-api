@@ -126,6 +126,7 @@ export default function ModelPricingEditor({
     handleBillingModeChange,
     handleBillingExprChange,
     handleRequestRuleExprChange,
+    handleTaskBillingUnitChange,
     handleSubmit,
     addModel,
     deleteModel,
@@ -190,14 +191,18 @@ export default function ModelPricingEditor({
           <Tag
             color={
               record.billingMode === 'per-request'
-                ? 'teal'
+                ? record.taskBillingUnit === 'per_second'
+                  ? 'cyan'
+                  : 'teal'
                 : record.billingMode === 'tiered_expr'
                   ? 'amber'
                   : 'violet'
             }
           >
             {record.billingMode === 'per-request'
-              ? t('按次计费')
+              ? record.taskBillingUnit === 'per_second'
+                ? t('按秒计费')
+                : t('按次计费')
               : record.billingMode === 'tiered_expr'
                 ? getExprModeLabel(record)
                 : t('按量计费')}
@@ -379,14 +384,18 @@ export default function ModelPricingEditor({
                 <Tag
                   color={
                     selectedModel.billingMode === 'per-request'
-                      ? 'teal'
+                      ? selectedModel.taskBillingUnit === 'per_second'
+                        ? 'cyan'
+                        : 'teal'
                       : selectedModel.billingMode === 'tiered_expr'
                         ? 'amber'
                         : 'blue'
                   }
                 >
                   {selectedModel.billingMode === 'per-request'
-                    ? t('按次计费')
+                    ? selectedModel.taskBillingUnit === 'per_second'
+                      ? t('按秒计费')
+                      : t('按次计费')
                     : selectedModel.billingMode === 'tiered_expr'
                       ? getExprModeLabel(selectedModel)
                       : t('按量计费')}
@@ -441,14 +450,45 @@ export default function ModelPricingEditor({
                 ) : null}
 
                 {selectedModel.billingMode === 'per-request' ? (
-                  <PriceInput
-                    label={t('固定价格')}
-                    value={selectedModel.fixedPrice}
-                    placeholder={t('输入每次调用价格')}
-                    suffix={t('$/次')}
-                    onChange={(value) => handleNumericFieldChange('fixedPrice', value)}
-                    extraText={t('适合 MJ / 任务类等按次收费模型。')}
-                  />
+                  <>
+                    <div className='mb-4'>
+                      <div className='mb-2 font-medium text-gray-700'>
+                        {t('固定价格单位')}
+                      </div>
+                      <RadioGroup
+                        type='button'
+                        value={selectedModel.taskBillingUnit}
+                        onChange={(event) =>
+                          handleTaskBillingUnitChange(event.target.value)
+                        }
+                      >
+                        <Radio value='per_item'>{t('按次计费')}</Radio>
+                        <Radio value='per_second'>{t('按秒计费')}</Radio>
+                      </RadioGroup>
+                    </div>
+                    <PriceInput
+                      label={t('固定价格')}
+                      value={selectedModel.fixedPrice}
+                      placeholder={
+                        selectedModel.taskBillingUnit === 'per_second'
+                          ? t('输入每秒价格')
+                          : t('输入每次调用价格')
+                      }
+                      suffix={
+                        selectedModel.taskBillingUnit === 'per_second'
+                          ? t('$/秒')
+                          : t('$/次')
+                      }
+                      onChange={(value) =>
+                        handleNumericFieldChange('fixedPrice', value)
+                      }
+                      extraText={
+                        selectedModel.taskBillingUnit === 'per_second'
+                          ? t('适合按视频时长计费的任务模型。')
+                          : t('适合 MJ / 任务类等按次收费模型。')
+                      }
+                    />
+                  </>
                 ) : selectedModel.billingMode === 'tiered_expr' ? (
                   <TieredPricingEditor
                     model={selectedModel}
