@@ -26,6 +26,7 @@ import {
   Checkbox,
   Form,
   Input,
+  InputNumber,
   Tooltip,
   Select,
   Modal,
@@ -106,6 +107,7 @@ export default function UpstreamRatioSync(props) {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [aistarsLabLoading, setAistarsLabLoading] = useState(false);
   const [aistarsLabResult, setAistarsLabResult] = useState(null);
+  const [aistarsLabProfitPercent, setAistarsLabProfitPercent] = useState(30);
   const isMobile = useIsMobile();
 
   // 渠道选择相关
@@ -621,10 +623,17 @@ export default function UpstreamRatioSync(props) {
   };
 
   const runAistarsLabSync = async (dryRun = true) => {
+    const profitPercent = Number(aistarsLabProfitPercent);
+    if (Number.isNaN(profitPercent) || profitPercent < 0) {
+      showError(t('利润比例不能小于 0'));
+      return;
+    }
+
     setAistarsLabLoading(true);
     try {
       const res = await API.post('/api/ratio_sync/aistarslab/sync', {
         dry_run: dryRun,
+        markup_rate: 1 + profitPercent / 100,
       });
 
       if (!res.data.success) {
@@ -651,7 +660,7 @@ export default function UpstreamRatioSync(props) {
   const confirmAistarsLabSync = () => {
     Modal.confirm({
       title: t('确认应用 AistarsLab 即梦同步'),
-      content: t('将更新即梦模型、价格、计费单位和渠道映射。'),
+      content: `${t('将更新即梦模型、价格、计费单位和渠道映射。')}${t('当前利润比例')}: ${aistarsLabProfitPercent}%`,
       okText: t('确认应用'),
       cancelText: t('取消'),
       onOk: () => runAistarsLabSync(false),
@@ -674,6 +683,22 @@ export default function UpstreamRatioSync(props) {
         </div>
       </div>
       <div className='flex flex-col sm:flex-row gap-2 w-full md:w-auto'>
+        <div className='flex items-center gap-2 w-full sm:w-auto'>
+          <span className='text-sm whitespace-nowrap'>{t('利润比例')}</span>
+          <InputNumber
+            value={aistarsLabProfitPercent}
+            min={0}
+            max={1000}
+            precision={2}
+            onChange={(value) => {
+              setAistarsLabProfitPercent(value ?? 0);
+              setAistarsLabResult(null);
+            }}
+            className='w-full sm:w-28'
+            disabled={aistarsLabLoading}
+          />
+          <span className='text-sm text-gray-500'>%</span>
+        </div>
         <Button
           icon={<RefreshCcw size={14} />}
           className='w-full md:w-auto'
@@ -812,6 +837,12 @@ export default function UpstreamRatioSync(props) {
           </Tag>
           <Tag color='cyan' shape='circle'>
             {t('映射')}: {aistarsLabResult.mapping_changes?.length || 0}
+          </Tag>
+          <Tag color='purple' shape='circle'>
+            {t('利润比例')}:{' '}
+            {Number.isFinite(aistarsLabResult.markup_rate)
+              ? `${Math.round((aistarsLabResult.markup_rate - 1) * 10000) / 100}%`
+              : '-'}
           </Tag>
           <Tag
             color={aistarsLabResult.dry_run ? 'yellow' : 'green'}
