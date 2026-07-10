@@ -66,6 +66,10 @@ import LinuxDoIcon from '../common/logo/LinuxDoIcon';
 import TwoFAVerification from './TwoFAVerification';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
+import {
+  redirectAfterLogin,
+  rememberLoginReturnTo,
+} from '../../helpers/loginReturn';
 
 const LoginForm = () => {
   let navigate = useNavigate();
@@ -112,6 +116,10 @@ const LoginForm = () => {
   const githubTimeoutRef = useRef(null);
   const githubButtonText = t(githubButtonTextKeyByState[githubButtonState]);
   const [customOAuthLoading, setCustomOAuthLoading] = useState({});
+
+  useEffect(() => {
+    rememberLoginReturnTo(searchParams.get('return_to'));
+  }, [searchParams]);
 
   const logo = getLogo();
   const systemName = getSystemName();
@@ -255,7 +263,7 @@ const LoginForm = () => {
               centered: true,
             });
           }
-          navigate('/console');
+          redirectAfterLogin(navigate, '/console');
         } else {
           showError(message);
         }
@@ -456,7 +464,7 @@ const LoginForm = () => {
         setUserData(finish.data);
         updateAPI();
         showSuccess('登录成功！');
-        navigate('/console');
+        redirectAfterLogin(navigate, '/console');
       } else {
         showError(finish.message || 'Passkey 登录失败，请重试');
       }
@@ -491,7 +499,7 @@ const LoginForm = () => {
     setUserData(data);
     updateAPI();
     showSuccess('登录成功！');
-    navigate('/console');
+    redirectAfterLogin(navigate, '/console');
   };
 
   // 返回登录页面

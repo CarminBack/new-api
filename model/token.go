@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Token struct {
@@ -223,6 +224,15 @@ func ValidateUserToken(key string) (token *Token, err error) {
 		return nil, ErrTokenInvalid
 	}
 	return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
+}
+
+func GetUserTokenByNameAndGroup(userId int, name, group string) (*Token, error) {
+	if userId <= 0 || strings.TrimSpace(name) == "" || strings.TrimSpace(group) == "" {
+		return nil, errors.New("invalid token lookup parameters")
+	}
+	var token Token
+	err := DB.Where("user_id = ? AND name = ?", userId, name).Where(clause.Eq{Column: clause.Column{Name: "group"}, Value: group}).First(&token).Error
+	return &token, err
 }
 
 func GetTokenByIds(id int, userId int) (*Token, error) {

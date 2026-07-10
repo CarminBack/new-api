@@ -12,6 +12,9 @@ import (
 )
 
 func SetApiRouter(router *gin.Engine) {
+	router.GET("/oauth/authorize", middleware.CriticalRateLimit(), controller.CanvasOAuthAuthorize)
+	router.POST("/oauth/token", middleware.CriticalRateLimit(), controller.CanvasOAuthToken)
+
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))

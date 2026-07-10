@@ -29,13 +29,14 @@ import {
 } from '../../helpers';
 import { UserContext } from '../../context/User';
 import Loading from '../common/ui/Loading';
+import { redirectAfterLogin } from '../../helpers/loginReturn';
 
 const OAuth2Callback = (props) => {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const [, userDispatch] = useContext(UserContext);
   const navigate = useNavigate();
-  
+
   // 防止 React 18 Strict Mode 下重复执行
   const hasExecuted = useRef(false);
 
@@ -65,7 +66,7 @@ const OAuth2Callback = (props) => {
         setUserData(data);
         updateAPI();
         showSuccess(t('登录成功！'));
-        navigate('/console/token');
+        redirectAfterLogin(navigate, '/console/token');
       }
     } catch (error) {
       // 网络错误等可重试

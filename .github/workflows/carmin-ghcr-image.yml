@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - video-task-result-fix
+      - hotfix-sora-error-string
   workflow_dispatch:
 
 env:
