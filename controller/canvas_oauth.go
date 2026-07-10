@@ -28,7 +28,9 @@ const (
 	defaultCanvasOAuthClientID    = "canvas"
 	defaultCanvasOAuthRedirectURI = "https://canvas.mewinyou.shop/auth/callback"
 	defaultCanvasTokenName        = "无限画布自动授权"
-	defaultCanvasTokenGroup       = "Image"
+	defaultCanvasImageGroup       = "Image"
+	defaultCanvasVideoGroup       = "Video"
+	defaultCanvasChatGPTGroup     = "ChatGPT"
 	canvasOAuthCodeTTL            = 60 * time.Second
 )
 
@@ -42,7 +44,9 @@ type canvasOAuthConfig struct {
 	ClientSecret string
 	RedirectURI  string
 	TokenName    string
-	TokenGroup   string
+	ImageGroup   string
+	VideoGroup   string
+	ChatGPTGroup string
 }
 
 func getCanvasOAuthConfig() canvasOAuthConfig {
@@ -51,7 +55,9 @@ func getCanvasOAuthConfig() canvasOAuthConfig {
 		ClientSecret: strings.TrimSpace(os.Getenv("CANVAS_OAUTH_CLIENT_SECRET")),
 		RedirectURI:  common.GetEnvOrDefaultString("CANVAS_OAUTH_REDIRECT_URI", defaultCanvasOAuthRedirectURI),
 		TokenName:    common.GetEnvOrDefaultString("CANVAS_OAUTH_TOKEN_NAME", defaultCanvasTokenName),
-		TokenGroup:   common.GetEnvOrDefaultString("CANVAS_OAUTH_TOKEN_GROUP", defaultCanvasTokenGroup),
+		ImageGroup:   common.GetEnvOrDefaultString("CANVAS_OAUTH_TOKEN_GROUP", defaultCanvasImageGroup),
+		VideoGroup:   common.GetEnvOrDefaultString("CANVAS_OAUTH_VIDEO_GROUP", defaultCanvasVideoGroup),
+		ChatGPTGroup: common.GetEnvOrDefaultString("CANVAS_OAUTH_CHATGPT_GROUP", defaultCanvasChatGPTGroup),
 	}
 }
 
@@ -158,25 +164,38 @@ func CanvasOAuthToken(c *gin.Context) {
 		canvasOAuthError(c, http.StatusBadRequest, "invalid_grant", "user is unavailable")
 		return
 	}
-	if !service.GroupInUserUsableGroups(user.Group, config.TokenGroup) {
-		canvasOAuthError(c, http.StatusForbidden, "access_denied", fmt.Sprintf("当前账号不可使用 %s 分组", config.TokenGroup))
-		return
+	specs := canvasTokenSpecs(config)
+	for _, spec := range specs {
+		if !service.GroupInUserUsableGroups(user.Group, spec.Group) {
+			canvasOAuthError(c, http.StatusForbidden, "access_denied", fmt.Sprintf("当前账号不可使用 %s 分组", spec.Group))
+			return
+		}
 	}
-	token, err := getOrCreateCanvasToken(user.Id, config)
-	if err != nil {
-		common.SysLog("failed to provision Canvas token: " + err.Error())
-		canvasOAuthError(c, http.StatusInternalServerError, "server_error", "failed to provision Canvas access")
-		return
-	}
-	if token.Status != common.TokenStatusEnabled {
-		canvasOAuthError(c, http.StatusForbidden, "access_denied", "Canvas 自动授权令牌已被停用，请在令牌页面重新启用")
-		return
+	tokens := make(map[string]*model.Token, len(specs))
+	for _, spec := range specs {
+		token, provisionErr := getOrCreateCanvasToken(user.Id, spec.Name, spec.Group)
+		if provisionErr != nil {
+			common.SysLog("failed to provision Canvas token: " + provisionErr.Error())
+			canvasOAuthError(c, http.StatusInternalServerError, "server_error", "failed to provision Canvas access")
+			return
+		}
+		if token.Status != common.TokenStatusEnabled {
+			canvasOAuthError(c, http.StatusForbidden, "access_denied", fmt.Sprintf("Canvas %s 分组自动授权令牌已被停用，请在令牌页面重新启用", spec.Group))
+			return
+		}
+		tokens[spec.Capability] = token
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"access_token": "sk-" + token.Key,
+		"access_token": "sk-" + tokens["image"].Key,
 		"token_type":   "Bearer",
-		"scope":        "image",
+		"scope":        "image video text audio",
+		"group_tokens": gin.H{
+			"image": "sk-" + tokens["image"].Key,
+			"video": "sk-" + tokens["video"].Key,
+			"text":  "sk-" + tokens["text"].Key,
+			"audio": "sk-" + tokens["text"].Key,
+		},
 		"user": gin.H{
 			"sub":      strconv.Itoa(user.Id),
 			"username": user.Username,
@@ -184,9 +203,23 @@ func CanvasOAuthToken(c *gin.Context) {
 	})
 }
 
-func getOrCreateCanvasToken(userID int, config canvasOAuthConfig) (*model.Token, error) {
+type canvasTokenSpec struct {
+	Capability string
+	Name       string
+	Group      string
+}
+
+func canvasTokenSpecs(config canvasOAuthConfig) []canvasTokenSpec {
+	return []canvasTokenSpec{
+		{Capability: "image", Name: config.TokenName, Group: config.ImageGroup},
+		{Capability: "video", Name: config.TokenName + " (Video)", Group: config.VideoGroup},
+		{Capability: "text", Name: config.TokenName + " (ChatGPT)", Group: config.ChatGPTGroup},
+	}
+}
+
+func getOrCreateCanvasToken(userID int, tokenName, tokenGroup string) (*model.Token, error) {
 	var token model.Token
-	existingToken, err := model.GetUserTokenByNameAndGroup(userID, config.TokenName, config.TokenGroup)
+	existingToken, err := model.GetUserTokenByNameAndGroup(userID, tokenName, tokenGroup)
 	if err == nil {
 		return existingToken, nil
 	}
@@ -209,17 +242,17 @@ func getOrCreateCanvasToken(userID int, config canvasOAuthConfig) (*model.Token,
 		UserId:             userID,
 		Key:                key,
 		Status:             common.TokenStatusEnabled,
-		Name:               config.TokenName,
+		Name:               tokenName,
 		CreatedTime:        now,
 		AccessedTime:       now,
 		ExpiredTime:        -1,
 		UnlimitedQuota:     true,
 		ModelLimitsEnabled: false,
 		ModelLimits:        "",
-		Group:              config.TokenGroup,
+		Group:              tokenGroup,
 	}
 	if err := token.Insert(); err != nil {
-		if existing, lookupErr := model.GetUserTokenByNameAndGroup(userID, config.TokenName, config.TokenGroup); lookupErr == nil {
+		if existing, lookupErr := model.GetUserTokenByNameAndGroup(userID, tokenName, tokenGroup); lookupErr == nil {
 			return existing, nil
 		}
 		return nil, err
