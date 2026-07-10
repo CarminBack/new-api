@@ -41,11 +41,10 @@ export const AuthRedirect = ({ children }) => {
 
   useEffect(() => {
     if (returnTo) rememberLoginReturnTo(returnTo);
-    if (user && returnTo) window.location.replace(returnTo);
-  }, [returnTo, user]);
+  }, [returnTo]);
 
-  if (user) {
-    return returnTo ? null : <Navigate to='/console' replace />;
+  if (user && !returnTo) {
+    return <Navigate to='/console' replace />;
   }
 
   return children;
