@@ -28,7 +28,7 @@ const (
 	defaultCanvasOAuthClientID    = "canvas"
 	defaultCanvasOAuthRedirectURI = "https://canvas.mewinyou.shop/auth/callback"
 	defaultCanvasTokenName        = "无限画布自动授权"
-	defaultCanvasTokenGroup       = "image"
+	defaultCanvasTokenGroup       = "Image"
 	canvasOAuthCodeTTL            = 60 * time.Second
 )
 
