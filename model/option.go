@@ -52,6 +52,11 @@ func InitOptionMap() {
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
 	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
 	common.OptionMap["TaskEnabled"] = strconv.FormatBool(common.TaskEnabled)
+	aistarsLabMarkupRate := strings.TrimSpace(common.GetEnvOrDefaultString("AISTARSLAB_MARKUP_RATE", "1.3"))
+	if value, err := strconv.ParseFloat(aistarsLabMarkupRate, 64); err != nil || value <= 0 {
+		aistarsLabMarkupRate = "1.3"
+	}
+	common.OptionMap["AistarsLabMarkupRate"] = aistarsLabMarkupRate
 	common.OptionMap["DataExportEnabled"] = strconv.FormatBool(common.DataExportEnabled)
 	common.OptionMap["ChannelDisableThreshold"] = strconv.FormatFloat(common.ChannelDisableThreshold, 'f', -1, 64)
 	common.OptionMap["EmailDomainRestrictionEnabled"] = strconv.FormatBool(common.EmailDomainRestrictionEnabled)

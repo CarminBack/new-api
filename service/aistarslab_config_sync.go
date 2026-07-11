@@ -204,7 +204,7 @@ func SyncAistarsLabConfig(ctx context.Context, req AistarsLabSyncRequest) (*Aist
 	if normalized.DryRun {
 		return result, nil
 	}
-	if err := applyAistarsLabSeedanceSync(normalized.ChannelID, models); err != nil {
+	if err := applyAistarsLabSeedanceSync(normalized.ChannelID, normalized.MarkupRate, models); err != nil {
 		return nil, err
 	}
 	model.RefreshPricing()
@@ -222,9 +222,19 @@ func normalizeAistarsLabSyncRequest(req AistarsLabSyncRequest) AistarsLabSyncReq
 		req.CreditRate = getAistarsLabEnvFloat("AISTARSLAB_CREDIT_RATE", aistarslabDefaultCreditRate)
 	}
 	if req.MarkupRate <= 0 {
-		req.MarkupRate = getAistarsLabEnvFloat("AISTARSLAB_MARKUP_RATE", aistarslabDefaultMarkupRate)
+		req.MarkupRate = getAistarsLabConfiguredMarkupRate()
 	}
 	return req
+}
+
+func getAistarsLabConfiguredMarkupRate() float64 {
+	common.OptionMapRWMutex.RLock()
+	raw := strings.TrimSpace(common.OptionMap["AistarsLabMarkupRate"])
+	common.OptionMapRWMutex.RUnlock()
+	if value, err := strconv.ParseFloat(raw, 64); err == nil && value > 0 {
+		return value
+	}
+	return getAistarsLabEnvFloat("AISTARSLAB_MARKUP_RATE", aistarslabDefaultMarkupRate)
 }
 
 func getAistarsLabEnvFloat(env string, defaultValue float64) float64 {
@@ -445,7 +455,7 @@ func buildAistarsLabSyncResult(req AistarsLabSyncRequest, models []AistarsLabSee
 	return result
 }
 
-func applyAistarsLabSeedanceSync(channelID int, modelsToSync []AistarsLabSeedanceModel) error {
+func applyAistarsLabSeedanceSync(channelID int, markupRate float64, modelsToSync []AistarsLabSeedanceModel) error {
 	priceMap := ratio_setting.GetModelPriceCopy()
 	unitMap := ratio_setting.GetTaskBillingUnitCopy()
 
@@ -478,10 +488,11 @@ func applyAistarsLabSeedanceSync(channelID int, modelsToSync []AistarsLabSeedanc
 	if err != nil {
 		return err
 	}
-	if err := model.UpdateOption("ModelPrice", string(priceJSON)); err != nil {
-		return err
-	}
-	if err := model.UpdateOption("TaskBillingUnit", string(unitJSON)); err != nil {
+	if err := model.UpdateOptionsBulk(map[string]string{
+		"ModelPrice":           string(priceJSON),
+		"TaskBillingUnit":      string(unitJSON),
+		"AistarsLabMarkupRate": strconv.FormatFloat(markupRate, 'f', -1, 64),
+	}); err != nil {
 		return err
 	}
 	if err := upsertAistarsLabSeedanceModelMeta(modelsToSync); err != nil {

@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/assert"
 )
@@ -128,4 +129,27 @@ func TestFilterOutAistarsLabSeedanceAliasesRemovesRawModels(t *testing.T) {
 	})
 
 	assert.Equal(t, []string{"grok-video-1.5"}, filtered)
+}
+
+func TestNormalizeAistarsLabSyncRequestUsesConfiguredMarkupRate(t *testing.T) {
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	originalValue, existed := common.OptionMap["AistarsLabMarkupRate"]
+	common.OptionMap["AistarsLabMarkupRate"] = "1.42"
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		if existed {
+			common.OptionMap["AistarsLabMarkupRate"] = originalValue
+		} else {
+			delete(common.OptionMap, "AistarsLabMarkupRate")
+		}
+	})
+
+	normalized := normalizeAistarsLabSyncRequest(AistarsLabSyncRequest{})
+
+	assert.Equal(t, 1.42, normalized.MarkupRate)
 }

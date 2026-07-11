@@ -35,6 +35,7 @@ import {
 import { Input } from '@/components/ui/input'
 
 import { syncAistarsLabConfig } from '../api'
+import { useSystemOptions } from '../hooks/use-system-options'
 import type { AistarsLabSyncResult } from '../types'
 
 type ChangeRow = {
@@ -48,13 +49,24 @@ type ChangeRow = {
 export function AistarsLabSync() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const [profitPercent, setProfitPercent] = useState('30')
+  const { data: systemOptions } = useSystemOptions()
+  const [profitPercent, setProfitPercent] = useState<string | null>(null)
   const [result, setResult] = useState<AistarsLabSyncResult | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
 
+  const configuredProfitPercent = useMemo(() => {
+    const option = systemOptions?.data?.find(
+      (item) => item.key === 'AistarsLabMarkupRate'
+    )
+    const markupRate = Number(option?.value)
+    if (!Number.isFinite(markupRate) || markupRate <= 0) return '30'
+    return String(Math.round((markupRate - 1) * 10000) / 100)
+  }, [systemOptions])
+  const effectiveProfitPercent = profitPercent ?? configuredProfitPercent
+
   const syncMutation = useMutation({
     mutationFn: (dryRun: boolean) => {
-      const profit = Number(profitPercent)
+      const profit = Number(effectiveProfitPercent)
       return syncAistarsLabConfig({
         dry_run: dryRun,
         markup_rate: 1 + profit / 100,
@@ -71,6 +83,9 @@ export function AistarsLabSync() {
         return
       }
       toast.success(t('AistarsLab Jimeng sync applied'))
+      setProfitPercent(
+        String(Math.round((response.data.markup_rate - 1) * 10000) / 100)
+      )
       setConfirmOpen(false)
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
     },
@@ -79,9 +94,9 @@ export function AistarsLabSync() {
     },
   })
 
-  const parsedProfit = Number(profitPercent)
+  const parsedProfit = Number(effectiveProfitPercent)
   const profitIsValid =
-    profitPercent.trim() !== '' &&
+    effectiveProfitPercent.trim() !== '' &&
     Number.isFinite(parsedProfit) &&
     parsedProfit >= 0
 
@@ -167,7 +182,7 @@ export function AistarsLabSync() {
                   type='number'
                   min='0'
                   step='1'
-                  value={profitPercent}
+                  value={effectiveProfitPercent}
                   onChange={(event) => setProfitPercent(event.target.value)}
                   disabled={syncMutation.isPending}
                   aria-invalid={!profitIsValid}
@@ -289,7 +304,7 @@ export function AistarsLabSync() {
         title={t('Confirm AistarsLab Jimeng sync')}
         desc={t(
           'This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%',
-          { profit: profitPercent }
+          { profit: effectiveProfitPercent }
         )}
         confirmText={t('Apply sync')}
         handleConfirm={() => runSync(false)}
