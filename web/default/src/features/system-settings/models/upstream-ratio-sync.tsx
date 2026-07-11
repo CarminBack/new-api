@@ -35,6 +35,7 @@ import type {
   UpstreamChannel,
   UpstreamConfig,
 } from '../types'
+import { AistarsLabSync } from './aistarslab-sync'
 import { ChannelSelectorDialog } from './channel-selector-dialog'
 import {
   ConflictConfirmDialog,
@@ -520,6 +521,8 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
 
   return (
     <div className='space-y-4'>
+      <AistarsLabSync />
+
       <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
         <div className='flex flex-col gap-2 sm:flex-row'>
           <Button onClick={handleOpenChannelDialog} disabled={isLoading}>

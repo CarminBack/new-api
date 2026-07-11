@@ -444,3 +444,58 @@ export type UpstreamRatiosResponse = {
     test_results: TestResult[]
   }
 }
+
+export type AistarsLabSyncRequest = {
+  dry_run: boolean
+  channel_id?: number
+  config_url?: string
+  credit_rate?: number
+  markup_rate: number
+}
+
+export type AistarsLabValueChange<T> = {
+  model: string
+  old?: T
+  new?: T
+}
+
+export type AistarsLabSeedanceModel = {
+  public_model: string
+  upstream_model: string
+  channel: string
+  quality: string
+  billing_unit: string
+  price: number
+  raw_credits: number
+  modes?: string[]
+  aspect_ratios?: string[]
+  duration_min?: number
+  duration_max?: number
+  input_images_max: number
+  input_videos_max: number
+  input_audios_max: number
+  default_option: boolean
+  source_title?: string
+  source_description?: string
+}
+
+export type AistarsLabSyncResult = {
+  dry_run: boolean
+  channel_id: number
+  config_url: string
+  credit_rate: number
+  markup_rate: number
+  total_models: number
+  added_models: string[]
+  removed_models: string[]
+  price_changes: AistarsLabValueChange<number>[]
+  task_unit_changes: AistarsLabValueChange<string>[]
+  mapping_changes: AistarsLabValueChange<string>[]
+  models: AistarsLabSeedanceModel[]
+}
+
+export type AistarsLabSyncResponse = {
+  success: boolean
+  message: string
+  data?: AistarsLabSyncResult
+}

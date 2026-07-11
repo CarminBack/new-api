@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 
 import type {
+  AistarsLabSyncRequest,
+  AistarsLabSyncResponse,
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
@@ -101,6 +103,14 @@ export async function getUpstreamChannels() {
 export async function fetchUpstreamRatios(request: FetchUpstreamRatiosRequest) {
   const res = await api.post<UpstreamRatiosResponse>(
     '/api/ratio_sync/fetch',
+    request
+  )
+  return res.data
+}
+
+export async function syncAistarsLabConfig(request: AistarsLabSyncRequest) {
+  const res = await api.post<AistarsLabSyncResponse>(
+    '/api/ratio_sync/aistarslab/sync',
     request
   )
   return res.data
