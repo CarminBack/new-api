@@ -5108,6 +5108,7 @@
     "No AistarsLab Jimeng sync result yet": "No AistarsLab Jimeng sync result yet",
     "Confirm AistarsLab Jimeng sync": "Confirm AistarsLab Jimeng sync",
     "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%": "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%",
-    "Apply sync": "Apply sync"
+    "Apply sync": "Apply sync",
+    "Infinite Canvas": "Infinite Canvas"
   }
 }

@@ -5108,6 +5108,7 @@
     "No AistarsLab Jimeng sync result yet": "AistarsLab Jimeng 同期結果はまだありません",
     "Confirm AistarsLab Jimeng sync": "AistarsLab Jimeng 同期を確認",
     "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%": "Jimeng のモデル、価格、課金単位、チャネルマッピングを更新します。現在の利益率：{{profit}}%",
-    "Apply sync": "同期を適用"
+    "Apply sync": "同期を適用",
+    "Infinite Canvas": "無限キャンバス"
   }
 }

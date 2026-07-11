@@ -5108,6 +5108,7 @@
     "No AistarsLab Jimeng sync result yet": "Chưa có kết quả đồng bộ Jimeng AistarsLab",
     "Confirm AistarsLab Jimeng sync": "Xác nhận đồng bộ Jimeng AistarsLab",
     "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%": "Thao tác này sẽ cập nhật mô hình Jimeng, giá, đơn vị tính phí và ánh xạ kênh. Tỷ lệ lợi nhuận hiện tại: {{profit}}%",
-    "Apply sync": "Áp dụng đồng bộ"
+    "Apply sync": "Áp dụng đồng bộ",
+    "Infinite Canvas": "Canvas vô hạn"
   }
 }

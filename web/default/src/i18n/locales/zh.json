@@ -5108,6 +5108,7 @@
     "No AistarsLab Jimeng sync result yet": "暂无 AistarsLab 即梦同步结果",
     "Confirm AistarsLab Jimeng sync": "确认应用 AistarsLab 即梦同步",
     "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%": "将更新即梦模型、价格、计费单位和渠道映射。当前利润比例：{{profit}}%",
-    "Apply sync": "确认应用"
+    "Apply sync": "确认应用",
+    "Infinite Canvas": "无限画布"
   }
 }

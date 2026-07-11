@@ -5108,6 +5108,7 @@
     "No AistarsLab Jimeng sync result yet": "Aucun résultat de synchronisation Jimeng d’AistarsLab",
     "Confirm AistarsLab Jimeng sync": "Confirmer la synchronisation Jimeng d’AistarsLab",
     "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%": "Cette action mettra à jour les modèles Jimeng, les prix, les unités de facturation et les mappages de canaux. Pourcentage de marge actuel : {{profit}} %",
-    "Apply sync": "Appliquer la synchronisation"
+    "Apply sync": "Appliquer la synchronisation",
+    "Infinite Canvas": "Toile infinie"
   }
 }
