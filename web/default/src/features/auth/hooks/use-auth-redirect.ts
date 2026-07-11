@@ -23,6 +23,7 @@ import type { User } from '@/features/users/types'
 import { getSelf } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { consumeLoginReturnTo } from '../lib/login-return'
 import { saveUserId } from '../lib/storage'
 
 function getSavedLanguage(user: User): string | undefined {
@@ -49,6 +50,16 @@ function getSavedLanguage(user: User): string | undefined {
 export function useAuthRedirect() {
   const navigate = useNavigate()
   const { auth } = useAuthStore()
+
+  const redirectAfterLogin = (redirectTo?: string) => {
+    const loginReturnTo = consumeLoginReturnTo(redirectTo)
+    if (loginReturnTo) {
+      window.location.assign(loginReturnTo)
+      return
+    }
+
+    navigate({ to: redirectTo || '/dashboard', replace: true })
+  }
 
   /**
    * Handle successful login
@@ -87,9 +98,7 @@ export function useAuthRedirect() {
       console.error('Failed to fetch user data:', error)
     }
 
-    // Navigate to target page
-    const targetPath = redirectTo || '/dashboard'
-    navigate({ to: targetPath, replace: true })
+    redirectAfterLogin(redirectTo)
   }
 
   /**
@@ -115,6 +124,7 @@ export function useAuthRedirect() {
 
   return {
     handleLoginSuccess,
+    redirectAfterLogin,
     redirectTo2FA,
     redirectToLogin,
     redirectToRegister,

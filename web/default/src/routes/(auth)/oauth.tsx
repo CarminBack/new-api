@@ -22,6 +22,7 @@ import { useEffect } from 'react'
 import { toast } from 'sonner'
 
 import { wechatLoginByCode } from '@/features/auth/api'
+import { consumeLoginReturnTo } from '@/features/auth/lib/login-return'
 import { getSelf } from '@/lib/api'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 
@@ -43,8 +44,12 @@ function OAuthComponent() {
         const res = await getSelf()
         if (res?.success) {
           useAuthStore.getState().auth.setUser(res.data as AuthUser)
-          const target = search?.redirect || '/dashboard'
-          navigate({ to: target, replace: true })
+          const loginReturnTo = consumeLoginReturnTo(search?.redirect)
+          if (loginReturnTo) {
+            window.location.assign(loginReturnTo)
+            return
+          }
+          navigate({ to: search?.redirect || '/dashboard', replace: true })
           return
         }
       } catch {

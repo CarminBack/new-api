@@ -81,12 +81,12 @@ func CanvasOAuthAuthorize(c *gin.Context) {
 	userID, ok := sessionInt(session.Get("id"))
 	if !ok || userID <= 0 || session.Get("username") == nil {
 		returnTo := c.Request.URL.RequestURI()
-		c.Redirect(http.StatusFound, "/login?return_to="+url.QueryEscape(returnTo))
+		c.Redirect(http.StatusFound, "/sign-in?redirect="+url.QueryEscape(returnTo))
 		return
 	}
 	user, err := model.GetUserById(userID, false)
 	if err != nil || user.Status != common.UserStatusEnabled {
-		c.Redirect(http.StatusFound, "/login?return_to="+url.QueryEscape(c.Request.URL.RequestURI()))
+		c.Redirect(http.StatusFound, "/sign-in?redirect="+url.QueryEscape(c.Request.URL.RequestURI()))
 		return
 	}
 

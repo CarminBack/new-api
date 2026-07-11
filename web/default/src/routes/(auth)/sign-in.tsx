@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { z } from 'zod'
 
+import { normalizeLoginReturnTo } from '@/features/auth/lib/login-return'
 import { SignIn } from '@/features/auth/sign-in'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -31,6 +32,10 @@ export const Route = createFileRoute('/(auth)/sign-in')({
   validateSearch: searchSchema,
   beforeLoad: async ({ search }) => {
     const { auth } = useAuthStore.getState()
+
+    // Canvas authorization reaches this page only when the backend session is
+    // missing or invalid. Do not trust a potentially stale frontend user here.
+    if (normalizeLoginReturnTo(search?.redirect)) return
 
     // 如果已经有用户信息，说明已登录
     if (auth.user) {

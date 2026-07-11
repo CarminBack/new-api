@@ -67,7 +67,7 @@ export function OtpForm({ className, ...props }: OtpFormProps) {
   const [useBackupCode, setUseBackupCode] = useState(false)
 
   const { auth } = useAuthStore()
-  const { redirectToLogin } = useAuthRedirect()
+  const { redirectAfterLogin, redirectToLogin } = useAuthRedirect()
 
   const form = useForm<z.infer<typeof otpFormSchema>>({
     resolver: zodResolver(otpFormSchema),
@@ -116,7 +116,7 @@ export function OtpForm({ className, ...props }: OtpFormProps) {
       }
 
       toast.success(t('Signed in'))
-      redirectToLogin() // This will redirect to dashboard via the redirect logic
+      redirectAfterLogin()
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('2FA verification error:', error)
