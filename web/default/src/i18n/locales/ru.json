@@ -5109,6 +5109,10 @@
     "Confirm AistarsLab Jimeng sync": "Подтвердить синхронизацию Jimeng AistarsLab",
     "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%": "Будут обновлены модели Jimeng, цены, единицы тарификации и сопоставления каналов. Текущий процент прибыли: {{profit}}%",
     "Apply sync": "Применить синхронизацию",
+    "Image group resolution prices": "Цены по разрешению для группы Image",
+    "The single-image prices used when a request is routed through the Image group.": "Цена одного изображения при обработке запроса через группу Image.",
+    "{{tier}} price (USD)": "Цена {{tier}} (USD)",
+    "JSON map containing the 1K, 2K, and 4K single-image prices in USD.": "JSON-объект с ценами в USD за одно изображение для 1K, 2K и 4K.",
     "Infinite Canvas": "Бесконечный холст"
   }
 }

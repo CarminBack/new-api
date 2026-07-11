@@ -45,6 +45,7 @@ const defaultBillingSettings: BillingSettings = {
   CreateCacheRatio: '',
   CompletionRatio: '',
   ImageRatio: '',
+  ImageGroupPrice: '{"1k":0.1,"2k":0.14,"4k":0.2}',
   AudioRatio: '',
   AudioCompletionRatio: '',
   ExposeRatioEnabled: false,

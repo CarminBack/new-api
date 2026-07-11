@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -184,15 +185,7 @@ func imageGroupUnitPrice(size string) (float64, bool) {
 	if !ok {
 		return 0, false
 	}
-	switch tier {
-	case "1k":
-		return 0.10, true
-	case "2k":
-		return 0.14, true
-	case "4k":
-		return 0.20, true
-	}
-	return 0, false
+	return ratio_setting.GetImageGroupPrice(tier)
 }
 
 func gptImage2UnitPrice(size string, quality string) (float64, bool) {

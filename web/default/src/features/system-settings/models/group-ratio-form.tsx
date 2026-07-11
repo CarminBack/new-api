@@ -34,6 +34,13 @@ import {
 } from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
 import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import {
   Form,
   FormControl,
   FormDescription,
@@ -42,6 +49,8 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Sheet,
   SheetContent,
@@ -64,6 +73,7 @@ import { GroupSpecialUsableRulesEditor } from './group-special-usable-editor'
 
 type GroupFormValues = {
   GroupRatio: string
+  ImageGroupPrice: string
   TopupGroupRatio: string
   UserUsableGroups: string
   GroupGroupRatio: string
@@ -102,8 +112,27 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   }, [])
 
   const watchedGroupRatio = form.watch('GroupRatio')
+  const watchedImageGroupPrice = form.watch('ImageGroupPrice')
   const watchedUserUsableGroups = form.watch('UserUsableGroups')
   const watchedTopupGroupRatio = form.watch('TopupGroupRatio')
+  const imageGroupPrices = useMemo(
+    () =>
+      safeJsonParse<Record<'1k' | '2k' | '4k', number>>(
+        watchedImageGroupPrice,
+        { fallback: { '1k': 0.1, '2k': 0.14, '4k': 0.2 }, silent: true }
+      ),
+    [watchedImageGroupPrice]
+  )
+  const updateImageGroupPrice = useCallback(
+    (tier: '1k' | '2k' | '4k', value: number) => {
+      handleFieldChange(
+        'ImageGroupPrice',
+        JSON.stringify({ ...imageGroupPrices, [tier]: value }, null, 2)
+      )
+    },
+    [handleFieldChange, imageGroupPrices]
+  )
+
   const groupNames = useMemo(() => {
     const ratioMap = safeJsonParse<Record<string, number>>(watchedGroupRatio, {
       fallback: {},
@@ -163,6 +192,39 @@ export const GroupRatioForm = memo(function GroupRatioForm({
         </SettingsPageActionsPortal>
         {editMode === 'visual' ? (
           <div className='space-y-6'>
+            <Card>
+              <CardHeader>
+                <CardTitle>{t('Image group resolution prices')}</CardTitle>
+                <CardDescription>
+                  {t(
+                    'The single-image prices used when a request is routed through the Image group.'
+                  )}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className='grid gap-4 sm:grid-cols-3'>
+                {(['1k', '2k', '4k'] as const).map((tier) => (
+                  <div key={tier} className='space-y-2'>
+                    <Label htmlFor={`image-group-price-${tier}`}>
+                      {t('{{tier}} price (USD)', { tier: tier.toUpperCase() })}
+                    </Label>
+                    <Input
+                      id={`image-group-price-${tier}`}
+                      type='number'
+                      min={0}
+                      step={0.01}
+                      value={imageGroupPrices[tier]}
+                      onChange={(event) => {
+                        const value = event.target.valueAsNumber
+                        if (Number.isFinite(value)) {
+                          updateImageGroupPrice(tier, value)
+                        }
+                      }}
+                    />
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
             <GroupRatioVisualEditor
               groupRatio={form.watch('GroupRatio')}
               topupGroupRatio={form.watch('TopupGroupRatio')}
@@ -208,6 +270,25 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           </div>
         ) : (
           <SettingsForm onSubmit={form.handleSubmit(onSave)}>
+            <FormField
+              control={form.control}
+              name='ImageGroupPrice'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Image group resolution prices')}</FormLabel>
+                  <FormControl>
+                    <Textarea rows={5} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map containing the 1K, 2K, and 4K single-image prices in USD.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             <FormField
               control={form.control}
               name='GroupRatio'
@@ -404,7 +485,9 @@ function GroupPricingGuide({ open, onOpenChange }: GroupPricingGuideProps) {
 
         <div className={sideDrawerFormClassName('gap-5')}>
           <section className='space-y-2'>
-            <h3 className='text-sm font-semibold'>{t('The two roles of a group')}</h3>
+            <h3 className='text-sm font-semibold'>
+              {t('The two roles of a group')}
+            </h3>
             <div className='text-muted-foreground space-y-2 text-sm leading-6'>
               <p>
                 {t(
@@ -416,7 +499,9 @@ function GroupPricingGuide({ open, onOpenChange }: GroupPricingGuideProps) {
                   {t('Token group')}
                 </span>
                 {': '}
-                {t('decides which channels are used and which base ratio applies.')}
+                {t(
+                  'decides which channels are used and which base ratio applies.'
+                )}
               </p>
               <p>
                 <span className='text-foreground font-medium'>
@@ -431,7 +516,9 @@ function GroupPricingGuide({ open, onOpenChange }: GroupPricingGuideProps) {
           </section>
 
           <section className='space-y-2'>
-            <h3 className='text-sm font-semibold'>{t('How a call is priced')}</h3>
+            <h3 className='text-sm font-semibold'>
+              {t('How a call is priced')}
+            </h3>
             <ol className='text-muted-foreground list-decimal space-y-2 pl-5 text-sm leading-6'>
               <li>
                 <span className='text-foreground font-medium'>
@@ -453,7 +540,9 @@ function GroupPricingGuide({ open, onOpenChange }: GroupPricingGuideProps) {
                 <span className='text-foreground font-medium'>
                   {t('Charge.')}
                 </span>{' '}
-                {t('Cost = model price × that one ratio. Nothing else from the group settings enters the formula.')}
+                {t(
+                  'Cost = model price × that one ratio. Nothing else from the group settings enters the formula.'
+                )}
               </li>
             </ol>
             <p className='text-muted-foreground text-sm leading-6'>
@@ -466,7 +555,9 @@ function GroupPricingGuide({ open, onOpenChange }: GroupPricingGuideProps) {
           <section className='space-y-3'>
             <h3 className='text-sm font-semibold'>{t('Worked example')}</h3>
             <p className='text-muted-foreground text-sm leading-6'>
-              {t('The admin configured three groups and one special ratio rule:')}
+              {t(
+                'The admin configured three groups and one special ratio rule:'
+              )}
             </p>
 
             <div className='overflow-hidden rounded-lg border'>
@@ -529,7 +620,9 @@ function GroupPricingGuide({ open, onOpenChange }: GroupPricingGuideProps) {
                 </div>
                 <div className='space-y-2 p-3'>
                   <GuideStepRow chip='1'>
-                    {t('Billing group = premium (the token has a group, so use it)')}
+                    {t(
+                      'Billing group = premium (the token has a group, so use it)'
+                    )}
                   </GuideStepRow>
                   <GuideStepRow chip='2'>
                     {t(
@@ -550,7 +643,9 @@ function GroupPricingGuide({ open, onOpenChange }: GroupPricingGuideProps) {
                 </div>
                 <div className='space-y-2 p-3'>
                   <GuideStepRow chip='1'>
-                    {t('Billing group = default (the token has a group, so use it)')}
+                    {t(
+                      'Billing group = default (the token has a group, so use it)'
+                    )}
                   </GuideStepRow>
                   <GuideStepRow chip='2'>
                     {t(

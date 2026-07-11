@@ -5109,6 +5109,10 @@
     "Confirm AistarsLab Jimeng sync": "Confirm AistarsLab Jimeng sync",
     "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%": "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%",
     "Apply sync": "Apply sync",
+    "Image group resolution prices": "Image group resolution prices",
+    "The single-image prices used when a request is routed through the Image group.": "The single-image prices used when a request is routed through the Image group.",
+    "{{tier}} price (USD)": "{{tier}} price (USD)",
+    "JSON map containing the 1K, 2K, and 4K single-image prices in USD.": "JSON map containing the 1K, 2K, and 4K single-image prices in USD.",
     "Infinite Canvas": "Infinite Canvas"
   }
 }

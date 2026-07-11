@@ -232,6 +232,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "ImageGroupPrice":
+		err = ratio_setting.CheckImageGroupPrice(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "图片分辨率价格设置失败: " + err.Error(),
+			})
+			return
+		}
 	case "ImageRatio":
 		err = ratio_setting.UpdateImageRatioByJSONString(option.Value.(string))
 		if err != nil {

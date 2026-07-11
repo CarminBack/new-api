@@ -5109,6 +5109,10 @@
     "Confirm AistarsLab Jimeng sync": "AistarsLab Jimeng 同期を確認",
     "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%": "Jimeng のモデル、価格、課金単位、チャネルマッピングを更新します。現在の利益率：{{profit}}%",
     "Apply sync": "同期を適用",
+    "Image group resolution prices": "Image グループの解像度別価格",
+    "The single-image prices used when a request is routed through the Image group.": "リクエストが Image グループ経由で処理される場合の画像1枚あたりの価格です。",
+    "{{tier}} price (USD)": "{{tier}} 価格（USD）",
+    "JSON map containing the 1K, 2K, and 4K single-image prices in USD.": "1K、2K、4K の画像1枚あたりの USD 価格を含む JSON マップです。",
     "Infinite Canvas": "無限キャンバス"
   }
 }

@@ -3,6 +3,7 @@ package dto
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/require"
 )
 
@@ -85,6 +86,19 @@ func TestImageRequestImageGroupUnitPrice(t *testing.T) {
 			require.InDelta(t, test.want, meta.ImageGroupUnitPrice, 0.000001)
 		})
 	}
+}
+
+func TestImageRequestImageGroupUnitPriceUsesSystemSetting(t *testing.T) {
+	original := ratio_setting.ImageGroupPrice2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateImageGroupPriceByJSONString(original))
+	})
+	require.NoError(t, ratio_setting.UpdateImageGroupPriceByJSONString(`{"1k":0.12,"2k":0.16,"4k":0.24}`))
+
+	req := ImageRequest{Model: "any-image-model", Size: "2048x2048"}
+	meta := req.GetTokenCountMeta()
+
+	require.InDelta(t, 0.16, meta.ImageGroupUnitPrice, 0.000001)
 }
 
 func TestImageRequestUnknownBuiltInPriceKeepsLegacyImageRatio(t *testing.T) {

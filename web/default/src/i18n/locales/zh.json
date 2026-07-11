@@ -5109,6 +5109,10 @@
     "Confirm AistarsLab Jimeng sync": "确认应用 AistarsLab 即梦同步",
     "This will update Jimeng models, prices, billing units, and channel mappings. Current profit percentage: {{profit}}%": "将更新即梦模型、价格、计费单位和渠道映射。当前利润比例：{{profit}}%",
     "Apply sync": "确认应用",
+    "Image group resolution prices": "Image 分组图片分辨率价格",
+    "The single-image prices used when a request is routed through the Image group.": "请求通过 Image 分组时使用的单张图片价格。",
+    "{{tier}} price (USD)": "{{tier}} 价格（USD）",
+    "JSON map containing the 1K, 2K, and 4K single-image prices in USD.": "包含 1K、2K 和 4K 单张图片美元价格的 JSON 映射。",
     "Infinite Canvas": "无限画布"
   }
 }
