@@ -27,8 +27,8 @@ import {
 const defaultSiteSettings: SiteSettings = {
   'theme.frontend': 'default',
   Notice: '',
-  SystemName: 'New API',
-  Logo: '',
+  SystemName: 'Winworld',
+  Logo: 'https://image.mewinyou.shop/uploads/94a8ae7a-0c16-4794-9044-ef5d9c6dfb15.png',
   Footer: '',
   About: '',
   HomePageContent: '',

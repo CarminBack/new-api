@@ -21,8 +21,9 @@ For commercial licensing, please contact support@quantumnous.com
  */
 
 // System Configuration Defaults
-export const DEFAULT_SYSTEM_NAME = 'New API'
-export const DEFAULT_LOGO = '/logo.png'
+export const DEFAULT_SYSTEM_NAME = 'Winworld'
+export const DEFAULT_LOGO =
+  'https://image.mewinyou.shop/uploads/94a8ae7a-0c16-4794-9044-ef5d9c6dfb15.png'
 
 // LocalStorage Keys
 export const STORAGE_KEYS = {

@@ -14,9 +14,9 @@ import (
 
 var StartTime = time.Now().Unix() // unit: second
 var Version = "v0.0.0"            // this hard coding will be replaced automatically when building, no need to manually change
-var SystemName = "New API"
+var SystemName = "Winworld"
 var Footer = ""
-var Logo = ""
+var Logo = "https://image.mewinyou.shop/uploads/94a8ae7a-0c16-4794-9044-ef5d9c6dfb15.png"
 var TopUpLink = ""
 
 var themeValue atomic.Value // stores string; safe for concurrent read/write
