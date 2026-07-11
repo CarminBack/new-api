@@ -10,6 +10,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -120,5 +122,62 @@ func TestGeminiNativeImageHandlerConvertsInlineImageToOpenAIImageResponse(t *tes
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &openAIResponse))
 	require.Len(t, openAIResponse.Data, 1)
 	require.Equal(t, "aW1hZ2UtYnl0ZXM=", openAIResponse.Data[0].B64Json)
+	require.Equal(t, "revised prompt", openAIResponse.Data[0].RevisedPrompt)
+}
+
+func TestGetRequestURLUsesStreamingForAntigravityNativeImage(t *testing.T) {
+	settings := model_setting.GetGeminiSettings()
+	previous, existed := settings.VersionSettings["gemini-3.1-flash-image"]
+	settings.VersionSettings["gemini-3.1-flash-image"] = "antigravity/v1beta"
+	t.Cleanup(func() {
+		if existed {
+			settings.VersionSettings["gemini-3.1-flash-image"] = previous
+		} else {
+			delete(settings.VersionSettings, "gemini-3.1-flash-image")
+		}
+	})
+
+	requestURL, err := (&Adaptor{}).GetRequestURL(&relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeImagesGenerations,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelBaseUrl:    "https://token2.example.com",
+			UpstreamModelName: "gemini-3.1-flash-image",
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "https://token2.example.com/antigravity/v1beta/models/gemini-3.1-flash-image:streamGenerateContent?alt=sse", requestURL)
+}
+
+func TestGeminiNativeImageHandlerCollectsStreamingImageChunks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+
+	body := "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"inline_data\":{\"mime_type\":\"image/png\",\"data\":\"c3RyZWFtZWQtaW1hZ2U=\"}}]}}]}\n\n" +
+		"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"revised prompt\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":973,\"totalTokenCount\":980}}\n\n" +
+		"data: [DONE]\n\n"
+
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gemini-3.1-flash-image",
+		},
+	}
+	usage, newAPIError := GeminiNativeImageHandler(c, info, &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+	})
+
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	require.Equal(t, 7, usage.PromptTokens)
+	require.Equal(t, 973, usage.CompletionTokens)
+	require.Equal(t, 980, usage.TotalTokens)
+
+	var openAIResponse dto.ImageResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &openAIResponse))
+	require.Len(t, openAIResponse.Data, 1)
+	require.Equal(t, "c3RyZWFtZWQtaW1hZ2U=", openAIResponse.Data[0].B64Json)
 	require.Equal(t, "revised prompt", openAIResponse.Data[0].RevisedPrompt)
 }

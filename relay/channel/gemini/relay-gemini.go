@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1582,6 +1583,42 @@ func GeminiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	return usage, nil
 }
 
+func parseGeminiNativeImageResponse(responseBody []byte) (dto.GeminiChatResponse, error) {
+	var response dto.GeminiChatResponse
+	if err := common.Unmarshal(responseBody, &response); err == nil {
+		return response, nil
+	}
+
+	parsedEvent := false
+	for _, line := range bytes.Split(responseBody, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		payload := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
+			continue
+		}
+
+		var event dto.GeminiChatResponse
+		if err := common.Unmarshal(payload, &event); err != nil {
+			return dto.GeminiChatResponse{}, err
+		}
+		parsedEvent = true
+		response.Candidates = append(response.Candidates, event.Candidates...)
+		if event.UsageMetadata.TotalTokenCount > 0 ||
+			event.UsageMetadata.PromptTokenCount > 0 ||
+			event.UsageMetadata.CandidatesTokenCount > 0 {
+			response.UsageMetadata = event.UsageMetadata
+		}
+	}
+
+	if !parsedEvent {
+		return dto.GeminiChatResponse{}, errors.New("invalid Gemini image response")
+	}
+	return response, nil
+}
+
 func GeminiNativeImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	responseBody, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
@@ -1589,8 +1626,8 @@ func GeminiNativeImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 	}
 	service.CloseResponseBodyGracefully(resp)
 
-	var geminiResponse dto.GeminiChatResponse
-	if jsonErr := common.Unmarshal(responseBody, &geminiResponse); jsonErr != nil {
+	geminiResponse, jsonErr := parseGeminiNativeImageResponse(responseBody)
+	if jsonErr != nil {
 		return nil, types.NewOpenAIError(jsonErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 

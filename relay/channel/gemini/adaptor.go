@@ -278,7 +278,11 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	}
 
 	action := "generateContent"
-	if info.IsStream {
+	useStreamingImageResponse := (info.RelayMode == constant.RelayModeImagesGenerations ||
+		info.RelayMode == constant.RelayModeImagesEdits) &&
+		isGeminiNativeImageGenerationModel(info.UpstreamModelName) &&
+		strings.Contains(strings.ToLower(version), "antigravity")
+	if info.IsStream || useStreamingImageResponse {
 		action = "streamGenerateContent?alt=sse"
 		if info.RelayMode == constant.RelayModeGemini {
 			info.DisablePing = true
