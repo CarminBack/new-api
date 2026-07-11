@@ -116,7 +116,7 @@ func TestGeminiNativeImageHandlerConvertsInlineImageToOpenAIImageResponse(t *tes
 	require.Equal(t, 11, usage.PromptTokens)
 	require.Equal(t, 22, usage.CompletionTokens)
 	require.Equal(t, 33, usage.TotalTokens)
-	require.Equal(t, float64(1), info.PriceData.OtherRatios["n"])
+	require.Equal(t, float64(1), info.PriceData.OtherRatios()["n"])
 
 	var openAIResponse dto.ImageResponse
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &openAIResponse))

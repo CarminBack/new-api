@@ -17,14 +17,8 @@ func TestApplyTaskBillingRatiosPerSecondMultipliesSeconds(t *testing.T) {
 		"seedance-480p-fast-c13": "per_second"
 	}`))
 
-	info := &relaycommon.RelayInfo{
-		PriceData: types.PriceData{
-			Quota: 390,
-			OtherRatios: map[string]float64{
-				"seconds": 4,
-			},
-		},
-	}
+	info := &relaycommon.RelayInfo{PriceData: types.PriceData{Quota: 390}}
+	info.PriceData.AddOtherRatio("seconds", 4)
 
 	applyTaskBillingRatios(info, "seedance-480p-fast-c13")
 
@@ -37,14 +31,8 @@ func TestApplyTaskBillingRatiosPerItemKeepsBaseQuota(t *testing.T) {
 		"seedance-720p-c37": "per_item"
 	}`))
 
-	info := &relaycommon.RelayInfo{
-		PriceData: types.PriceData{
-			Quota: 390,
-			OtherRatios: map[string]float64{
-				"seconds": 4,
-			},
-		},
-	}
+	info := &relaycommon.RelayInfo{PriceData: types.PriceData{Quota: 390}}
+	info.PriceData.AddOtherRatio("seconds", 4)
 
 	applyTaskBillingRatios(info, "seedance-720p-c37")
 
@@ -52,20 +40,15 @@ func TestApplyTaskBillingRatiosPerItemKeepsBaseQuota(t *testing.T) {
 }
 
 func TestRecalcQuotaFromRatiosPerCallKeepsBaseQuota(t *testing.T) {
-	info := &relaycommon.RelayInfo{
-		PriceData: types.PriceData{
-			Quota: 390,
-			OtherRatios: map[string]float64{
-				"seconds": 4,
-			},
-		},
-	}
+	info := &relaycommon.RelayInfo{PriceData: types.PriceData{Quota: 390}}
+	info.PriceData.AddOtherRatio("seconds", 4)
 
-	quota := recalcQuotaFromRatios(info, map[string]float64{
+	quota, ok := recalcQuotaFromRatios(info, map[string]float64{
 		"seconds": 10,
 		"size":    1,
 	}, true)
 
+	require.True(t, ok)
 	assert.Equal(t, 390, quota)
 }
 
@@ -81,19 +64,14 @@ func resetTaskBillingConfig(t *testing.T) {
 }
 
 func TestRecalcQuotaFromRatiosNonPerCallAppliesAdjustedRatios(t *testing.T) {
-	info := &relaycommon.RelayInfo{
-		PriceData: types.PriceData{
-			Quota: 156,
-			OtherRatios: map[string]float64{
-				"seconds": 4,
-			},
-		},
-	}
+	info := &relaycommon.RelayInfo{PriceData: types.PriceData{Quota: 156}}
+	info.PriceData.AddOtherRatio("seconds", 4)
 
-	quota := recalcQuotaFromRatios(info, map[string]float64{
+	quota, ok := recalcQuotaFromRatios(info, map[string]float64{
 		"seconds": 10,
 		"size":    1,
 	}, false)
 
+	require.True(t, ok)
 	assert.Equal(t, 390, quota)
 }

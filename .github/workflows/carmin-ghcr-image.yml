@@ -5,6 +5,7 @@ on:
     branches:
       - video-task-result-fix
       - hotfix-sora-error-string
+      - upgrade-rc20-test
   workflow_dispatch:
 
 env:
