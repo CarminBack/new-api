@@ -49,6 +49,7 @@ export const QUOTA_TYPES = {
   ALL: 'all',
   TOKEN: 'token',
   REQUEST: 'request',
+  SECOND: 'second',
 } as const
 
 export type QuotaTypeOption = (typeof QUOTA_TYPES)[keyof typeof QUOTA_TYPES]
@@ -61,6 +62,7 @@ export function getQuotaTypeLabels(
     [QUOTA_TYPES.ALL]: t('All Models'),
     [QUOTA_TYPES.TOKEN]: t('Token-based'),
     [QUOTA_TYPES.REQUEST]: t('Per Request'),
+    [QUOTA_TYPES.SECOND]: t('Per Second'),
   }
 }
 
@@ -122,6 +124,7 @@ export const EXCLUDED_GROUPS = ['', 'auto']
 export const QUOTA_TYPE_VALUES = {
   TOKEN: 0,
   REQUEST: 1,
+  SECOND: 2,
 } as const
 
 /** Token unit divisors */

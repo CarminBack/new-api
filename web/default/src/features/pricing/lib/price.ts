@@ -169,7 +169,7 @@ export function formatPrice(
   priceRate = 1,
   usdExchangeRate = 1
 ): string {
-  if (model.quota_type === QUOTA_TYPE_VALUES.REQUEST) {
+  if (model.quota_type !== QUOTA_TYPE_VALUES.TOKEN) {
     return '-'
   }
 
@@ -208,7 +208,7 @@ export function formatGroupPrice(
   usdExchangeRate = 1,
   groupRatio: Record<string, number>
 ): string {
-  if (model.quota_type === QUOTA_TYPE_VALUES.REQUEST) {
+  if (model.quota_type !== QUOTA_TYPE_VALUES.TOKEN) {
     return '-'
   }
 
@@ -231,7 +231,7 @@ export function formatGroupPrice(
 }
 
 /**
- * Format fixed price for pay-per-request models (with specific group)
+ * Format fixed price for fixed-price models (with specific group)
  */
 export function formatFixedPrice(
   model: PricingModel,
@@ -241,7 +241,7 @@ export function formatFixedPrice(
   usdExchangeRate = 1,
   groupRatio: Record<string, number>
 ): string {
-  if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
+  if (model.quota_type === QUOTA_TYPE_VALUES.TOKEN) {
     return '-'
   }
 
@@ -263,7 +263,7 @@ export function formatFixedPrice(
 }
 
 /**
- * Format fixed price for pay-per-request models (minimum price from all groups)
+ * Format fixed price for fixed-price models (minimum price from all groups)
  */
 export function formatRequestPrice(
   model: PricingModel,
@@ -271,7 +271,7 @@ export function formatRequestPrice(
   priceRate = 1,
   usdExchangeRate = 1
 ): string {
-  if (model.quota_type !== QUOTA_TYPE_VALUES.REQUEST) {
+  if (model.quota_type === QUOTA_TYPE_VALUES.TOKEN) {
     return '-'
   }
 

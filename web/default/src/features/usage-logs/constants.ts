@@ -124,6 +124,7 @@ export const LOG_TYPE_FILTERS = [
  * Must match backend constants in constant/midjourney.go
  */
 export const MJ_TASK_TYPES = {
+  IMAGE_GENERATION: 'IMAGE_GENERATION', // 标准图像生成
   IMAGINE: 'IMAGINE', // 绘图
   UPSCALE: 'UPSCALE', // 放大
   VIDEO: 'VIDEO', // 视频

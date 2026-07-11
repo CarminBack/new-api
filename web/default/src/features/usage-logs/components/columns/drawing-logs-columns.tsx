@@ -58,6 +58,7 @@ import {
 } from './column-helpers'
 
 const drawingTypeIconMap: Record<string, LucideIcon> = {
+  [MJ_TASK_TYPES.IMAGE_GENERATION]: ImageIcon,
   [MJ_TASK_TYPES.IMAGINE]: ImageIcon,
   [MJ_TASK_TYPES.UPSCALE]: Maximize2,
   [MJ_TASK_TYPES.VIDEO]: Video,
@@ -122,10 +123,16 @@ export function useDrawingLogsColumns(
     header: t('Type'),
     cell: ({ row }) => {
       const action = row.getValue('action') as string
+      const isImageGeneration = action === MJ_TASK_TYPES.IMAGE_GENERATION
+      const label = isImageGeneration
+        ? row.original.prompt_en || t('Unknown')
+        : t(mjTaskTypeMapper.getLabel(action))
       return (
         <StatusBadge
-          label={t(mjTaskTypeMapper.getLabel(action))}
-          variant={mjTaskTypeMapper.getVariant(action)}
+          label={label}
+          variant={
+            isImageGeneration ? 'blue' : mjTaskTypeMapper.getVariant(action)
+          }
           icon={getDrawingTypeIcon(action)}
           size='sm'
           copyable={false}

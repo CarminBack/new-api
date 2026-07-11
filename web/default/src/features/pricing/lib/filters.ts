@@ -78,11 +78,14 @@ export function filterByQuotaType(
   quotaType: string
 ): PricingModel[] {
   if (quotaType === QUOTA_TYPES.ALL) return models
-  const targetType =
-    quotaType === QUOTA_TYPES.TOKEN
-      ? QUOTA_TYPE_VALUES.TOKEN
-      : QUOTA_TYPE_VALUES.REQUEST
-  return models.filter((m) => m.quota_type === targetType)
+  const targetType = {
+    [QUOTA_TYPES.TOKEN]: QUOTA_TYPE_VALUES.TOKEN,
+    [QUOTA_TYPES.REQUEST]: QUOTA_TYPE_VALUES.REQUEST,
+    [QUOTA_TYPES.SECOND]: QUOTA_TYPE_VALUES.SECOND,
+  }[quotaType]
+  return targetType === undefined
+    ? models
+    : models.filter((m) => m.quota_type === targetType)
 }
 
 /**
