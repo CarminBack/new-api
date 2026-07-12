@@ -38,7 +38,7 @@ func VideoProxy(c *gin.Context) {
 	}
 
 	userID := c.GetInt("id")
-	task, exists, err := model.GetByTaskId(userID, taskID)
+	task, exists, err := getAccessibleVideoTask(userID, taskID)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to query task %s: %s", taskID, err.Error()))
 		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to query task")
@@ -187,6 +187,13 @@ func VideoProxy(c *gin.Context) {
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
 	}
+}
+
+func getAccessibleVideoTask(userID int, taskID string) (*model.Task, bool, error) {
+	if model.IsAdmin(userID) {
+		return model.GetByOnlyTaskId(taskID)
+	}
+	return model.GetByTaskId(userID, taskID)
 }
 
 func resolveOpenAIVideoURL(task *model.Task, baseURL string) (string, bool) {
