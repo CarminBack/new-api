@@ -115,6 +115,24 @@ func GetTokenStatus(c *gin.Context) {
 	})
 }
 
+func GetTokenUserBalance(c *gin.Context) {
+	user, err := model.GetUserCache(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	generalSetting := operation_setting.GetGeneralSetting()
+	common.ApiSuccess(c, gin.H{
+		"quota":                         user.Quota,
+		"quota_per_unit":                common.QuotaPerUnit,
+		"quota_display_type":            operation_setting.GetQuotaDisplayType(),
+		"usd_exchange_rate":             operation_setting.USDExchangeRate,
+		"custom_currency_symbol":        generalSetting.CustomCurrencySymbol,
+		"custom_currency_exchange_rate": generalSetting.CustomCurrencyExchangeRate,
+	})
+}
+
 func GetTokenUsage(c *gin.Context) {
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {

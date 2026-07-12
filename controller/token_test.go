@@ -538,3 +538,40 @@ func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 		t.Fatalf("unauthorized key response leaked raw token key: %s", unauthorizedRecorder.Body.String())
 	}
 }
+
+func TestGetTokenUserBalanceReturnsCurrentQuotaAndDisplayConfig(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("failed to migrate user table: %v", err)
+	}
+	user := &model.User{Username: "balance-user", Status: common.UserStatusEnabled, Quota: 1250000}
+	if err := db.Create(user).Error; err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/usage/token/balance", nil, user.Id)
+	GetTokenUserBalance(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected success response, got message: %s", response.Message)
+	}
+	var balance struct {
+		Quota        int     `json:"quota"`
+		QuotaPerUnit float64 `json:"quota_per_unit"`
+		DisplayType  string  `json:"quota_display_type"`
+		ExchangeRate float64 `json:"usd_exchange_rate"`
+	}
+	if err := common.Unmarshal(response.Data, &balance); err != nil {
+		t.Fatalf("failed to decode balance response: %v", err)
+	}
+	if balance.Quota != user.Quota {
+		t.Fatalf("expected quota %d, got %d", user.Quota, balance.Quota)
+	}
+	if balance.QuotaPerUnit != common.QuotaPerUnit {
+		t.Fatalf("expected quota per unit %v, got %v", common.QuotaPerUnit, balance.QuotaPerUnit)
+	}
+	if balance.DisplayType == "" || balance.ExchangeRate <= 0 {
+		t.Fatalf("expected display configuration, got %+v", balance)
+	}
+}
