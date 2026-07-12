@@ -31,6 +31,23 @@ func TestCanvasOAuthAuthorizeRedirectsAnonymousUserToDefaultSignIn(t *testing.T)
 	require.Equal(t, "/sign-in?redirect="+url.QueryEscape(request.URL.RequestURI()), recorder.Header().Get("Location"))
 }
 
+func TestVideoOAuthAuthorizeRedirectsAnonymousUserToDefaultSignIn(t *testing.T) {
+	t.Setenv("VIDEO_OAUTH_CLIENT_ID", "video")
+	t.Setenv("VIDEO_OAUTH_CLIENT_SECRET", "test-secret")
+	t.Setenv("VIDEO_OAUTH_REDIRECT_URI", "https://video.example/auth/callback")
+
+	router := gin.New()
+	router.Use(sessions.Sessions("session", cookie.NewStore([]byte("test-session-secret"))))
+	router.GET("/oauth/authorize", CanvasOAuthAuthorize)
+
+	request := httptest.NewRequest(http.MethodGet, "/oauth/authorize?response_type=code&client_id=video&redirect_uri=https%3A%2F%2Fvideo.example%2Fauth%2Fcallback&state=1234567890abcdef&code_challenge=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ&code_challenge_method=S256", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusFound, recorder.Code)
+	require.Equal(t, "/sign-in?redirect="+url.QueryEscape(request.URL.RequestURI()), recorder.Header().Get("Location"))
+}
+
 func TestGetOrCreateCanvasTokenCreatesAndReusesGroupToken(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 
@@ -90,6 +107,18 @@ func TestCanvasTokenSpecsProvisionThreeGroups(t *testing.T) {
 	}
 	require.NoError(t, db.Model(&model.Token{}).Where("user_id = ?", 9).Count(&count).Error)
 	require.EqualValues(t, 3, count)
+}
+
+func TestVideoTokenSpecsProvisionOnlyVideoGroup(t *testing.T) {
+	config := canvasOAuthConfig{
+		TokenName:  "Carmin 视频自动授权",
+		VideoGroup: "Video",
+		VideoOnly:  true,
+	}
+
+	require.Equal(t, []canvasTokenSpec{
+		{Capability: "video", Name: "Carmin 视频自动授权", Group: "Video"},
+	}, canvasTokenSpecs(config))
 }
 
 func TestGetOrCreateCanvasTokenDoesNotReenableDisabledToken(t *testing.T) {

@@ -28,6 +28,9 @@ const (
 	defaultCanvasOAuthClientID    = "canvas"
 	defaultCanvasOAuthRedirectURI = "https://canvas.mewinyou.shop/auth/callback"
 	defaultCanvasTokenName        = "无限画布自动授权"
+	defaultVideoOAuthClientID     = "video"
+	defaultVideoOAuthRedirectURI  = "https://video.mewinyou.shop/auth/callback"
+	defaultVideoTokenName         = "Carmin 视频自动授权"
 	defaultCanvasImageGroup       = "Image"
 	defaultCanvasVideoGroup       = "Video"
 	defaultCanvasChatGPTGroup     = "ChatGPT"
@@ -47,6 +50,7 @@ type canvasOAuthConfig struct {
 	ImageGroup   string
 	VideoGroup   string
 	ChatGPTGroup string
+	VideoOnly    bool
 }
 
 func getCanvasOAuthConfig() canvasOAuthConfig {
@@ -61,14 +65,38 @@ func getCanvasOAuthConfig() canvasOAuthConfig {
 	}
 }
 
+func getVideoOAuthConfig() canvasOAuthConfig {
+	return canvasOAuthConfig{
+		ClientID:     common.GetEnvOrDefaultString("VIDEO_OAUTH_CLIENT_ID", defaultVideoOAuthClientID),
+		ClientSecret: strings.TrimSpace(os.Getenv("VIDEO_OAUTH_CLIENT_SECRET")),
+		RedirectURI:  common.GetEnvOrDefaultString("VIDEO_OAUTH_REDIRECT_URI", defaultVideoOAuthRedirectURI),
+		TokenName:    common.GetEnvOrDefaultString("VIDEO_OAUTH_TOKEN_NAME", defaultVideoTokenName),
+		VideoGroup:   common.GetEnvOrDefaultString("VIDEO_OAUTH_TOKEN_GROUP", defaultCanvasVideoGroup),
+		VideoOnly:    true,
+	}
+}
+
+func getOAuthConfig(clientID string) (canvasOAuthConfig, bool) {
+	for _, config := range []canvasOAuthConfig{getCanvasOAuthConfig(), getVideoOAuthConfig()} {
+		if clientID == config.ClientID {
+			return config, true
+		}
+	}
+	return canvasOAuthConfig{}, false
+}
+
 func CanvasOAuthAuthorize(c *gin.Context) {
-	config := getCanvasOAuthConfig()
+	clientID := c.Query("client_id")
+	config, ok := getOAuthConfig(clientID)
+	if !ok {
+		c.String(http.StatusBadRequest, "invalid OAuth authorization request")
+		return
+	}
 	if config.ClientSecret == "" {
-		c.String(http.StatusServiceUnavailable, "Canvas OAuth is not configured")
+		c.String(http.StatusServiceUnavailable, "OAuth client is not configured")
 		return
 	}
 
-	clientID := c.Query("client_id")
 	redirectURI := c.Query("redirect_uri")
 	state := c.Query("state")
 	codeChallenge := c.Query("code_challenge")
@@ -125,17 +153,17 @@ func CanvasOAuthAuthorize(c *gin.Context) {
 func CanvasOAuthToken(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Pragma", "no-cache")
-	config := getCanvasOAuthConfig()
-	if config.ClientSecret == "" {
-		canvasOAuthError(c, http.StatusServiceUnavailable, "temporarily_unavailable", "Canvas OAuth is not configured")
-		return
-	}
 	if err := c.Request.ParseForm(); err != nil {
 		canvasOAuthError(c, http.StatusBadRequest, "invalid_request", "invalid form body")
 		return
 	}
 	clientID, clientSecret, ok := c.Request.BasicAuth()
-	if !ok || clientID != config.ClientID || subtle.ConstantTimeCompare([]byte(clientSecret), []byte(config.ClientSecret)) != 1 {
+	config, knownClient := getOAuthConfig(clientID)
+	if knownClient && config.ClientSecret == "" {
+		canvasOAuthError(c, http.StatusServiceUnavailable, "temporarily_unavailable", "OAuth client is not configured")
+		return
+	}
+	if !ok || !knownClient || subtle.ConstantTimeCompare([]byte(clientSecret), []byte(config.ClientSecret)) != 1 {
 		c.Header("WWW-Authenticate", `Basic realm="canvas-oauth"`)
 		canvasOAuthError(c, http.StatusUnauthorized, "invalid_client", "client authentication failed")
 		return
@@ -186,16 +214,27 @@ func CanvasOAuthToken(c *gin.Context) {
 		tokens[spec.Capability] = token
 	}
 
+	groupTokens := gin.H{}
+	scopes := make([]string, 0, len(specs)+1)
+	accessToken := ""
+	for _, spec := range specs {
+		value := "sk-" + tokens[spec.Capability].Key
+		groupTokens[spec.Capability] = value
+		scopes = append(scopes, spec.Capability)
+		if accessToken == "" {
+			accessToken = value
+		}
+	}
+	if textToken, ok := groupTokens["text"]; ok {
+		groupTokens["audio"] = textToken
+		scopes = append(scopes, "audio")
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"access_token": "sk-" + tokens["image"].Key,
+		"access_token": accessToken,
 		"token_type":   "Bearer",
-		"scope":        "image video text audio",
-		"group_tokens": gin.H{
-			"image": "sk-" + tokens["image"].Key,
-			"video": "sk-" + tokens["video"].Key,
-			"text":  "sk-" + tokens["text"].Key,
-			"audio": "sk-" + tokens["text"].Key,
-		},
+		"scope":        strings.Join(scopes, " "),
+		"group_tokens": groupTokens,
 		"user": gin.H{
 			"sub":      strconv.Itoa(user.Id),
 			"username": user.Username,
@@ -210,6 +249,9 @@ type canvasTokenSpec struct {
 }
 
 func canvasTokenSpecs(config canvasOAuthConfig) []canvasTokenSpec {
+	if config.VideoOnly {
+		return []canvasTokenSpec{{Capability: "video", Name: config.TokenName, Group: config.VideoGroup}}
+	}
 	return []canvasTokenSpec{
 		{Capability: "image", Name: config.TokenName, Group: config.ImageGroup},
 		{Capability: "video", Name: config.TokenName + " (Video)", Group: config.VideoGroup},
