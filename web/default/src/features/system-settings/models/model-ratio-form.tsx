@@ -53,6 +53,7 @@ type ModelFormValues = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  TaskBillingUnit: string
   ExposeRatioEnabled: boolean
   BillingMode: string
   BillingExpr: string
@@ -76,6 +77,7 @@ type ModelJsonFieldName =
   | 'ImageRatio'
   | 'AudioRatio'
   | 'AudioCompletionRatio'
+  | 'TaskBillingUnit'
 
 const modelJsonFields: Array<{
   name: ModelJsonFieldName
@@ -125,6 +127,12 @@ const modelJsonFields: Array<{
     name: 'AudioCompletionRatio',
     labelKey: 'Audio completion ratio',
     descriptionKey: 'Ratio applied to audio completions for streaming models.',
+  },
+  {
+    name: 'TaskBillingUnit',
+    labelKey: 'Task billing unit',
+    descriptionKey:
+      'JSON map of fixed-price task model → per_item or per_second.',
   },
 ]
 
@@ -246,6 +254,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               savedAudioCompletionRatio={savedValues.AudioCompletionRatio}
               savedBillingMode={savedValues.BillingMode}
               savedBillingExpr={savedValues.BillingExpr}
+              savedTaskBillingUnit={savedValues.TaskBillingUnit}
               modelPrice={form.watch('ModelPrice')}
               modelRatio={form.watch('ModelRatio')}
               cacheRatio={form.watch('CacheRatio')}
@@ -256,6 +265,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               audioCompletionRatio={form.watch('AudioCompletionRatio')}
               billingMode={form.watch('BillingMode')}
               billingExpr={form.watch('BillingExpr')}
+              taskBillingUnit={form.watch('TaskBillingUnit')}
               onSave={handleSave}
               isSaving={isSaving}
               onChange={(field, value) => {

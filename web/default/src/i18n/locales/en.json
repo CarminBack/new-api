@@ -5113,6 +5113,18 @@
     "The single-image prices used when a request is routed through the Image group.": "The single-image prices used when a request is routed through the Image group.",
     "{{tier}} price (USD)": "{{tier}} price (USD)",
     "JSON map containing the 1K, 2K, and 4K single-image prices in USD.": "JSON map containing the 1K, 2K, and 4K single-image prices in USD.",
-    "Infinite Canvas": "Infinite Canvas"
+    "Infinite Canvas": "Infinite Canvas",
+    "Fixed price unit": "Fixed price unit",
+    "Per item": "Per item",
+    "Per second": "Per second",
+    "Choose whether the fixed price is charged per task or per generated second.": "Choose whether the fixed price is charged per task or per generated second.",
+    "per item": "per item",
+    "per second": "per second",
+    "Cost in USD per generated second.": "Cost in USD per generated second.",
+    "Cost in USD per task request.": "Cost in USD per task request.",
+    "Fixed price per second": "Fixed price per second",
+    "Task billing unit": "Task billing unit",
+    "JSON map of fixed-price task model → per_item or per_second.": "JSON map of fixed-price task model → per_item or per_second.",
+    "second": "second"
   }
 }

@@ -213,6 +213,7 @@ export type ModelSettings = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  TaskBillingUnit: string
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
@@ -268,6 +269,7 @@ export type BillingSettings = {
   ImageGroupPrice: string
   AudioRatio: string
   AudioCompletionRatio: string
+  TaskBillingUnit: string
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string

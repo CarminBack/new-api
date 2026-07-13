@@ -40,6 +40,7 @@ export type ModelPricingFormValues = z.infer<
 >
 
 export type PricingMode = 'per-token' | 'per-request' | 'tiered_expr'
+export type TaskBillingUnit = 'per_item' | 'per_second'
 
 export type LaneKey =
   | 'completion'
@@ -60,6 +61,7 @@ export type ModelRatioData = {
   audioRatio?: string
   audioCompletionRatio?: string
   billingMode?: PricingMode
+  taskBillingUnit?: TaskBillingUnit
   billingExpr?: string
   requestRuleExpr?: string
 }
@@ -210,6 +212,7 @@ export function createInitialLaneState(data?: ModelRatioData | null) {
 export function buildPreviewRows(
   values: ModelPricingFormValues,
   mode: PricingMode,
+  taskBillingUnit: TaskBillingUnit,
   billingExpr: string,
   requestRuleExpr: string,
   promptPrice: string,
@@ -236,6 +239,11 @@ export function buildPreviewRows(
         key: 'price',
         label: 'ModelPrice',
         value: values.price || t('Empty'),
+      },
+      {
+        key: 'taskBillingUnit',
+        label: 'TaskBillingUnit',
+        value: taskBillingUnit,
       },
     ]
   }

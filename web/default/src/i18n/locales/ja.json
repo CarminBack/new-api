@@ -5113,6 +5113,18 @@
     "The single-image prices used when a request is routed through the Image group.": "リクエストが Image グループ経由で処理される場合の画像1枚あたりの価格です。",
     "{{tier}} price (USD)": "{{tier}} 価格（USD）",
     "JSON map containing the 1K, 2K, and 4K single-image prices in USD.": "1K、2K、4K の画像1枚あたりの USD 価格を含む JSON マップです。",
-    "Infinite Canvas": "無限キャンバス"
+    "Infinite Canvas": "無限キャンバス",
+    "Fixed price unit": "固定価格の単位",
+    "Per item": "リクエスト単位",
+    "Per second": "秒単位",
+    "Choose whether the fixed price is charged per task or per generated second.": "固定価格をタスク単位または生成秒数単位のどちらで請求するか選択します。",
+    "per item": "リクエストごと",
+    "per second": "秒ごと",
+    "Cost in USD per generated second.": "生成1秒あたりの料金（USD）。",
+    "Cost in USD per task request.": "タスクリクエスト1回あたりの料金（USD）。",
+    "Fixed price per second": "秒単位の固定価格",
+    "Task billing unit": "タスク課金単位",
+    "JSON map of fixed-price task model → per_item or per_second.": "固定価格タスクモデルから per_item または per_second への JSON マップ。",
+    "second": "秒"
   }
 }

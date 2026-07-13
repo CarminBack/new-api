@@ -32,6 +32,7 @@ export type ModelPricingSnapshotInput = {
   audioCompletionRatio: string
   billingMode: string
   billingExpr: string
+  taskBillingUnit: string
 }
 
 export type ModelPricingSnapshot = {
@@ -45,6 +46,7 @@ export type ModelPricingSnapshot = {
   audioRatio?: string
   audioCompletionRatio?: string
   billingMode?: string
+  taskBillingUnit?: 'per_item' | 'per_second'
   billingExpr?: string
   requestRuleExpr?: string
   hasConflict: boolean
@@ -107,7 +109,9 @@ export const getPriceSummary = (
     return getExpressionSummary(row, t)
   }
   if (row.billingMode === 'per-request') {
-    return row.price ? `$${row.price} / ${t('request')}` : t('Unset price')
+    const unit =
+      row.taskBillingUnit === 'per_second' ? t('second') : t('request')
+    return row.price ? `$${row.price} / ${unit}` : t('Unset price')
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -137,7 +141,9 @@ export const getPriceDetail = (
       : t('Expression based')
   }
   if (row.billingMode === 'per-request') {
-    return t('Fixed request price')
+    return row.taskBillingUnit === 'per_second'
+      ? t('Fixed price per second')
+      : t('Fixed request price')
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -168,6 +174,7 @@ export const buildModelSnapshots = ({
   audioCompletionRatio,
   billingMode,
   billingExpr,
+  taskBillingUnit,
 }: ModelPricingSnapshotInput): ModelPricingSnapshot[] => {
   const priceMap = safeJsonParse<Record<string, number>>(modelPrice, {
     fallback: {},
@@ -209,6 +216,10 @@ export const buildModelSnapshots = ({
     fallback: {},
     context: 'billing expression',
   })
+  const taskBillingUnitMap = safeJsonParse<Record<string, string>>(
+    taskBillingUnit,
+    { fallback: {}, context: 'task billing unit' }
+  )
 
   const modelNames = new Set([
     ...Object.keys(priceMap),
@@ -221,6 +232,7 @@ export const buildModelSnapshots = ({
     ...Object.keys(audioCompletionMap),
     ...Object.keys(billingModeMap),
     ...Object.keys(billingExprMap),
+    ...Object.keys(taskBillingUnitMap),
   ])
 
   return Array.from(modelNames).map((name) => {
@@ -234,6 +246,8 @@ export const buildModelSnapshots = ({
     const audioCompletion = audioCompletionMap[name]?.toString() || ''
 
     const modeForModel = billingModeMap[name]
+    const taskUnitForModel =
+      taskBillingUnitMap[name] === 'per_second' ? 'per_second' : 'per_item'
     if (modeForModel === 'tiered_expr') {
       const fullExpr = billingExprMap[name] || ''
       const { billingExpr: pureExpr, requestRuleExpr } =
@@ -241,6 +255,7 @@ export const buildModelSnapshots = ({
       return {
         name,
         billingMode: 'tiered_expr',
+        taskBillingUnit: taskUnitForModel,
         billingExpr: pureExpr,
         requestRuleExpr,
         price,
@@ -266,6 +281,7 @@ export const buildModelSnapshots = ({
       audioRatio: audio,
       audioCompletionRatio: audioCompletion,
       billingMode: price !== '' ? 'per-request' : 'per-token',
+      taskBillingUnit: taskUnitForModel,
       hasConflict:
         price !== '' &&
         (ratio !== '' ||
@@ -291,6 +307,7 @@ export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
     audioRatio: snapshot.audioRatio || '',
     audioCompletionRatio: snapshot.audioCompletionRatio || '',
     billingMode: snapshot.billingMode || 'per-token',
+    taskBillingUnit: snapshot.taskBillingUnit || 'per_item',
     billingExpr: snapshot.billingExpr || '',
     requestRuleExpr: snapshot.requestRuleExpr || '',
   })

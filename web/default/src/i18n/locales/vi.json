@@ -5113,6 +5113,18 @@
     "The single-image prices used when a request is routed through the Image group.": "Giá cho mỗi ảnh khi yêu cầu được định tuyến qua nhóm Image.",
     "{{tier}} price (USD)": "Giá {{tier}} (USD)",
     "JSON map containing the 1K, 2K, and 4K single-image prices in USD.": "Đối tượng JSON chứa giá USD cho mỗi ảnh ở độ phân giải 1K, 2K và 4K.",
-    "Infinite Canvas": "Canvas vô hạn"
+    "Infinite Canvas": "Canvas vô hạn",
+    "Fixed price unit": "Đơn vị giá cố định",
+    "Per item": "Theo yêu cầu",
+    "Per second": "Theo giây",
+    "Choose whether the fixed price is charged per task or per generated second.": "Chọn tính giá cố định theo mỗi tác vụ hoặc theo mỗi giây được tạo.",
+    "per item": "mỗi yêu cầu",
+    "per second": "mỗi giây",
+    "Cost in USD per generated second.": "Chi phí USD cho mỗi giây được tạo.",
+    "Cost in USD per task request.": "Chi phí USD cho mỗi yêu cầu tác vụ.",
+    "Fixed price per second": "Giá cố định mỗi giây",
+    "Task billing unit": "Đơn vị tính phí tác vụ",
+    "JSON map of fixed-price task model → per_item or per_second.": "Đối tượng JSON ánh xạ mô hình tác vụ giá cố định tới per_item hoặc per_second.",
+    "second": "giây"
   }
 }

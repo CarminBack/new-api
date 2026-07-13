@@ -53,6 +53,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from '@/components/ui/input-group'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Sheet,
   SheetContent,
@@ -78,6 +79,7 @@ import {
   type ModelPricingFormValues,
   type ModelRatioData,
   type PricingMode,
+  type TaskBillingUnit,
 } from './model-pricing-core'
 import { PriceInput, PriceLane } from './model-pricing-inputs'
 import { formatPricingNumber } from './pricing-format'
@@ -146,6 +148,8 @@ export const ModelPricingEditorPanel = forwardRef<
 ) {
   const { t } = useTranslation()
   const [pricingMode, setPricingMode] = useState<PricingMode>('per-token')
+  const [taskBillingUnit, setTaskBillingUnit] =
+    useState<TaskBillingUnit>('per_item')
   const [promptPrice, setPromptPrice] = useState('')
   const [lanePrices, setLanePrices] = useState<Record<LaneKey, string>>({
     ...EMPTY_LANE_PRICES,
@@ -195,6 +199,9 @@ export const ModelPricingEditorPanel = forwardRef<
             ? 'per-request'
             : 'per-token'
       )
+      setTaskBillingUnit(
+        editData.taskBillingUnit === 'per_second' ? 'per_second' : 'per_item'
+      )
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
     } else {
@@ -210,6 +217,7 @@ export const ModelPricingEditorPanel = forwardRef<
         audioCompletionRatio: '',
       })
       setPricingMode('per-token')
+      setTaskBillingUnit('per_item')
       setBillingExpr('')
       setRequestRuleExpr('')
     }
@@ -346,6 +354,7 @@ export const ModelPricingEditorPanel = forwardRef<
       buildPreviewRows(
         watchedValues,
         pricingMode,
+        taskBillingUnit,
         billingExpr,
         requestRuleExpr,
         promptPrice,
@@ -358,6 +367,7 @@ export const ModelPricingEditorPanel = forwardRef<
       laneEnabled,
       lanePrices,
       pricingMode,
+      taskBillingUnit,
       promptPrice,
       requestRuleExpr,
       t,
@@ -443,6 +453,7 @@ export const ModelPricingEditorPanel = forwardRef<
       const data: ModelRatioData = {
         name: values.name.trim(),
         billingMode: pricingMode,
+        taskBillingUnit,
         price: values.price || '',
         ratio: values.ratio || '',
         cacheRatio: values.cacheRatio || '',
@@ -460,7 +471,7 @@ export const ModelPricingEditorPanel = forwardRef<
 
       return data
     },
-    [billingExpr, pricingMode, requestRuleExpr]
+    [billingExpr, pricingMode, requestRuleExpr, taskBillingUnit]
   )
 
   useImperativeHandle(
@@ -600,6 +611,37 @@ export const ModelPricingEditorPanel = forwardRef<
 
                   <TabsContent value='per-request' className='pt-0'>
                     <FieldGroup className='gap-5'>
+                      <Field>
+                        <FieldLabel>{t('Fixed price unit')}</FieldLabel>
+                        <RadioGroup
+                          value={taskBillingUnit}
+                          onValueChange={(value) =>
+                            setTaskBillingUnit(
+                              value === 'per_second' ? 'per_second' : 'per_item'
+                            )
+                          }
+                          className='grid grid-cols-2 gap-3'
+                        >
+                          <label className='border-input hover:bg-muted/50 has-data-checked:border-primary has-data-checked:bg-primary/5 flex cursor-pointer items-center gap-3 rounded-lg border p-3'>
+                            <RadioGroupItem value='per_item' />
+                            <span className='text-sm font-medium'>
+                              {t('Per item')}
+                            </span>
+                          </label>
+                          <label className='border-input hover:bg-muted/50 has-data-checked:border-primary has-data-checked:bg-primary/5 flex cursor-pointer items-center gap-3 rounded-lg border p-3'>
+                            <RadioGroupItem value='per_second' />
+                            <span className='text-sm font-medium'>
+                              {t('Per second')}
+                            </span>
+                          </label>
+                        </RadioGroup>
+                        <FieldDescription>
+                          {t(
+                            'Choose whether the fixed price is charged per task or per generated second.'
+                          )}
+                        </FieldDescription>
+                      </Field>
+
                       <FormField
                         control={form.control}
                         name='price'
@@ -622,13 +664,17 @@ export const ModelPricingEditorPanel = forwardRef<
                                     }}
                                   />
                                   <InputGroupAddon align='inline-end'>
-                                    {t('per request')}
+                                    {taskBillingUnit === 'per_second'
+                                      ? t('per second')
+                                      : t('per item')}
                                   </InputGroupAddon>
                                 </InputGroup>
                               </FormControl>
                               <FieldDescription>
                                 {t(
-                                  'Cost in USD per request, regardless of tokens used.'
+                                  taskBillingUnit === 'per_second'
+                                    ? 'Cost in USD per generated second.'
+                                    : 'Cost in USD per task request.'
                                 )}
                               </FieldDescription>
                               <FormMessage />

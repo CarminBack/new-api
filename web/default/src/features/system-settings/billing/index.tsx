@@ -48,6 +48,7 @@ const defaultBillingSettings: BillingSettings = {
   ImageGroupPrice: '{"1k":0.1,"2k":0.14,"4k":0.2}',
   AudioRatio: '',
   AudioCompletionRatio: '',
+  TaskBillingUnit: '{}',
   ExposeRatioEnabled: false,
   'billing_setting.billing_mode': '{}',
   'billing_setting.billing_expr': '{}',

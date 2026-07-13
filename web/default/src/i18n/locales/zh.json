@@ -5113,6 +5113,18 @@
     "The single-image prices used when a request is routed through the Image group.": "请求通过 Image 分组时使用的单张图片价格。",
     "{{tier}} price (USD)": "{{tier}} 价格（USD）",
     "JSON map containing the 1K, 2K, and 4K single-image prices in USD.": "包含 1K、2K 和 4K 单张图片美元价格的 JSON 映射。",
-    "Infinite Canvas": "无限画布"
+    "Infinite Canvas": "无限画布",
+    "Fixed price unit": "固定价格单位",
+    "Per item": "按次计费",
+    "Per second": "按秒计费",
+    "Choose whether the fixed price is charged per task or per generated second.": "选择固定价格按任务次数还是按生成秒数收费。",
+    "per item": "每次",
+    "per second": "每秒",
+    "Cost in USD per generated second.": "每生成一秒收取的美元费用。",
+    "Cost in USD per task request.": "每次任务请求收取的美元费用。",
+    "Fixed price per second": "固定每秒价格",
+    "Task billing unit": "任务计费单位",
+    "JSON map of fixed-price task model → per_item or per_second.": "固定价格任务模型到 per_item 或 per_second 的 JSON 映射。",
+    "second": "秒"
   }
 }

@@ -107,6 +107,7 @@ const createModelSchema = (t: Translate) =>
     ImageRatio: createJsonStringField(t),
     AudioRatio: createJsonStringField(t),
     AudioCompletionRatio: createJsonStringField(t),
+    TaskBillingUnit: createJsonStringField(t),
     ExposeRatioEnabled: z.boolean(),
     BillingMode: createJsonStringField(t),
     BillingExpr: createJsonStringField(t),
@@ -180,6 +181,7 @@ export function RatioSettingsCard({
     AudioCompletionRatio: normalizeJsonString(
       modelDefaults.AudioCompletionRatio
     ),
+    TaskBillingUnit: normalizeJsonString(modelDefaults.TaskBillingUnit),
     ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
     BillingMode: normalizeJsonString(modelDefaults.BillingMode),
     BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
@@ -218,6 +220,7 @@ export function RatioSettingsCard({
       AudioCompletionRatio: formatJsonForTextarea(
         modelDefaults.AudioCompletionRatio
       ),
+      TaskBillingUnit: formatJsonForTextarea(modelDefaults.TaskBillingUnit),
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
     },
@@ -252,6 +255,7 @@ export function RatioSettingsCard({
       AudioCompletionRatio: normalizeJsonString(
         modelDefaults.AudioCompletionRatio
       ),
+      TaskBillingUnit: normalizeJsonString(modelDefaults.TaskBillingUnit),
       ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
       BillingMode: normalizeJsonString(modelDefaults.BillingMode),
       BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
@@ -270,6 +274,7 @@ export function RatioSettingsCard({
       AudioCompletionRatio: formatJsonForTextarea(
         modelDefaults.AudioCompletionRatio
       ),
+      TaskBillingUnit: formatJsonForTextarea(modelDefaults.TaskBillingUnit),
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
     })
@@ -314,6 +319,7 @@ export function RatioSettingsCard({
         ImageRatio: normalizeJsonString(values.ImageRatio),
         AudioRatio: normalizeJsonString(values.AudioRatio),
         AudioCompletionRatio: normalizeJsonString(values.AudioCompletionRatio),
+        TaskBillingUnit: normalizeJsonString(values.TaskBillingUnit),
         ExposeRatioEnabled: values.ExposeRatioEnabled,
         BillingMode: normalizeJsonString(values.BillingMode),
         BillingExpr: normalizeJsonString(values.BillingExpr),

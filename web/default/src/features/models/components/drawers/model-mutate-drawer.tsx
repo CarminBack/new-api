@@ -188,6 +188,7 @@ export function ModelMutateDrawer({
       ImageRatio: '',
       AudioRatio: '',
       AudioCompletionRatio: '',
+      TaskBillingUnit: '{}',
       ExposeRatioEnabled: false,
       'billing_setting.billing_mode': '{}',
       'billing_setting.billing_expr': '{}',
