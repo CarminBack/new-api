@@ -5221,6 +5221,21 @@
     "Fixed price per second": "Giá cố định mỗi giây",
     "Task billing unit": "Đơn vị tính phí tác vụ",
     "JSON map of fixed-price task model → per_item or per_second.": "Đối tượng JSON ánh xạ mô hình tác vụ giá cố định tới per_item hoặc per_second.",
-    "second": "giây"
+    "second": "giây",
+    "Failed to preview official prices": "Không thể xem trước giá chính thức",
+    "Failed to fill official prices": "Không thể bổ sung giá chính thức",
+    "Filled official prices for {{count}} models": "Đã bổ sung giá chính thức cho {{count}} mô hình",
+    "Checking official prices...": "Đang kiểm tra giá chính thức...",
+    "Fill official prices": "Bổ sung giá chính thức",
+    "Fill missing official prices?": "Bổ sung các giá chính thức còn thiếu?",
+    "Only enabled models without a base price will be updated. Existing custom prices will not be changed.": "Chỉ cập nhật các mô hình đang bật nhưng chưa có giá cơ bản. Giá tùy chỉnh hiện có sẽ không bị thay đổi.",
+    "{{count}} to fill": "Cần bổ sung {{count}}",
+    "{{count}} already priced": "Đã có giá {{count}}",
+    "{{count}} skipped": "Đã bỏ qua {{count}}",
+    "Apply {{count}} prices": "Áp dụng {{count}} mức giá",
+    "Official price": "Giá chính thức",
+    "Source model": "Mô hình nguồn",
+    "Skipped models": "Mô hình bị bỏ qua",
+    "No missing official prices were found": "Không tìm thấy giá chính thức nào cần bổ sung"
   }
 }

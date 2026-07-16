@@ -5221,6 +5221,21 @@
     "Fixed price per second": "Фиксированная цена за секунду",
     "Task billing unit": "Единица тарификации задач",
     "JSON map of fixed-price task model → per_item or per_second.": "JSON-объект соответствия моделей задач с фиксированной ценой значениям per_item или per_second.",
-    "second": "секунда"
+    "second": "секунда",
+    "Failed to preview official prices": "Не удалось получить предварительный просмотр официальных цен",
+    "Failed to fill official prices": "Не удалось добавить официальные цены",
+    "Filled official prices for {{count}} models": "Официальные цены добавлены для {{count}} моделей",
+    "Checking official prices...": "Проверка официальных цен...",
+    "Fill official prices": "Добавить официальные цены",
+    "Fill missing official prices?": "Добавить отсутствующие официальные цены?",
+    "Only enabled models without a base price will be updated. Existing custom prices will not be changed.": "Будут обновлены только включённые модели без базовой цены. Существующие пользовательские цены не изменятся.",
+    "{{count}} to fill": "Добавить: {{count}}",
+    "{{count}} already priced": "С ценой: {{count}}",
+    "{{count}} skipped": "Пропущено: {{count}}",
+    "Apply {{count}} prices": "Применить {{count}} цен",
+    "Official price": "Официальная цена",
+    "Source model": "Исходная модель",
+    "Skipped models": "Пропущенные модели",
+    "No missing official prices were found": "Отсутствующие официальные цены не найдены"
   }
 }

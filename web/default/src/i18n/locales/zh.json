@@ -5221,6 +5221,21 @@
     "Fixed price per second": "固定每秒价格",
     "Task billing unit": "任务计费单位",
     "JSON map of fixed-price task model → per_item or per_second.": "固定价格任务模型到 per_item 或 per_second 的 JSON 映射。",
-    "second": "秒"
+    "second": "秒",
+    "Failed to preview official prices": "获取官方价格预览失败",
+    "Failed to fill official prices": "补全官方价格失败",
+    "Filled official prices for {{count}} models": "已为 {{count}} 个模型补全官方价格",
+    "Checking official prices...": "正在检查官方价格...",
+    "Fill official prices": "补全官方价格",
+    "Fill missing official prices?": "补全缺失的官方价格？",
+    "Only enabled models without a base price will be updated. Existing custom prices will not be changed.": "只更新已启用且没有基础价格的模型，不会修改现有自定义价格。",
+    "{{count}} to fill": "待补全 {{count}} 个",
+    "{{count}} already priced": "已有价格 {{count}} 个",
+    "{{count}} skipped": "跳过 {{count}} 个",
+    "Apply {{count}} prices": "应用 {{count}} 个价格",
+    "Official price": "官方价格",
+    "Source model": "来源模型",
+    "Skipped models": "跳过的模型",
+    "No missing official prices were found": "没有发现可补全的官方价格"
   }
 }

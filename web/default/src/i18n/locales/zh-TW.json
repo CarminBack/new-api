@@ -5221,6 +5221,21 @@
     "Fixed price per second": "固定每秒價格",
     "Task billing unit": "任務計費單位",
     "JSON map of fixed-price task model → per_item or per_second.": "固定價格任務模型到 per_item 或 per_second 的 JSON 映射。",
-    "second": "秒"
+    "second": "秒",
+    "Failed to preview official prices": "取得官方價格預覽失敗",
+    "Failed to fill official prices": "補齊官方價格失敗",
+    "Filled official prices for {{count}} models": "已為 {{count}} 個模型補齊官方價格",
+    "Checking official prices...": "正在檢查官方價格...",
+    "Fill official prices": "補齊官方價格",
+    "Fill missing official prices?": "補齊缺少的官方價格？",
+    "Only enabled models without a base price will be updated. Existing custom prices will not be changed.": "只更新已啟用且沒有基礎價格的模型，不會修改現有自訂價格。",
+    "{{count}} to fill": "待補齊 {{count}} 個",
+    "{{count}} already priced": "已有價格 {{count}} 個",
+    "{{count}} skipped": "略過 {{count}} 個",
+    "Apply {{count}} prices": "套用 {{count}} 個價格",
+    "Official price": "官方價格",
+    "Source model": "來源模型",
+    "Skipped models": "略過的模型",
+    "No missing official prices were found": "沒有發現可補齊的官方價格"
   }
 }

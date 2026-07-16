@@ -46,6 +46,7 @@ import {
   ModelRatioVisualEditor,
   type ModelRatioVisualEditorHandle,
 } from './model-ratio-visual-editor'
+import { OfficialPriceFill } from './official-price-fill'
 
 type ModelFormValues = {
   ModelPrice: string
@@ -226,7 +227,9 @@ export const ModelRatioForm = memo(function ModelRatioForm({
 
   return (
     <div className='space-y-6'>
-      {!isUnsetVariant && (
+      {isUnsetVariant ? (
+        <OfficialPriceFill />
+      ) : (
         <div className='flex flex-wrap justify-end gap-2'>
           <Button
             type='button'

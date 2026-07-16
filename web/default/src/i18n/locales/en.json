@@ -5221,6 +5221,21 @@
     "Fixed price per second": "Fixed price per second",
     "Task billing unit": "Task billing unit",
     "JSON map of fixed-price task model → per_item or per_second.": "JSON map of fixed-price task model → per_item or per_second.",
-    "second": "second"
+    "second": "second",
+    "Failed to preview official prices": "Failed to preview official prices",
+    "Failed to fill official prices": "Failed to fill official prices",
+    "Filled official prices for {{count}} models": "Filled official prices for {{count}} models",
+    "Checking official prices...": "Checking official prices...",
+    "Fill official prices": "Fill official prices",
+    "Fill missing official prices?": "Fill missing official prices?",
+    "Only enabled models without a base price will be updated. Existing custom prices will not be changed.": "Only enabled models without a base price will be updated. Existing custom prices will not be changed.",
+    "{{count}} to fill": "{{count}} to fill",
+    "{{count}} already priced": "{{count}} already priced",
+    "{{count}} skipped": "{{count}} skipped",
+    "Apply {{count}} prices": "Apply {{count}} prices",
+    "Official price": "Official price",
+    "Source model": "Source model",
+    "Skipped models": "Skipped models",
+    "No missing official prices were found": "No missing official prices were found"
   }
 }

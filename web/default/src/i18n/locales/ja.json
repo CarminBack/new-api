@@ -5221,6 +5221,21 @@
     "Fixed price per second": "秒単位の固定価格",
     "Task billing unit": "タスク課金単位",
     "JSON map of fixed-price task model → per_item or per_second.": "固定価格タスクモデルから per_item または per_second への JSON マップ。",
-    "second": "秒"
+    "second": "秒",
+    "Failed to preview official prices": "公式価格のプレビューに失敗しました",
+    "Failed to fill official prices": "公式価格の補完に失敗しました",
+    "Filled official prices for {{count}} models": "{{count}} 件のモデルに公式価格を設定しました",
+    "Checking official prices...": "公式価格を確認しています...",
+    "Fill official prices": "公式価格を補完",
+    "Fill missing official prices?": "不足している公式価格を補完しますか？",
+    "Only enabled models without a base price will be updated. Existing custom prices will not be changed.": "有効で基本価格が未設定のモデルのみ更新します。既存のカスタム価格は変更しません。",
+    "{{count}} to fill": "補完対象 {{count}} 件",
+    "{{count}} already priced": "価格設定済み {{count}} 件",
+    "{{count}} skipped": "スキップ {{count}} 件",
+    "Apply {{count}} prices": "{{count}} 件の価格を適用",
+    "Official price": "公式価格",
+    "Source model": "参照モデル",
+    "Skipped models": "スキップしたモデル",
+    "No missing official prices were found": "補完可能な公式価格はありません"
   }
 }

@@ -5221,6 +5221,21 @@
     "Fixed price per second": "Prix fixe par seconde",
     "Task billing unit": "Unité de facturation des tâches",
     "JSON map of fixed-price task model → per_item or per_second.": "Objet JSON associant chaque modèle de tâche à prix fixe à per_item ou per_second.",
-    "second": "seconde"
+    "second": "seconde",
+    "Failed to preview official prices": "Échec de l’aperçu des prix officiels",
+    "Failed to fill official prices": "Échec de l’ajout des prix officiels",
+    "Filled official prices for {{count}} models": "Prix officiels ajoutés pour {{count}} modèles",
+    "Checking official prices...": "Vérification des prix officiels...",
+    "Fill official prices": "Compléter les prix officiels",
+    "Fill missing official prices?": "Compléter les prix officiels manquants ?",
+    "Only enabled models without a base price will be updated. Existing custom prices will not be changed.": "Seuls les modèles activés sans prix de base seront mis à jour. Les prix personnalisés existants ne seront pas modifiés.",
+    "{{count}} to fill": "{{count}} à compléter",
+    "{{count}} already priced": "{{count}} déjà tarifés",
+    "{{count}} skipped": "{{count}} ignorés",
+    "Apply {{count}} prices": "Appliquer {{count}} prix",
+    "Official price": "Prix officiel",
+    "Source model": "Modèle source",
+    "Skipped models": "Modèles ignorés",
+    "No missing official prices were found": "Aucun prix officiel manquant n’a été trouvé"
   }
 }

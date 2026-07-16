@@ -449,6 +449,36 @@ export type UpstreamRatiosResponse = {
   }
 }
 
+export type OfficialPriceFillRequest = {
+  dry_run: boolean
+}
+
+export type OfficialPriceFillItem = {
+  model: string
+  source_model: string
+  fields: Partial<Record<RatioType, number | string>>
+}
+
+export type OfficialPriceFillSkip = {
+  model: string
+  reason: string
+}
+
+export type OfficialPriceFillResult = {
+  dry_run: boolean
+  source: string
+  enabled_models: number
+  already_priced: number
+  filled_models: OfficialPriceFillItem[]
+  skipped_models: OfficialPriceFillSkip[]
+}
+
+export type OfficialPriceFillResponse = {
+  success: boolean
+  message: string
+  data?: OfficialPriceFillResult
+}
+
 export type AistarsLabSyncRequest = {
   dry_run: boolean
   channel_id?: number
