@@ -48,7 +48,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=video-task-result-fix
+            type=raw,value=video-task-result-fix,enable=${{ github.ref_name == 'video-task-result-fix' }}
             type=raw,value=${{ steps.version.outputs.value }}
             type=sha,prefix=sha-
 
