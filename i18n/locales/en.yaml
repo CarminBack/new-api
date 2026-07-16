@@ -271,6 +271,7 @@ distributor.get_channel_failed: "Failed to get available channel for model {{.Mo
 distributor.no_available_channel: "No available channel for model {{.Model}} under group {{.Group}} (distributor)"
 distributor.invalid_midjourney_request: "Invalid Midjourney request: {{.Error}}"
 distributor.invalid_request_parse_model: "Invalid request, unable to parse model"
+distributor.video_model_endpoint_mismatch: "Model {{.Model}} only supports video task endpoints. Use POST /v1/video/generations or POST /v1/videos."
 
 # Custom OAuth provider messages
 custom_oauth.not_found: "Custom OAuth provider not found"

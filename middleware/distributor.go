@@ -38,6 +38,15 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		if modelRequest.Model != "" && model.IsVideoTaskModel(modelRequest.Model) && !isVideoTaskRequestPath(c.Request.URL.Path) {
+			abortWithOpenAiMessage(
+				c,
+				http.StatusBadRequest,
+				i18n.T(c, i18n.MsgDistributorVideoModelEndpointMismatch, map[string]any{"Model": modelRequest.Model}),
+				types.ErrorCodeModelEndpointMismatch,
+			)
+			return
+		}
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {
@@ -167,6 +176,16 @@ func Distribute() func(c *gin.Context) {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}
+}
+
+func isVideoTaskRequestPath(path string) bool {
+	return path == "/v1/video/generations" ||
+		path == "/v1/videos" ||
+		strings.HasPrefix(path, "/v1/video/generations/") ||
+		strings.HasPrefix(path, "/v1/videos/") ||
+		strings.HasPrefix(path, "/kling/v1/videos/") ||
+		path == "/jimeng" ||
+		strings.HasPrefix(path, "/jimeng/")
 }
 
 // channelSupportsRequestPath reports whether a channel can serve the request path.

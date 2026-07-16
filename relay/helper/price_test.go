@@ -349,3 +349,17 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 	require.Equal(t, common.QuotaClampOverflow, clamp.Kind)
 	require.Nil(t, info.Billing)
 }
+
+func TestModelPriceHelperRejectsPerSecondTaskModel(t *testing.T) {
+	savedUnits := ratio_setting.TaskBillingUnit2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateTaskBillingUnitByJSONString(savedUnits))
+	})
+	require.NoError(t, ratio_setting.UpdateTaskBillingUnitByJSONString(`{"grok-video-1.5":"per_second"}`))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{OriginModelName: "grok-video-1.5"}
+
+	_, err := ModelPriceHelper(ctx, info, 0, &types.TokenCountMeta{})
+	require.ErrorContains(t, err, "requires a video task endpoint")
+}

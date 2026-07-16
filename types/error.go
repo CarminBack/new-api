@@ -39,6 +39,7 @@ type ErrorCode string
 
 const (
 	ErrorCodeInvalidRequest         ErrorCode = "invalid_request"
+	ErrorCodeModelEndpointMismatch  ErrorCode = "model_endpoint_mismatch"
 	ErrorCodeSensitiveWordsDetected ErrorCode = "sensitive_words_detected"
 	ErrorCodeViolationFeeGrokCSAM   ErrorCode = "violation_fee.grok.csam"
 

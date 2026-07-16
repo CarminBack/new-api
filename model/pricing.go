@@ -55,6 +55,7 @@ var (
 	// 缓存映射：模型名 -> 启用分组 / 计费类型
 	modelEnableGroups     = make(map[string][]string)
 	modelQuotaTypeMap     = make(map[string]int)
+	videoTaskModelMap     = make(map[string]struct{})
 	modelEnableGroupsLock = sync.RWMutex{}
 )
 
@@ -418,6 +419,12 @@ func updatePricing() {
 	modelEnableGroupsLock.Lock()
 	modelEnableGroups = make(map[string][]string)
 	modelQuotaTypeMap = make(map[string]int)
+	videoTaskModelMap = make(map[string]struct{})
+	for model, groups := range modelGroupsMap {
+		if hasVideoGroup(groups.Items()) {
+			videoTaskModelMap[model] = struct{}{}
+		}
+	}
 	for _, p := range pricingMap {
 		modelEnableGroups[p.ModelName] = p.EnableGroup
 		modelQuotaTypeMap[p.ModelName] = p.QuotaType

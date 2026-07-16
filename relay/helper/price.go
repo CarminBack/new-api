@@ -74,6 +74,9 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 }
 
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (types.PriceData, error) {
+	if ratio_setting.IsTaskPerSecondBilling(info.OriginModelName) {
+		return types.PriceData{}, fmt.Errorf("model %s requires a video task endpoint", info.OriginModelName)
+	}
 	if meta == nil {
 		meta = &types.TokenCountMeta{}
 	}
