@@ -325,6 +325,13 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	switch resTask.Status {
 	case "queued", "pending":
 		taskResult.Status = model.TaskStatusQueued
+	case "unknown":
+		if resTask.Error != nil && resTask.Error.Message != "" {
+			taskResult.Status = model.TaskStatusFailure
+			taskResult.Reason = resTask.Error.Message
+		} else {
+			taskResult.Status = model.TaskStatusQueued
+		}
 	case "processing", "in_progress":
 		taskResult.Status = model.TaskStatusInProgress
 	case "completed":

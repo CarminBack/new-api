@@ -54,3 +54,36 @@ func TestParseTaskResultErrorWithoutStatus(t *testing.T) {
 	assert.Equal(t, model.TaskStatusFailure, taskInfo.Status)
 	assert.Equal(t, "Generated video rejected by content moderation.", taskInfo.Reason)
 }
+
+func TestParseTaskResultUnknownWithoutErrorIsQueued(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+
+	taskInfo, err := adaptor.ParseTaskResult([]byte(`{
+		"id": "task_upstream",
+		"task_id": "task_upstream",
+		"object": "video",
+		"model": "grok-video-1.5",
+		"status": "unknown",
+		"progress": 0
+	}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, taskInfo)
+	assert.Equal(t, model.TaskStatusQueued, taskInfo.Status)
+	assert.Empty(t, taskInfo.Reason)
+}
+
+func TestParseTaskResultUnknownWithErrorFails(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+
+	taskInfo, err := adaptor.ParseTaskResult([]byte(`{
+		"id": "task_upstream",
+		"status": "unknown",
+		"error": {"message": "upstream rejected the task", "code": "invalid_request"}
+	}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, taskInfo)
+	assert.Equal(t, model.TaskStatusFailure, taskInfo.Status)
+	assert.Equal(t, "upstream rejected the task", taskInfo.Reason)
+}
