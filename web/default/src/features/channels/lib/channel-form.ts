@@ -116,6 +116,11 @@ function isVertexJsonKey(value: string | undefined): boolean {
   }
 }
 
+const imageResolutionTiersSchema = z.record(
+  z.string(),
+  z.array(z.enum(['1k', '2k', '4k']))
+)
+
 function addRequiredIssue(
   ctx: z.RefinementCtx,
   path: string,
@@ -191,6 +196,7 @@ export const channelFormSchema = z
     pass_through_body_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
+    image_resolution_tiers: imageResolutionTiersSchema.optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -331,6 +337,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   pass_through_body_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
+  image_resolution_tiers: {},
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -369,11 +376,15 @@ export function transformChannelToFormDefaults(
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
+    image_resolution_tiers: {} as Record<string, Array<'1k' | '2k' | '4k'>>,
   }
 
   if (channel.setting) {
     try {
       const parsed = JSON.parse(channel.setting)
+      const parsedImageResolutionTiers = imageResolutionTiersSchema.safeParse(
+        parsed.image_resolution_tiers
+      )
       extraSettings = {
         force_format: parsed.force_format || false,
         thinking_to_content: parsed.thinking_to_content || false,
@@ -381,6 +392,9 @@ export function transformChannelToFormDefaults(
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
+        image_resolution_tiers: parsedImageResolutionTiers.success
+          ? parsedImageResolutionTiers.data
+          : {},
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -510,6 +524,17 @@ function buildSettingJSON(formData: ChannelFormValues): string {
   settingObj.system_prompt = formData.system_prompt || ''
   settingObj.system_prompt_override = formData.system_prompt_override || false
 
+  const imageResolutionTiers = Object.fromEntries(
+    Object.entries(formData.image_resolution_tiers || {}).filter(
+      ([model, tiers]) => model.trim() && tiers.length > 0
+    )
+  )
+  if (Object.keys(imageResolutionTiers).length > 0) {
+    settingObj.image_resolution_tiers = imageResolutionTiers
+  } else {
+    delete settingObj.image_resolution_tiers
+  }
+
   return JSON.stringify(settingObj)
 }
 
@@ -575,12 +600,15 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.allow_inference_geo = formData.allow_inference_geo === true
   } else {
     if ('disable_store' in settingsObj) delete settingsObj.disable_store
-    if ('allow_safety_identifier' in settingsObj)
+    if ('allow_safety_identifier' in settingsObj) {
       delete settingsObj.allow_safety_identifier
-    if ('allow_include_obfuscation' in settingsObj)
+    }
+    if ('allow_include_obfuscation' in settingsObj) {
       delete settingsObj.allow_include_obfuscation
-    if (formData.type !== 14 && 'allow_inference_geo' in settingsObj)
+    }
+    if (formData.type !== 14 && 'allow_inference_geo' in settingsObj) {
       delete settingsObj.allow_inference_geo
+    }
   }
 
   // Anthropic (type 14): claude_beta_query, allow_inference_geo, allow_speed
@@ -603,14 +631,14 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.upstream_model_update_auto_sync_enabled =
       settingsObj.upstream_model_update_check_enabled === true &&
       formData.upstream_model_update_auto_sync_enabled === true
-    settingsObj.upstream_model_update_ignored_models = Array.from(
-      new Set(
+    settingsObj.upstream_model_update_ignored_models = [
+      ...new Set(
         String(formData.upstream_model_update_ignored_models || '')
           .split(',')
           .map((model) => model.trim())
           .filter(Boolean)
-      )
-    )
+      ),
+    ]
     if (
       !Array.isArray(settingsObj.upstream_model_update_last_detected_models) ||
       settingsObj.upstream_model_update_check_enabled !== true

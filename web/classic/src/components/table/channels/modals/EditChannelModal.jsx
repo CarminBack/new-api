@@ -103,6 +103,7 @@ const REGION_EXAMPLE = {
 };
 const UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT = 8;
 const ADVANCED_SETTINGS_EXPANDED_KEY = 'channel-advanced-settings-expanded';
+const IMAGE_RESOLUTION_TIERS = ['1k', '2k', '4k'];
 
 const PARAM_OVERRIDE_LEGACY_TEMPLATE = {
   temperature: 0,
@@ -194,6 +195,7 @@ const EditChannelModal = (props) => {
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
+    image_resolution_tiers: {},
     setting: '',
     settings: '',
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
@@ -516,6 +518,7 @@ const EditChannelModal = (props) => {
     proxy: '',
     pass_through_body_enabled: false,
     system_prompt: '',
+    image_resolution_tiers: {},
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
@@ -549,6 +552,26 @@ const EditChannelModal = (props) => {
     };
     const settingsJson = JSON.stringify(newSettings);
     handleInputChange('setting', settingsJson);
+  };
+
+  const handleImageResolutionTierChange = (model, tier, enabled) => {
+    const currentTiers =
+      formApiRef.current?.getValue('image_resolution_tiers') ||
+      channelSettings.image_resolution_tiers ||
+      {};
+    const next = { ...currentTiers };
+    const tiers = new Set(next[model] || []);
+    if (enabled) {
+      tiers.add(tier);
+    } else {
+      tiers.delete(tier);
+    }
+    if (tiers.size > 0) {
+      next[model] = IMAGE_RESOLUTION_TIERS.filter((value) => tiers.has(value));
+    } else {
+      delete next[model];
+    }
+    handleChannelSettingsChange('image_resolution_tiers', next);
   };
 
   const handleChannelOtherSettingsChange = (key, value) => {
@@ -881,6 +904,12 @@ const EditChannelModal = (props) => {
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
+          data.image_resolution_tiers =
+            parsedSettings.image_resolution_tiers &&
+            typeof parsedSettings.image_resolution_tiers === 'object' &&
+            !Array.isArray(parsedSettings.image_resolution_tiers)
+              ? parsedSettings.image_resolution_tiers
+              : {};
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -889,6 +918,7 @@ const EditChannelModal = (props) => {
           data.pass_through_body_enabled = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
+          data.image_resolution_tiers = {};
         }
       } else {
         data.force_format = false;
@@ -897,6 +927,7 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
+        data.image_resolution_tiers = {};
       }
 
       if (data.settings) {
@@ -1006,6 +1037,7 @@ const EditChannelModal = (props) => {
         pass_through_body_enabled: data.pass_through_body_enabled,
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
+        image_resolution_tiers: data.image_resolution_tiers || {},
       });
       initialModelsRef.current = (data.models || [])
         .map((model) => (model || '').trim())
@@ -1390,6 +1422,7 @@ const EditChannelModal = (props) => {
       pass_through_body_enabled: false,
       system_prompt: '',
       system_prompt_override: false,
+      image_resolution_tiers: {},
     });
     // 重置密钥模式状态
     setKeyMode('append');
@@ -1770,6 +1803,15 @@ const EditChannelModal = (props) => {
     channelExtraSettings.system_prompt = localInputs.system_prompt || '';
     channelExtraSettings.system_prompt_override =
       localInputs.system_prompt_override || false;
+    if (
+      localInputs.image_resolution_tiers &&
+      Object.keys(localInputs.image_resolution_tiers).length > 0
+    ) {
+      channelExtraSettings.image_resolution_tiers =
+        localInputs.image_resolution_tiers;
+    } else {
+      delete channelExtraSettings.image_resolution_tiers;
+    }
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
     // 处理 settings 字段（包括企业账户设置和字段透传控制）
@@ -1854,6 +1896,7 @@ const EditChannelModal = (props) => {
     delete localInputs.pass_through_body_enabled;
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
+    delete localInputs.image_resolution_tiers;
     delete localInputs.is_enterprise_account;
     // 顶层的 vertex_key_type 不应发送给后端
     delete localInputs.vertex_key_type;
@@ -1996,6 +2039,17 @@ const EditChannelModal = (props) => {
       showInfo(t('未发现新增模型'));
     }
   };
+
+  const imageResolutionCapabilitiesVisible =
+    (inputs.groups || []).some(
+      (group) => String(group).toLowerCase() === 'image',
+    ) || Object.keys(channelSettings.image_resolution_tiers || {}).length > 0;
+  const imageResolutionModels = Array.from(
+    new Set([
+      ...(inputs.models || []),
+      ...Object.keys(channelSettings.image_resolution_tiers || {}),
+    ]),
+  );
 
   const batchAllowed = (!isEdit || isMultiKeyChannel) && inputs.type !== 57;
   const batchExtra = batchAllowed ? (
@@ -2527,6 +2581,60 @@ const EditChannelModal = (props) => {
                     </>
                   )}
                 </div>
+
+                {imageResolutionCapabilitiesVisible && (
+                  <div className='pt-3'>
+                    <Text className='text-sm font-medium text-gray-500 mb-3 block'>
+                      {t('图片分辨率能力')}
+                    </Text>
+                    <Banner
+                      type='warning'
+                      className='mb-3'
+                      description={t(
+                        '只勾选已通过实际图片尺寸验证的档位；系统按请求图片最长边选择渠道。',
+                      )}
+                    />
+                    {imageResolutionModels.length > 0 ? (
+                      <div className='space-y-3'>
+                        {imageResolutionModels.map((model) => {
+                          const selectedTiers =
+                            channelSettings.image_resolution_tiers?.[model] || [];
+                          return (
+                            <div
+                              key={model}
+                              className='rounded-lg border border-gray-200 p-3'
+                            >
+                              <Text strong className='break-all font-mono'>
+                                {model}
+                              </Text>
+                              <div className='mt-3 flex flex-wrap gap-5'>
+                                {IMAGE_RESOLUTION_TIERS.map((tier) => (
+                                  <Checkbox
+                                    key={tier}
+                                    checked={selectedTiers.includes(tier)}
+                                    onChange={(event) =>
+                                      handleImageResolutionTierChange(
+                                        model,
+                                        tier,
+                                        event.target.checked,
+                                      )
+                                    }
+                                  >
+                                    {tier.toUpperCase()}
+                                  </Checkbox>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <Text type='tertiary'>
+                        {t('请先选择图片模型，再配置支持的分辨率档位。')}
+                      </Text>
+                    )}
+                  </div>
+                )}
 
                 {/* Extra Settings Section */}
                 <div className='pt-3'>

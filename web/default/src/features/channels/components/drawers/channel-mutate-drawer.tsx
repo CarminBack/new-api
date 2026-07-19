@@ -68,6 +68,7 @@ import { MultiSelect } from '@/components/multi-select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
 import {
   Form,
@@ -239,6 +240,11 @@ const MODEL_MAPPING_PREVIEW_FALLBACK: Array<{
 }> = [{ source: 'client-model', target: 'upstream-model' }]
 
 const ADVANCED_SETTINGS_EXPANDED_KEY = 'channel-advanced-settings-expanded'
+const IMAGE_RESOLUTION_TIERS = ['1k', '2k', '4k'] as const
+type ImageResolutionTier = (typeof IMAGE_RESOLUTION_TIERS)[number]
+const EMPTY_IMAGE_RESOLUTION_TIERS: NonNullable<
+  ChannelFormValues['image_resolution_tiers']
+> = {}
 const CHANNEL_EDITOR_SECTION_IDS = {
   identity: 'channel-section-identity',
   credentials: 'channel-section-credentials',
@@ -255,6 +261,8 @@ const ADVANCED_SETTINGS_SECTION_IDS = {
   routingStrategy: 'channel-section-advanced-routing-strategy',
   internalNotes: 'channel-section-advanced-internal-notes',
   overrideRules: 'channel-section-advanced-override-rules',
+  imageResolutionCapabilities:
+    'channel-section-advanced-image-resolution-capabilities',
   extraSettings: 'channel-section-advanced-extra-settings',
   fieldPassthrough: 'channel-section-advanced-field-passthrough',
   upstreamModelDetection: 'channel-section-advanced-upstream-model-detection',
@@ -286,6 +294,7 @@ const SENSITIVE_FORM_FIELDS = [
   'pass_through_body_enabled',
   'system_prompt',
   'system_prompt_override',
+  'image_resolution_tiers',
   'allow_service_tier',
   'disable_store',
   'allow_safety_identifier',
@@ -746,6 +755,8 @@ export function ChannelMutateDrawer({
   const currentProxy = form.watch('proxy')
   const currentSystemPrompt = form.watch('system_prompt')
   const currentSystemPromptOverride = form.watch('system_prompt_override')
+  const currentImageResolutionTiers =
+    form.watch('image_resolution_tiers') ?? EMPTY_IMAGE_RESOLUTION_TIERS
   const currentAllowServiceTier = form.watch('allow_service_tier')
   const currentDisableStore = form.watch('disable_store')
   const currentAllowSafetyIdentifier = form.watch('allow_safety_identifier')
@@ -1034,11 +1045,49 @@ export function ChannelMutateDrawer({
     currentUpstreamModelUpdateAutoSyncEnabled ||
     currentUpstreamModelUpdateIgnoredModels?.trim()
   )
+  const imageResolutionCapabilitiesVisible = Boolean(
+    currentGroups?.some((group) => group.toLowerCase() === 'image') ||
+    Object.keys(currentImageResolutionTiers).length > 0
+  )
+  const imageResolutionCapabilitiesConfigured = Object.values(
+    currentImageResolutionTiers
+  ).some((tiers) => tiers.length > 0)
+  const imageResolutionModels = useMemo(
+    () => [
+      ...new Set([
+        ...currentModelsArray,
+        ...Object.keys(currentImageResolutionTiers),
+      ]),
+    ],
+    [currentImageResolutionTiers, currentModelsArray]
+  )
+  const updateImageResolutionTier = useCallback(
+    (model: string, tier: ImageResolutionTier, enabled: boolean) => {
+      const next = { ...form.getValues('image_resolution_tiers') }
+      const tiers = new Set(next[model] || [])
+      if (enabled) {
+        tiers.add(tier)
+      } else {
+        tiers.delete(tier)
+      }
+      if (tiers.size > 0) {
+        next[model] = IMAGE_RESOLUTION_TIERS.filter((value) => tiers.has(value))
+      } else {
+        delete next[model]
+      }
+      form.setValue('image_resolution_tiers', next, {
+        shouldDirty: true,
+        shouldTouch: true,
+      })
+    },
+    [form]
+  )
   const advancedConfigured = Boolean(
     routingStrategyConfigured ||
     internalNotesConfigured ||
     overrideRulesConfigured ||
     extraSettingsConfigured ||
+    imageResolutionCapabilitiesConfigured ||
     fieldPassthroughConfigured ||
     upstreamModelDetectionConfigured
   )
@@ -1064,6 +1113,13 @@ export function ChannelMutateDrawer({
       configured: extraSettingsConfigured,
     },
   ]
+  if (imageResolutionCapabilitiesVisible) {
+    advancedNavChildren.splice(3, 0, {
+      id: ADVANCED_SETTINGS_SECTION_IDS.imageResolutionCapabilities,
+      title: t('Image Resolution Capabilities'),
+      configured: imageResolutionCapabilitiesConfigured,
+    })
+  }
   if (currentType === 1 || currentType === 14 || currentType === 57) {
     advancedNavChildren.push({
       id: ADVANCED_SETTINGS_SECTION_IDS.fieldPassthrough,
@@ -4027,6 +4083,82 @@ export function ChannelMutateDrawer({
                             </fieldset>
                           </div>
                         </div>
+
+                        {imageResolutionCapabilitiesVisible && (
+                          <div
+                            id={
+                              ADVANCED_SETTINGS_SECTION_IDS.imageResolutionCapabilities
+                            }
+                            className={sideDrawerSectionClassName(
+                              configuredAdvancedSectionClassName(
+                                'scroll-mt-4',
+                                imageResolutionCapabilitiesConfigured
+                              )
+                            )}
+                          >
+                            <CardHeading
+                              title={t('Image Resolution Capabilities')}
+                              icon={<Sparkles className='h-4 w-4' />}
+                              iconTone='chart-4'
+                            />
+                            <Alert>
+                              <AlertDescription>
+                                {t(
+                                  'Only enable tiers verified with actual output dimensions. Requests are routed by the longest image edge.'
+                                )}
+                              </AlertDescription>
+                            </Alert>
+                            {imageResolutionModels.length > 0 ? (
+                              <fieldset
+                                disabled={sensitiveLocked || isSubmitting}
+                                className='space-y-3 disabled:opacity-60'
+                              >
+                                {imageResolutionModels.map((model) => {
+                                  const selectedTiers =
+                                    currentImageResolutionTiers[model] || []
+                                  return (
+                                    <div
+                                      key={model}
+                                      className='border-border bg-muted/20 rounded-lg border p-3'
+                                    >
+                                      <div className='mb-3 font-mono text-sm font-medium break-all'>
+                                        {model}
+                                      </div>
+                                      <div className='flex flex-wrap gap-5'>
+                                        {IMAGE_RESOLUTION_TIERS.map((tier) => (
+                                          <label
+                                            key={tier}
+                                            className='flex cursor-pointer items-center gap-2 text-sm font-medium uppercase'
+                                          >
+                                            <Checkbox
+                                              checked={selectedTiers.includes(
+                                                tier
+                                              )}
+                                              onCheckedChange={(checked) =>
+                                                updateImageResolutionTier(
+                                                  model,
+                                                  tier,
+                                                  checked === true
+                                                )
+                                              }
+                                            />
+                                            {tier}
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </fieldset>
+                            ) : (
+                              <p className='text-muted-foreground text-sm'>
+                                {t(
+                                  'Select image models first, then configure their supported resolution tiers.'
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        )}
 
                         {/* ── Extra Settings ── */}
                         <div
