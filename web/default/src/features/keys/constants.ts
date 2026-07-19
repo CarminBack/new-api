@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type StatusBadgeProps } from '@/components/status-badge'
+import type { StatusBadgeProps } from '@/components/status-badge'
 
 // ============================================================================
 // API Key Status Configuration
@@ -71,6 +71,10 @@ export const API_KEY_STATUS_OPTIONS = Object.values(API_KEY_STATUSES).map(
 // ============================================================================
 
 export const DEFAULT_GROUP = '' as const
+
+// Image requests can take longer than Cloudflare's proxied request timeout.
+// Keep this endpoint visible to users who create an Image-group API key.
+export const IMAGE_API_BASE_URL = 'https://image-api.mewinyou.shop' as const
 
 // ============================================================================
 // Error Messages (i18n keys: use t(ERROR_MESSAGES.xxx) when displaying)
