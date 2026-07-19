@@ -25,8 +25,10 @@ import (
 )
 
 type ModelRequest struct {
-	Model string `json:"model"`
-	Group string `json:"group,omitempty"`
+	Model               string `json:"model"`
+	Group               string `json:"group,omitempty"`
+	Size                string `json:"size,omitempty"`
+	ImageResolutionTier string `json:"-"`
 }
 
 func Distribute() func(c *gin.Context) {
@@ -37,6 +39,12 @@ func Distribute() func(c *gin.Context) {
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
+		}
+		if isImageRequestPath(c.Request.URL.Path) {
+			if tier, valid := dto.ImageSizeTier(modelRequest.Size); valid {
+				modelRequest.ImageResolutionTier = tier
+				common.SetContextKey(c, constant.ContextKeyImageResolutionTier, tier)
+			}
 		}
 		if modelRequest.Model != "" && model.IsVideoTaskModel(modelRequest.Model) && !isVideoTaskRequestPath(c.Request.URL.Path) {
 			abortWithOpenAiMessage(
@@ -119,7 +127,7 @@ func Distribute() func(c *gin.Context) {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 							autoGroups := service.GetUserAutoGroup(userGroup)
 							for _, g := range autoGroups {
-								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+								if model.IsChannelEnabledForGroupModelWithImageResolution(g, modelRequest.Model, modelRequest.ImageResolutionTier, preferred.Id) {
 									selectGroup = g
 									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 									channel = preferred
@@ -128,7 +136,7 @@ func Distribute() func(c *gin.Context) {
 									break
 								}
 							}
-						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
+						} else if model.IsChannelEnabledForGroupModelWithImageResolution(usingGroup, modelRequest.Model, modelRequest.ImageResolutionTier, preferred.Id) {
 							channel = preferred
 							selectGroup = usingGroup
 							affinityUsable = true
@@ -142,11 +150,12 @@ func Distribute() func(c *gin.Context) {
 
 				if channel == nil {
 					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
-						Ctx:         c,
-						ModelName:   modelRequest.Model,
-						TokenGroup:  usingGroup,
-						RequestPath: c.Request.URL.Path,
-						Retry:       common.GetPointer(0),
+						Ctx:                 c,
+						ModelName:           modelRequest.Model,
+						TokenGroup:          usingGroup,
+						RequestPath:         c.Request.URL.Path,
+						ImageResolutionTier: modelRequest.ImageResolutionTier,
+						Retry:               common.GetPointer(0),
 					})
 					if err != nil {
 						showGroup := usingGroup
@@ -176,6 +185,11 @@ func Distribute() func(c *gin.Context) {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}
+}
+
+func isImageRequestPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/images/generations") ||
+		strings.HasPrefix(path, "/v1/images/edits")
 }
 
 func isVideoTaskRequestPath(path string) bool {
@@ -237,12 +251,16 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 		return nil, errors.New("invalid JSON request body")
 	}
 
-	values := gjson.GetManyBytes(requestBody, "model", "group")
+	values := gjson.GetManyBytes(requestBody, "model", "group", "size")
 	model, err := getJSONStringValue(values[0], "model")
 	if err != nil {
 		return nil, err
 	}
 	group, err := getJSONStringValue(values[1], "group")
+	if err != nil {
+		return nil, err
+	}
+	size, err := getJSONStringValue(values[2], "size")
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +273,7 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 	return &ModelRequest{
 		Model: model,
 		Group: group,
+		Size:  size,
 	}, nil
 }
 
@@ -368,6 +387,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			return nil, false, err
 		}
 		modelRequest.Model = req.Model
+		modelRequest.Size = req.Size
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/realtime") {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01
@@ -390,8 +410,11 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		contentType := c.ContentType()
 		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {
 			req, err := getModelFromRequest(c)
-			if err == nil && req.Model != "" {
-				modelRequest.Model = req.Model
+			if err == nil {
+				if req.Model != "" {
+					modelRequest.Model = req.Model
+				}
+				modelRequest.Size = req.Size
 			}
 		}
 	}

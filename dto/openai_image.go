@@ -159,7 +159,7 @@ func parseImageSize(size string) (int, int, bool) {
 	return width, height, true
 }
 
-func imageSizeTier(size string) (string, bool) {
+func ImageSizeTier(size string) (string, bool) {
 	width, height, ok := parseImageSize(size)
 	if !ok {
 		return "", false
@@ -181,7 +181,7 @@ func imageSizeTier(size string) (string, bool) {
 }
 
 func imageGroupUnitPrice(size string) (float64, bool) {
-	tier, ok := imageSizeTier(size)
+	tier, ok := ImageSizeTier(size)
 	if !ok {
 		return 0, false
 	}
@@ -232,7 +232,7 @@ func builtInImageUnitPrice(model string, size string, quality string) (float64, 
 		return gptImage2UnitPrice(size, quality)
 	}
 
-	tier, ok := imageSizeTier(size)
+	tier, ok := ImageSizeTier(size)
 	if !ok {
 		return 0, false
 	}

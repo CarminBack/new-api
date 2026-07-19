@@ -21,6 +21,7 @@ var channelsIDM map[int]*Channel                     // all channels include dis
 // channel2advancedCustomConfig caches parsed Advanced Custom (type 58) configs so
 // path-aware selection avoids re-parsing JSON per request. Refreshed on full sync.
 var channel2advancedCustomConfig map[int]*dto.AdvancedCustomConfig
+var channel2settings map[int]dto.ChannelSettings
 var channelSyncLock sync.RWMutex
 
 func InitChannelCache() {
@@ -30,10 +31,12 @@ func InitChannelCache() {
 	}
 	newChannelId2channel := make(map[int]*Channel)
 	newChannel2advancedCustomConfig := make(map[int]*dto.AdvancedCustomConfig)
+	newChannel2settings := make(map[int]dto.ChannelSettings)
 	var channels []*Channel
 	DB.Find(&channels)
 	for _, channel := range channels {
 		newChannelId2channel[channel.Id] = channel
+		newChannel2settings[channel.Id] = channel.GetSetting()
 		if channel.Type == constant.ChannelTypeAdvancedCustom {
 			if config := channel.GetOtherSettings().AdvancedCustom; config != nil {
 				newChannel2advancedCustomConfig[channel.Id] = config
@@ -94,6 +97,7 @@ func InitChannelCache() {
 	}
 	channelsIDM = newChannelId2channel
 	channel2advancedCustomConfig = newChannel2advancedCustomConfig
+	channel2settings = newChannel2settings
 	channelSyncLock.Unlock()
 	// Lock ordering: InvalidatePricingCache acquires updatePricingLock, and
 	// GetPricing (holding updatePricingLock) nests channelSyncLock.RLock via
@@ -111,10 +115,10 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
-func GetRandomSatisfiedChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
+func GetRandomSatisfiedChannel(group string, model string, retry int, requestPath string, imageResolutionTier string) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry, requestPath)
+		return GetChannel(group, model, retry, requestPath, imageResolutionTier)
 	}
 
 	channelSyncLock.RLock()
@@ -122,11 +126,13 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, requestPat
 
 	// First, try to find channels with the exact model name.
 	channels := filterChannelsByRequestPathAndModel(group2model2channels[group][model], requestPath, model)
+	channels = filterChannelsByImageResolution(channels, model, imageResolutionTier)
 
 	// If no channels found, try to find channels with the normalized model name.
 	if len(channels) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(model)
 		channels = filterChannelsByRequestPathAndModel(group2model2channels[group][normalizedModel], requestPath, model)
+		channels = filterChannelsByImageResolution(channels, model, imageResolutionTier)
 	}
 
 	if len(channels) == 0 {
@@ -236,6 +242,37 @@ func filterChannelsByRequestPathAndModel(channels []int, requestPath string, mod
 	return filtered
 }
 
+// filterChannelsByImageResolution activates capability routing only when at least
+// one candidate explicitly declares tiers for the requested model. This keeps
+// legacy channel groups unchanged until capabilities are configured.
+// Caller must hold channelSyncLock (read lock).
+func filterChannelsByImageResolution(channels []int, model string, tier string) []int {
+	if tier == "" || len(channels) == 0 {
+		return channels
+	}
+
+	declared := false
+	filtered := make([]int, 0, len(channels))
+	for _, channelId := range channels {
+		settings, ok := channel2settings[channelId]
+		if !ok {
+			continue
+		}
+		supported, hasDeclaration := settings.ImageResolutionTierSupport(model, tier)
+		if !hasDeclaration {
+			continue
+		}
+		declared = true
+		if supported {
+			filtered = append(filtered, channelId)
+		}
+	}
+	if !declared {
+		return channels
+	}
+	return filtered
+}
+
 func CacheGetChannel(id int) (*Channel, error) {
 	if !common.MemoryCacheEnabled {
 		return GetChannelById(id, true)
@@ -313,6 +350,10 @@ func CacheUpdateChannel(channel *Channel) {
 	if channel2advancedCustomConfig == nil {
 		channel2advancedCustomConfig = make(map[int]*dto.AdvancedCustomConfig)
 	}
+	if channel2settings == nil {
+		channel2settings = make(map[int]dto.ChannelSettings)
+	}
+	channel2settings[channel.Id] = channel.GetSetting()
 	delete(channel2advancedCustomConfig, channel.Id)
 	if channel.Type == constant.ChannelTypeAdvancedCustom {
 		if config := channel.GetOtherSettings().AdvancedCustom; config != nil {

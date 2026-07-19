@@ -389,3 +389,86 @@ func TestAdvancedCustomSupportedEndpointTypesForModel(t *testing.T) {
 		constant.EndpointTypeAnthropic,
 	}, config.SupportedEndpointTypesForModel("other-model"))
 }
+
+func TestChannelSettingsImageResolutionTierSupport(t *testing.T) {
+	settings := ChannelSettings{
+		ImageResolutionTiers: map[string][]string{
+			" GPT-IMAGE-2 ": {" 1K ", "2k"},
+		},
+	}
+
+	supported, declared := settings.ImageResolutionTierSupport("gpt-image-2", "1k")
+	assert.True(t, supported)
+	assert.True(t, declared)
+
+	supported, declared = settings.ImageResolutionTierSupport(" GPT-IMAGE-2 ", "4K")
+	assert.False(t, supported)
+	assert.True(t, declared)
+
+	supported, declared = settings.ImageResolutionTierSupport("other-model", "1k")
+	assert.False(t, supported)
+	assert.False(t, declared)
+}
+
+func TestChannelSettingsValidateImageResolutionTiers(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings ChannelSettings
+		wantErr  string
+	}{
+		{
+			name: "valid normalized values",
+			settings: ChannelSettings{ImageResolutionTiers: map[string][]string{
+				" GPT-IMAGE-2 ": {" 1K ", "2k", "4K"},
+			}},
+		},
+		{
+			name: "empty model",
+			settings: ChannelSettings{ImageResolutionTiers: map[string][]string{
+				" ": {"1k"},
+			}},
+			wantErr: "model must not be empty",
+		},
+		{
+			name: "empty tiers",
+			settings: ChannelSettings{ImageResolutionTiers: map[string][]string{
+				"gpt-image-2": {},
+			}},
+			wantErr: "must not be empty",
+		},
+		{
+			name: "unsupported tier",
+			settings: ChannelSettings{ImageResolutionTiers: map[string][]string{
+				"gpt-image-2": {"8k"},
+			}},
+			wantErr: "unsupported image resolution tier",
+		},
+		{
+			name: "duplicate normalized tier",
+			settings: ChannelSettings{ImageResolutionTiers: map[string][]string{
+				"gpt-image-2": {"1k", " 1K "},
+			}},
+			wantErr: "duplicate image resolution tier",
+		},
+		{
+			name: "duplicate normalized model",
+			settings: ChannelSettings{ImageResolutionTiers: map[string][]string{
+				"gpt-image-2":   {"1k"},
+				" GPT-IMAGE-2 ": {"2k"},
+			}},
+			wantErr: "duplicate image_resolution_tiers model",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.settings.ValidateImageResolutionTiers()
+			if test.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.wantErr)
+		})
+	}
+}

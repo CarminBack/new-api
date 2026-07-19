@@ -113,3 +113,30 @@ func TestImageRequestUnknownBuiltInPriceKeepsLegacyImageRatio(t *testing.T) {
 	require.Zero(t, meta.ImageUnitPrice)
 	require.Equal(t, 3.0, meta.ImagePriceRatio)
 }
+
+func TestImageSizeTier(t *testing.T) {
+	tests := []struct {
+		name     string
+		size     string
+		wantTier string
+		wantOK   bool
+	}{
+		{name: "auto defaults to 1k", size: "auto", wantTier: "1k", wantOK: true},
+		{name: "empty defaults to 1k", wantTier: "1k", wantOK: true},
+		{name: "1k square", size: "1024x1024", wantTier: "1k", wantOK: true},
+		{name: "portrait reaches 2k", size: "1024x1536", wantTier: "2k", wantOK: true},
+		{name: "2k canvas landscape", size: "2048x1152", wantTier: "2k", wantOK: true},
+		{name: "4k canvas landscape", size: "3840x2160", wantTier: "4k", wantOK: true},
+		{name: "4k canvas portrait", size: "2160x3840", wantTier: "4k", wantOK: true},
+		{name: "invalid", size: "large", wantOK: false},
+		{name: "above 4k", size: "4097x4096", wantOK: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tier, ok := ImageSizeTier(test.size)
+			require.Equal(t, test.wantOK, ok)
+			require.Equal(t, test.wantTier, tier)
+		})
+	}
+}

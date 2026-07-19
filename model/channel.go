@@ -945,6 +945,9 @@ func (channel *Channel) ValidateSettings() error {
 			return err
 		}
 	}
+	if err := channelParams.ValidateImageResolutionTiers(); err != nil {
+		return err
+	}
 	channelOtherSettings := &dto.ChannelOtherSettings{}
 	if channel.OtherSettings != "" {
 		err := common.UnmarshalJsonStr(channel.OtherSettings, channelOtherSettings)

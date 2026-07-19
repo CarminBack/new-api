@@ -86,6 +86,7 @@ export interface ChannelSettings {
   pass_through_body_enabled?: boolean
   system_prompt?: string
   system_prompt_override?: boolean
+  image_resolution_tiers?: Record<string, Array<'1k' | '2k' | '4k'>>
 }
 
 export interface ChannelOtherSettings {

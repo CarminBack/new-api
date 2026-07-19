@@ -11,12 +11,66 @@ import (
 )
 
 type ChannelSettings struct {
-	ForceFormat            bool   `json:"force_format,omitempty"`
-	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
-	Proxy                  string `json:"proxy"`
-	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
-	SystemPrompt           string `json:"system_prompt,omitempty"`
-	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	ForceFormat            bool                `json:"force_format,omitempty"`
+	ThinkingToContent      bool                `json:"thinking_to_content,omitempty"`
+	Proxy                  string              `json:"proxy"`
+	PassThroughBodyEnabled bool                `json:"pass_through_body_enabled,omitempty"`
+	SystemPrompt           string              `json:"system_prompt,omitempty"`
+	SystemPromptOverride   bool                `json:"system_prompt_override,omitempty"`
+	ImageResolutionTiers   map[string][]string `json:"image_resolution_tiers,omitempty"`
+}
+
+// ImageResolutionTierSupport reports whether the channel explicitly declares
+// support for a requested image resolution tier for the model.
+func (s ChannelSettings) ImageResolutionTierSupport(model string, tier string) (supported bool, declared bool) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	tier = strings.ToLower(strings.TrimSpace(tier))
+	if model == "" || tier == "" {
+		return false, false
+	}
+
+	for configuredModel, configuredTiers := range s.ImageResolutionTiers {
+		if strings.ToLower(strings.TrimSpace(configuredModel)) != model {
+			continue
+		}
+		declared = true
+		for _, configuredTier := range configuredTiers {
+			if strings.ToLower(strings.TrimSpace(configuredTier)) == tier {
+				return true, true
+			}
+		}
+	}
+	return false, declared
+}
+
+func (s ChannelSettings) ValidateImageResolutionTiers() error {
+	validTiers := map[string]bool{"1k": true, "2k": true, "4k": true}
+	seenModels := make(map[string]bool, len(s.ImageResolutionTiers))
+	for model, tiers := range s.ImageResolutionTiers {
+		normalizedModel := strings.ToLower(strings.TrimSpace(model))
+		if normalizedModel == "" {
+			return fmt.Errorf("image_resolution_tiers model must not be empty")
+		}
+		if seenModels[normalizedModel] {
+			return fmt.Errorf("duplicate image_resolution_tiers model %q", model)
+		}
+		seenModels[normalizedModel] = true
+		if len(tiers) == 0 {
+			return fmt.Errorf("image_resolution_tiers for model %s must not be empty", model)
+		}
+		seen := make(map[string]bool, len(tiers))
+		for _, tier := range tiers {
+			normalized := strings.ToLower(strings.TrimSpace(tier))
+			if !validTiers[normalized] {
+				return fmt.Errorf("unsupported image resolution tier %q for model %s", tier, model)
+			}
+			if seen[normalized] {
+				return fmt.Errorf("duplicate image resolution tier %q for model %s", tier, model)
+			}
+			seen[normalized] = true
+		}
+	}
+	return nil
 }
 
 type VertexKeyType string

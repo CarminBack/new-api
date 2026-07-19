@@ -30,6 +30,50 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 	return false
 }
 
+func IsChannelEnabledForGroupModelWithImageResolution(group string, modelName string, imageResolutionTier string, channelID int) bool {
+	if !IsChannelEnabledForGroupModel(group, modelName, channelID) {
+		return false
+	}
+	if imageResolutionTier == "" {
+		return true
+	}
+
+	if !common.MemoryCacheEnabled {
+		var abilities []Ability
+		err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, modelName, true).Find(&abilities).Error
+		if err != nil || len(abilities) == 0 {
+			normalized := ratio_setting.FormatMatchingModelName(modelName)
+			if normalized == "" || normalized == modelName {
+				return false
+			}
+			err = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, normalized, true).Find(&abilities).Error
+		}
+		if err != nil {
+			return false
+		}
+		filtered, err := filterAbilitiesByImageResolution(abilities, modelName, imageResolutionTier)
+		if err != nil {
+			return false
+		}
+		for _, ability := range filtered {
+			if ability.ChannelId == channelID {
+				return true
+			}
+		}
+		return false
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	channels := group2model2channels[group][modelName]
+	if len(channels) == 0 {
+		normalized := ratio_setting.FormatMatchingModelName(modelName)
+		channels = group2model2channels[group][normalized]
+	}
+	channels = filterChannelsByImageResolution(channels, modelName, imageResolutionTier)
+	return isChannelIDInList(channels, channelID)
+}
+
 func IsChannelEnabledForAnyGroupModel(groups []string, modelName string, channelID int) bool {
 	if len(groups) == 0 {
 		return false

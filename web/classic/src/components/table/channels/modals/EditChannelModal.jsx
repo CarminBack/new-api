@@ -194,6 +194,7 @@ const EditChannelModal = (props) => {
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
+    setting: '',
     settings: '',
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
@@ -532,8 +533,20 @@ const EditChannelModal = (props) => {
     // 同步更新inputs状态
     setInputs((prev) => ({ ...prev, [key]: value }));
 
-    // 生成setting JSON并更新
-    const newSettings = { ...channelSettings, [key]: value };
+    // 生成setting JSON并更新，保留当前界面未直接编辑的扩展能力字段
+    let preservedSettings = {};
+    if (inputs.setting) {
+      try {
+        preservedSettings = JSON.parse(inputs.setting);
+      } catch (error) {
+        console.error('解析渠道设置失败:', error);
+      }
+    }
+    const newSettings = {
+      ...preservedSettings,
+      ...channelSettings,
+      [key]: value,
+    };
     const settingsJson = JSON.stringify(newSettings);
     handleInputChange('setting', settingsJson);
   };
@@ -1739,15 +1752,24 @@ const EditChannelModal = (props) => {
       localInputs.other = 'v2.1';
     }
 
-    // 生成渠道额外设置JSON
-    const channelExtraSettings = {
-      force_format: localInputs.force_format || false,
-      thinking_to_content: localInputs.thinking_to_content || false,
-      proxy: localInputs.proxy || '',
-      pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
-      system_prompt: localInputs.system_prompt || '',
-      system_prompt_override: localInputs.system_prompt_override || false,
-    };
+    // 生成渠道额外设置JSON，保留当前界面未直接编辑的扩展能力字段
+    let channelExtraSettings = {};
+    if (localInputs.setting) {
+      try {
+        channelExtraSettings = JSON.parse(localInputs.setting);
+      } catch (error) {
+        console.error('解析渠道设置失败:', error);
+      }
+    }
+    channelExtraSettings.force_format = localInputs.force_format || false;
+    channelExtraSettings.thinking_to_content =
+      localInputs.thinking_to_content || false;
+    channelExtraSettings.proxy = localInputs.proxy || '';
+    channelExtraSettings.pass_through_body_enabled =
+      localInputs.pass_through_body_enabled || false;
+    channelExtraSettings.system_prompt = localInputs.system_prompt || '';
+    channelExtraSettings.system_prompt_override =
+      localInputs.system_prompt_override || false;
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
     // 处理 settings 字段（包括企业账户设置和字段透传控制）
