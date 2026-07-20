@@ -193,14 +193,15 @@ func CanvasOAuthToken(c *gin.Context) {
 		return
 	}
 	specs := canvasTokenSpecs(config)
-	for _, spec := range specs {
-		if !service.GroupInUserUsableGroups(user.Group, spec.Group) {
-			canvasOAuthError(c, http.StatusForbidden, "access_denied", fmt.Sprintf("当前账号不可使用 %s 分组", spec.Group))
-			return
-		}
+	availableSpecs, deniedGroup := filterCanvasTokenSpecs(specs, func(group string) bool {
+		return service.GroupInUserUsableGroups(user.Group, group)
+	})
+	if deniedGroup != "" {
+		canvasOAuthError(c, http.StatusForbidden, "access_denied", fmt.Sprintf("当前账号不可使用 %s 分组", deniedGroup))
+		return
 	}
-	tokens := make(map[string]*model.Token, len(specs))
-	for _, spec := range specs {
+	tokens := make(map[string]*model.Token, len(availableSpecs))
+	for _, spec := range availableSpecs {
 		token, provisionErr := getOrCreateCanvasToken(user.Id, spec.Name, spec.Group)
 		if provisionErr != nil {
 			common.SysLog("failed to provision Canvas token: " + provisionErr.Error())
@@ -217,7 +218,7 @@ func CanvasOAuthToken(c *gin.Context) {
 	groupTokens := gin.H{}
 	scopes := make([]string, 0, len(specs)+1)
 	accessToken := ""
-	for _, spec := range specs {
+	for _, spec := range availableSpecs {
 		value := "sk-" + tokens[spec.Capability].Key
 		groupTokens[spec.Capability] = value
 		scopes = append(scopes, spec.Capability)
@@ -246,17 +247,30 @@ type canvasTokenSpec struct {
 	Capability string
 	Name       string
 	Group      string
+	Required   bool
 }
 
 func canvasTokenSpecs(config canvasOAuthConfig) []canvasTokenSpec {
 	if config.VideoOnly {
-		return []canvasTokenSpec{{Capability: "video", Name: config.TokenName, Group: config.VideoGroup}}
+		return []canvasTokenSpec{{Capability: "video", Name: config.TokenName, Group: config.VideoGroup, Required: true}}
 	}
 	return []canvasTokenSpec{
-		{Capability: "image", Name: config.TokenName, Group: config.ImageGroup},
+		{Capability: "image", Name: config.TokenName, Group: config.ImageGroup, Required: true},
 		{Capability: "video", Name: config.TokenName + " (Video)", Group: config.VideoGroup},
 		{Capability: "text", Name: config.TokenName + " (ChatGPT)", Group: config.ChatGPTGroup},
 	}
+}
+
+func filterCanvasTokenSpecs(specs []canvasTokenSpec, canUse func(string) bool) ([]canvasTokenSpec, string) {
+	available := make([]canvasTokenSpec, 0, len(specs))
+	for _, spec := range specs {
+		if canUse(spec.Group) {
+			available = append(available, spec)
+		} else if spec.Required {
+			return nil, spec.Group
+		}
+	}
+	return available, ""
 }
 
 func getOrCreateCanvasToken(userID int, tokenName, tokenGroup string) (*model.Token, error) {

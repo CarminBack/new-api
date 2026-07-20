@@ -82,7 +82,7 @@ func TestCanvasTokenSpecsProvisionThreeGroups(t *testing.T) {
 
 	specs := canvasTokenSpecs(config)
 	require.Equal(t, []canvasTokenSpec{
-		{Capability: "image", Name: "无限画布自动授权", Group: "Image"},
+		{Capability: "image", Name: "无限画布自动授权", Group: "Image", Required: true},
 		{Capability: "video", Name: "无限画布自动授权 (Video)", Group: "Video"},
 		{Capability: "text", Name: "无限画布自动授权 (ChatGPT)", Group: "ChatGPT"},
 	}, specs)
@@ -117,8 +117,35 @@ func TestVideoTokenSpecsProvisionOnlyVideoGroup(t *testing.T) {
 	}
 
 	require.Equal(t, []canvasTokenSpec{
-		{Capability: "video", Name: "Carmin 视频自动授权", Group: "Video"},
+		{Capability: "video", Name: "Carmin 视频自动授权", Group: "Video", Required: true},
 	}, canvasTokenSpecs(config))
+}
+
+func TestFilterCanvasTokenSpecsSkipsUnavailableOptionalGroups(t *testing.T) {
+	specs := []canvasTokenSpec{
+		{Capability: "image", Group: "Image", Required: true},
+		{Capability: "video", Group: "Video"},
+		{Capability: "text", Group: "ChatGPT"},
+	}
+
+	available, deniedGroup := filterCanvasTokenSpecs(specs, func(group string) bool {
+		return group == "Image" || group == "Video"
+	})
+
+	require.Empty(t, deniedGroup)
+	require.Equal(t, specs[:2], available)
+}
+
+func TestFilterCanvasTokenSpecsRejectsUnavailableRequiredGroup(t *testing.T) {
+	specs := []canvasTokenSpec{
+		{Capability: "image", Group: "Image", Required: true},
+		{Capability: "video", Group: "Video"},
+	}
+
+	available, deniedGroup := filterCanvasTokenSpecs(specs, func(string) bool { return false })
+
+	require.Nil(t, available)
+	require.Equal(t, "Image", deniedGroup)
 }
 
 func TestGetOrCreateCanvasTokenDoesNotReenableDisabledToken(t *testing.T) {
