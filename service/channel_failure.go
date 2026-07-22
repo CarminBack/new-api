@@ -26,7 +26,7 @@ type ChannelFailureDecision struct {
 	CountForCircuit bool
 }
 
-func DecideChannelFailure(c *gin.Context, err *types.NewAPIError, retriesRemaining int, specificChannel bool) ChannelFailureDecision {
+func DecideChannelFailure(c *gin.Context, err *types.NewAPIError, retriesRemaining int, specificChannel bool, allowUncertainRetry bool) ChannelFailureDecision {
 	if err == nil {
 		return ChannelFailureDecision{Class: ChannelFailureTerminal, Reason: "no_error"}
 	}
@@ -44,7 +44,9 @@ func DecideChannelFailure(c *gin.Context, err *types.NewAPIError, retriesRemaini
 	}
 
 	decision := classifyChannelFailure(err, message, path)
-	decision.Retry = decision.Class == ChannelFailureTransient || decision.Class == ChannelFailureChannelFatal
+	decision.Retry = decision.Class == ChannelFailureTransient ||
+		decision.Class == ChannelFailureChannelFatal ||
+		(decision.Class == ChannelFailureUncertain && allowUncertainRetry)
 	if responseStarted {
 		decision.Retry = false
 		decision.Reason += ":response_started"

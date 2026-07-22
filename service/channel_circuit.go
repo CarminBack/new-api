@@ -20,6 +20,8 @@ const (
 	channelCircuitWindow    = time.Minute
 	channelCircuitProbeTTL  = 30 * time.Second
 	channelCircuitStateTTL  = time.Hour
+	channelOutageThreshold  = 5
+	channelOutageOpenFor    = 5 * time.Minute
 
 	ginKeyChannelCircuitProbe = "channel_circuit_probe"
 )
@@ -32,7 +34,7 @@ type channelCircuitPolicy struct {
 }
 
 type channelCircuitProbe struct {
-	Key string
+	Keys map[string]struct{}
 }
 
 type memoryChannelCircuitState struct {
@@ -76,6 +78,10 @@ func channelCircuitKey(channelID int, modelName string, requestPath string) stri
 	return fmt.Sprintf("%d:%s", channelID, hex.EncodeToString(sum[:8]))
 }
 
+func channelOutageCircuitKey(channelID int) string {
+	return fmt.Sprintf("%d:all", channelID)
+}
+
 func channelCircuitRedisKeys(key string) (failureKey string, openKey string, probeKey string) {
 	base := channelCircuitNamespace + ":" + key
 	return base + ":fail", base + ":open", base + ":probe"
@@ -91,15 +97,24 @@ func AllowChannelCircuitAttempt(c *gin.Context, channelID int, modelName string,
 	if channelID <= 0 {
 		return true
 	}
-	key := channelCircuitKey(channelID, modelName, requestPath)
-	allowed, probe, err := allowChannelCircuitAttemptRedis(key)
-	if err != nil {
-		allowed, probe = allowChannelCircuitAttemptMemory(key)
+	acquiredProbes := make([]string, 0, 2)
+	for _, key := range []string{channelOutageCircuitKey(channelID), channelCircuitKey(channelID, modelName, requestPath)} {
+		allowed, probe, err := allowChannelCircuitAttemptRedis(key)
+		if err != nil {
+			allowed, probe = allowChannelCircuitAttemptMemory(key)
+		}
+		if !allowed {
+			for _, acquiredKey := range acquiredProbes {
+				clearCurrentChannelCircuitProbe(c, acquiredKey, true)
+			}
+			return false
+		}
+		if probe {
+			markCurrentChannelCircuitProbe(c, key)
+			acquiredProbes = append(acquiredProbes, key)
+		}
 	}
-	if allowed && probe && c != nil {
-		c.Set(ginKeyChannelCircuitProbe, channelCircuitProbe{Key: key})
-	}
-	return allowed
+	return true
 }
 
 func allowChannelCircuitAttemptRedis(key string) (bool, bool, error) {
@@ -167,6 +182,17 @@ func RecordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 	_ = recordChannelCircuitFailureRedis(key, policy)
 	recordChannelCircuitFailureMemory(key, policy)
 	clearCurrentChannelCircuitProbe(c, key, false)
+
+	outageKey := channelOutageCircuitKey(channelID)
+	if class == ChannelFailureUncertain || isCurrentChannelCircuitProbe(c, outageKey) {
+		outagePolicy := channelCircuitPolicy{Threshold: channelOutageThreshold, OpenFor: channelOutageOpenFor}
+		if isCurrentChannelCircuitProbe(c, outageKey) {
+			outagePolicy.Threshold = 1
+		}
+		_ = recordChannelCircuitFailureRedis(outageKey, outagePolicy)
+		recordChannelCircuitFailureMemory(outageKey, outagePolicy)
+		clearCurrentChannelCircuitProbe(c, outageKey, false)
+	}
 }
 
 func isCurrentChannelCircuitProbe(c *gin.Context, key string) bool {
@@ -178,7 +204,25 @@ func isCurrentChannelCircuitProbe(c *gin.Context, key string) bool {
 		return false
 	}
 	probe, ok := value.(channelCircuitProbe)
-	return ok && probe.Key == key
+	if !ok {
+		return false
+	}
+	_, ok = probe.Keys[key]
+	return ok
+}
+
+func markCurrentChannelCircuitProbe(c *gin.Context, key string) {
+	if c == nil {
+		return
+	}
+	probe := channelCircuitProbe{Keys: make(map[string]struct{})}
+	if value, ok := c.Get(ginKeyChannelCircuitProbe); ok {
+		if current, ok := value.(channelCircuitProbe); ok && current.Keys != nil {
+			probe = current
+		}
+	}
+	probe.Keys[key] = struct{}{}
+	c.Set(ginKeyChannelCircuitProbe, probe)
 }
 
 func recordChannelCircuitFailureRedis(key string, policy channelCircuitPolicy) error {
@@ -218,12 +262,22 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 	if channelID <= 0 {
 		return
 	}
-	key := channelCircuitKey(channelID, modelName, requestPath)
-	_ = resetChannelCircuitRedis(key)
+	keys := []string{channelCircuitKey(channelID, modelName, requestPath)}
+	outageKey := channelOutageCircuitKey(channelID)
+	if isCurrentChannelCircuitProbe(c, outageKey) {
+		keys = append(keys, outageKey)
+	}
+	for _, key := range keys {
+		_ = resetChannelCircuitRedis(key)
+	}
 	memoryChannelCircuits.Lock()
-	delete(memoryChannelCircuits.states, key)
+	for _, key := range keys {
+		delete(memoryChannelCircuits.states, key)
+	}
 	memoryChannelCircuits.Unlock()
-	clearCurrentChannelCircuitProbe(c, key, true)
+	for _, key := range keys {
+		clearCurrentChannelCircuitProbe(c, key, true)
+	}
 }
 
 func resetChannelCircuitRedis(key string) error {
@@ -243,6 +297,7 @@ func ReleaseChannelCircuitProbe(c *gin.Context, channelID int, modelName string,
 		return
 	}
 	clearCurrentChannelCircuitProbe(c, channelCircuitKey(channelID, modelName, requestPath), true)
+	clearCurrentChannelCircuitProbe(c, channelOutageCircuitKey(channelID), true)
 }
 
 func clearCurrentChannelCircuitProbe(c *gin.Context, key string, releaseProbe bool) {
@@ -252,7 +307,14 @@ func clearCurrentChannelCircuitProbe(c *gin.Context, key string, releaseProbe bo
 	if !isCurrentChannelCircuitProbe(c, key) {
 		return
 	}
-	c.Set(ginKeyChannelCircuitProbe, nil)
+	value, _ := c.Get(ginKeyChannelCircuitProbe)
+	probe, _ := value.(channelCircuitProbe)
+	delete(probe.Keys, key)
+	if len(probe.Keys) == 0 {
+		c.Set(ginKeyChannelCircuitProbe, nil)
+	} else {
+		c.Set(ginKeyChannelCircuitProbe, probe)
+	}
 	if releaseProbe && channelCircuitRedisEnabled() {
 		_, _, probeKey := channelCircuitRedisKeys(key)
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)

@@ -21,6 +21,7 @@ func TestDecideChannelFailure(t *testing.T) {
 		retriesRemaining int
 		specificChannel  bool
 		responseStarted  bool
+		allowUncertain   bool
 		wantClass        ChannelFailureClass
 		wantRetry        bool
 		wantEvict        bool
@@ -51,6 +52,49 @@ func TestDecideChannelFailure(t *testing.T) {
 			path:             "/v1/responses",
 			apiErr:           types.NewError(errors.New("origin timeout"), types.ErrorCodeBadResponse, types.ErrOptionWithStatusCode(524)),
 			retriesRemaining: 2,
+			wantClass:        ChannelFailureUncertain,
+			wantEvict:        true,
+			wantCountCircuit: true,
+		},
+		{
+			name:             "524 retries when safe text retry is allowed",
+			path:             "/v1/responses",
+			apiErr:           types.NewError(errors.New("origin timeout"), types.ErrorCodeBadResponse, types.ErrOptionWithStatusCode(524)),
+			retriesRemaining: 2,
+			allowUncertain:   true,
+			wantClass:        ChannelFailureUncertain,
+			wantRetry:        true,
+			wantEvict:        true,
+			wantCountCircuit: true,
+		},
+		{
+			name:             "524 does not retry after response started",
+			path:             "/v1/responses",
+			apiErr:           types.NewError(errors.New("origin timeout"), types.ErrorCodeBadResponse, types.ErrOptionWithStatusCode(524)),
+			retriesRemaining: 2,
+			responseStarted:  true,
+			allowUncertain:   true,
+			wantClass:        ChannelFailureUncertain,
+			wantEvict:        true,
+			wantCountCircuit: true,
+		},
+		{
+			name:             "524 does not retry for a specific channel",
+			path:             "/v1/responses",
+			apiErr:           types.NewError(errors.New("origin timeout"), types.ErrorCodeBadResponse, types.ErrOptionWithStatusCode(524)),
+			retriesRemaining: 2,
+			specificChannel:  true,
+			allowUncertain:   true,
+			wantClass:        ChannelFailureUncertain,
+			wantEvict:        true,
+			wantCountCircuit: true,
+		},
+		{
+			name:             "524 does not retry when budget is exhausted",
+			path:             "/v1/responses",
+			apiErr:           types.NewError(errors.New("origin timeout"), types.ErrorCodeBadResponse, types.ErrOptionWithStatusCode(524)),
+			retriesRemaining: 0,
+			allowUncertain:   true,
 			wantClass:        ChannelFailureUncertain,
 			wantEvict:        true,
 			wantCountCircuit: true,
@@ -171,7 +215,7 @@ func TestDecideChannelFailure(t *testing.T) {
 				ctx.Writer.WriteHeaderNow()
 			}
 
-			decision := DecideChannelFailure(ctx, tt.apiErr, tt.retriesRemaining, tt.specificChannel)
+			decision := DecideChannelFailure(ctx, tt.apiErr, tt.retriesRemaining, tt.specificChannel, tt.allowUncertain)
 			require.Equal(t, tt.wantClass, decision.Class)
 			require.Equal(t, tt.wantRetry, decision.Retry)
 			require.Equal(t, tt.wantEvict, decision.EvictAffinity)

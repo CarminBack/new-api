@@ -188,6 +188,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
+	allowUncertainRetry := allowsUncertainCrossChannelRetry(relayInfo, request)
+	uncertainRetryUsed := false
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		relayInfo.RetryIndex = retryParam.GetRetry()
@@ -235,9 +237,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		retryParam.MarkAttempted(channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex))
 
 		_, specificChannel := c.Get("specific_channel_id")
-		decision := service.DecideChannelFailure(c, newAPIError, common.RetryTimes-retryParam.GetRetry(), specificChannel)
+		decision := service.DecideChannelFailure(
+			c,
+			newAPIError,
+			common.RetryTimes-retryParam.GetRetry(),
+			specificChannel,
+			allowUncertainRetry && !uncertainRetryUsed,
+		)
 		if decision.EvictAffinity {
 			service.ClearCurrentChannelAffinityCache(c)
+		}
+		if decision.Retry && decision.Class == service.ChannelFailureUncertain {
+			retryParam.ExcludeChannel(channel)
+			uncertainRetryUsed = true
 		}
 		service.FinishChannelRouteAttempt(c, newAPIError.StatusCode, decision)
 		if decision.CountForCircuit {
@@ -342,7 +354,41 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
 	_, specificChannel := c.Get("specific_channel_id")
-	return service.DecideChannelFailure(c, openaiErr, retryTimes, specificChannel).Retry
+	return service.DecideChannelFailure(c, openaiErr, retryTimes, specificChannel, false).Retry
+}
+
+func allowsUncertainCrossChannelRetry(info *relaycommon.RelayInfo, request dto.Request) bool {
+	if info == nil {
+		return false
+	}
+	if info.RelayFormat == types.RelayFormatClaude {
+		return true
+	}
+	switch info.RelayMode {
+	case relayconstant.RelayModeChatCompletions,
+		relayconstant.RelayModeCompletions,
+		relayconstant.RelayModeEmbeddings,
+		relayconstant.RelayModeModerations,
+		relayconstant.RelayModeRerank:
+		return true
+	case relayconstant.RelayModeResponses:
+		responsesRequest, ok := request.(*dto.OpenAIResponsesRequest)
+		if !ok || len(responsesRequest.Tools) == 0 {
+			return ok
+		}
+		var tools []map[string]any
+		if err := common.Unmarshal(responsesRequest.Tools, &tools); err != nil {
+			return false
+		}
+		for _, tool := range tools {
+			if common.Interface2String(tool["type"]) == "image_generation" {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, recordErrorLog ...bool) {
@@ -663,7 +709,7 @@ func decideTaskChannelFailure(c *gin.Context, taskErr *dto.TaskError, retryTimes
 		underlyingErr = errors.New(message)
 	}
 	apiErr := types.NewOpenAIError(underlyingErr, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
-	decision := service.DecideChannelFailure(c, apiErr, retryTimes, specificChannel)
+	decision := service.DecideChannelFailure(c, apiErr, retryTimes, specificChannel, false)
 	if taskErr.StatusCode == http.StatusForbidden && decision.Class != service.ChannelFailureChannelFatal {
 		return service.ChannelFailureDecision{Class: service.ChannelFailureTerminal, Reason: "task_forbidden"}
 	}

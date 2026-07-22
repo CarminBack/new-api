@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -51,6 +52,18 @@ func TestChannelCircuitRedisIntegration(t *testing.T) {
 	require.False(t, AllowChannelCircuitAttempt(nil, 8, "gpt-test", "/v1/responses"))
 	RecordChannelCircuitSuccess(probeCtx, 8, "gpt-test", "/v1/responses")
 	require.True(t, AllowChannelCircuitAttempt(nil, 8, "gpt-test", "/v1/responses"))
+
+	for i := 0; i < channelOutageThreshold; i++ {
+		RecordChannelCircuitFailure(nil, 8, fmt.Sprintf("gpt-%d", i), "/v1/responses", ChannelFailureUncertain)
+	}
+	require.False(t, AllowChannelCircuitAttempt(nil, 8, "healthy-model", "/v1/embeddings"))
+
+	now = now.Add(channelOutageOpenFor + time.Millisecond)
+	outageProbeCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelCircuitAttempt(outageProbeCtx, 8, "healthy-model", "/v1/embeddings"))
+	require.False(t, AllowChannelCircuitAttempt(nil, 8, "other-model", "/v1/embeddings"))
+	RecordChannelCircuitSuccess(outageProbeCtx, 8, "healthy-model", "/v1/embeddings")
+	require.True(t, AllowChannelCircuitAttempt(nil, 8, "other-model", "/v1/embeddings"))
 }
 
 func resetMemoryChannelCircuitsForTest() {
@@ -182,6 +195,67 @@ func TestUncertainFailuresOpenCircuitAtLowerThreshold(t *testing.T) {
 	require.True(t, AllowChannelCircuitAttempt(nil, 8, "gpt-test", "/v1/responses"))
 	RecordChannelCircuitFailure(nil, 8, "gpt-test", "/v1/responses", ChannelFailureUncertain)
 	require.False(t, AllowChannelCircuitAttempt(nil, 8, "gpt-test", "/v1/responses"))
+}
+
+func TestUncertainFailuresAcrossRoutesOpenChannelOutageCircuit(t *testing.T) {
+	originalRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	resetMemoryChannelCircuitsForTest()
+	t.Cleanup(func() {
+		common.RedisEnabled = originalRedisEnabled
+		resetMemoryChannelCircuitsForTest()
+	})
+
+	routes := []struct {
+		model string
+		path  string
+	}{
+		{model: "gpt-a", path: "/v1/responses"},
+		{model: "gpt-a", path: "/v1/chat/completions"},
+		{model: "gpt-b", path: "/v1/responses"},
+		{model: "gpt-b", path: "/v1/chat/completions"},
+		{model: "gpt-c", path: "/v1/responses"},
+	}
+	for i, route := range routes {
+		RecordChannelCircuitFailure(nil, 8, route.model, route.path, ChannelFailureUncertain)
+		if i == 1 {
+			RecordChannelCircuitSuccess(nil, 8, "healthy-model", "/v1/embeddings")
+		}
+	}
+
+	require.False(t, AllowChannelCircuitAttempt(nil, 8, "healthy-model", "/v1/embeddings"))
+	require.True(t, AllowChannelCircuitAttempt(nil, 9, "healthy-model", "/v1/embeddings"))
+}
+
+func TestChannelOutageHalfOpenProbeReopensThenRecovers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalRedisEnabled := common.RedisEnabled
+	originalNow := channelCircuitNow
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	common.RedisEnabled = false
+	channelCircuitNow = func() time.Time { return now }
+	resetMemoryChannelCircuitsForTest()
+	t.Cleanup(func() {
+		common.RedisEnabled = originalRedisEnabled
+		channelCircuitNow = originalNow
+		resetMemoryChannelCircuitsForTest()
+	})
+
+	for i := 0; i < channelOutageThreshold; i++ {
+		RecordChannelCircuitFailure(nil, 8, fmt.Sprintf("gpt-%d", i), "/v1/responses", ChannelFailureUncertain)
+	}
+	now = now.Add(channelOutageOpenFor + time.Millisecond)
+	probeCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelCircuitAttempt(probeCtx, 8, "healthy-model", "/v1/embeddings"))
+	require.False(t, AllowChannelCircuitAttempt(nil, 8, "other-model", "/v1/embeddings"))
+	RecordChannelCircuitFailure(probeCtx, 8, "healthy-model", "/v1/embeddings", ChannelFailureTransient)
+	require.False(t, AllowChannelCircuitAttempt(nil, 8, "other-model", "/v1/embeddings"))
+
+	now = now.Add(channelOutageOpenFor + time.Millisecond)
+	recoveryCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelCircuitAttempt(recoveryCtx, 8, "healthy-model", "/v1/embeddings"))
+	RecordChannelCircuitSuccess(recoveryCtx, 8, "healthy-model", "/v1/embeddings")
+	require.True(t, AllowChannelCircuitAttempt(nil, 8, "other-model", "/v1/embeddings"))
 }
 
 func TestChannelRouteAttemptsAreBoundedAndExcludeSecrets(t *testing.T) {
