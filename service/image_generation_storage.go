@@ -4,22 +4,29 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
 )
 
-const imageGenerationRetention = 7 * 24 * time.Hour
+const (
+	imageGenerationRetention         = 7 * 24 * time.Hour
+	imageGenerationURLArchiveTimeout = 15 * time.Second
+)
 
 func imageGenerationStorageDir() string {
 	if dir := strings.TrimSpace(os.Getenv("IMAGE_GENERATION_STORAGE_DIR")); dir != "" {
@@ -54,6 +61,13 @@ func SaveImageGenerationResponse(c *gin.Context, info *relaycommon.RelayInfo, re
 	}
 
 	now := time.Now()
+	archiveBaseContext := context.Background()
+	if c.Request != nil {
+		archiveBaseContext = c.Request.Context()
+	}
+	archiveContext, cancelArchive := context.WithTimeout(archiveBaseContext, imageGenerationURLArchiveTimeout)
+	defer cancelArchive()
+
 	useTimeSeconds := int64(0)
 	if !info.StartTime.IsZero() {
 		useTimeSeconds = int64(now.Sub(info.StartTime).Seconds())
@@ -71,12 +85,31 @@ func SaveImageGenerationResponse(c *gin.Context, info *relaycommon.RelayInfo, re
 	}
 
 	for index, item := range imageResponse.Data {
-		if strings.TrimSpace(item.B64Json) == "" {
-			continue
+		var mimeType string
+		var ext string
+		var raw []byte
+		var err error
+		source := "b64_json"
+		if strings.TrimSpace(item.B64Json) != "" {
+			mimeType, ext, raw, err = decodeImageGenerationBase64(item.B64Json)
+		} else if strings.TrimSpace(item.Url) != "" {
+			source = "url:" + imageGenerationURLHost(item.Url)
+			mimeType, ext, raw, err = downloadImageGenerationURL(archiveContext, item.Url)
+		} else {
+			err = fmt.Errorf("response item has neither b64_json nor url")
+			source = "unsupported"
 		}
-		mimeType, ext, raw, err := decodeImageGenerationBase64(item.B64Json)
 		if err != nil {
-			logger.LogWarn(c, fmt.Sprintf("failed to decode image generation response image %d: %s", index, err.Error()))
+			logger.LogWarn(c, fmt.Sprintf(
+				"image generation archive skipped: request_id=%s user_id=%d channel_id=%d model=%s image_index=%d source=%s reason=%s",
+				requestID,
+				info.UserId,
+				info.ChannelId,
+				info.OriginModelName,
+				index,
+				common.MaskSensitiveInfo(source),
+				common.MaskSensitiveInfo(err.Error()),
+			))
 			continue
 		}
 
@@ -125,6 +158,84 @@ func SaveImageGenerationResponse(c *gin.Context, info *relaycommon.RelayInfo, re
 			_ = os.Remove(absolutePath)
 		}
 	}
+}
+
+func downloadImageGenerationURL(ctx context.Context, rawURL string) (mimeType string, ext string, raw []byte, err error) {
+	fetchSetting := system_setting.GetFetchSetting()
+	if fetchSetting == nil || !fetchSetting.EnableSSRFProtection {
+		return "", "", nil, fmt.Errorf("SSRF protection must be enabled for URL image archiving")
+	}
+	if err := ValidateSSRFProtectedFetchURL(rawURL); err != nil {
+		return "", "", nil, fmt.Errorf("URL rejected by SSRF protection: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to create image download request: %w", err)
+	}
+	req.Header.Set("Accept", "image/png,image/jpeg,image/webp,image/gif")
+
+	client := GetSSRFProtectedHTTPClient()
+	if client == nil {
+		return "", "", nil, fmt.Errorf("SSRF-protected HTTP client is not initialized")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("image download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	maxBytes := int64(constant.MaxFileDownloadMB) * 1024 * 1024
+	if maxBytes <= 0 {
+		maxBytes = 64 * 1024 * 1024
+	}
+	return decodeImageGenerationURLResponse(resp, maxBytes)
+}
+
+func decodeImageGenerationURLResponse(resp *http.Response, maxBytes int64) (mimeType string, ext string, raw []byte, err error) {
+	if resp == nil || resp.Body == nil {
+		return "", "", nil, fmt.Errorf("image download returned an empty response")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", "", nil, fmt.Errorf("image download returned HTTP %d", resp.StatusCode)
+	}
+	if maxBytes <= 0 {
+		return "", "", nil, fmt.Errorf("invalid image archive size limit")
+	}
+	if resp.ContentLength > maxBytes {
+		return "", "", nil, fmt.Errorf("image download size %d exceeds limit %d", resp.ContentLength, maxBytes)
+	}
+
+	raw, err = io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to read image download: %w", err)
+	}
+	if int64(len(raw)) > maxBytes {
+		return "", "", nil, fmt.Errorf("image download exceeds limit %d", maxBytes)
+	}
+
+	mimeType = http.DetectContentType(raw)
+	switch mimeType {
+	case "image/png":
+		ext = "png"
+	case "image/jpeg":
+		ext = "jpg"
+	case "image/webp":
+		ext = "webp"
+	case "image/gif":
+		ext = "gif"
+	default:
+		return "", "", nil, fmt.Errorf("unsupported downloaded image content type: %s", mimeType)
+	}
+	return mimeType, ext, raw, nil
+}
+
+func imageGenerationURLHost(rawURL string) string {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil || parsedURL.Hostname() == "" {
+		return "invalid"
+	}
+	return parsedURL.Hostname()
 }
 
 func decodeImageGenerationBase64(data string) (mimeType string, ext string, raw []byte, err error) {

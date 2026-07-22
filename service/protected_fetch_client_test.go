@@ -301,6 +301,15 @@ func TestProtectedFetchRoundTripperNoProxyUsesProtectedDialer(t *testing.T) {
 	require.Empty(t, dialed)
 }
 
+func TestProtectedFetchRedirectRejectsPrivateTarget(t *testing.T) {
+	configureSSRFTestFetchSetting(t)
+	req := &http.Request{URL: mustParseURL(t, "http://127.0.0.1/private.png")}
+
+	err := checkProtectedFetchRedirect(req, nil)
+
+	require.ErrorContains(t, err, "private IP address not allowed")
+}
+
 func TestProtectedFetchRoundTripperReusesTransportPerProxy(t *testing.T) {
 	client := newProtectedFetchHTTPClientWithDialer(nil, nil, nil)
 	roundTripper, ok := client.Transport.(*ssrfProtectedRoundTripper)
