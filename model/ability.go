@@ -96,6 +96,10 @@ func selectAbilitiesByRetry(abilities []Ability, retry int) []Ability {
 }
 
 func GetChannel(group string, model string, retry int, requestPath string, imageResolutionTier string) (*Channel, error) {
+	return GetChannelWithExclusions(group, model, retry, requestPath, imageResolutionTier, nil)
+}
+
+func GetChannelWithExclusions(group string, model string, retry int, requestPath string, imageResolutionTier string, exclusions ChannelKeyExclusions) (*Channel, error) {
 	var abilities []Ability
 	if err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Find(&abilities).Error; err != nil {
 		return nil, err
@@ -103,6 +107,10 @@ func GetChannel(group string, model string, retry int, requestPath string, image
 	abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, model)
 	var err error
 	abilities, err = filterAbilitiesByImageResolution(abilities, model, imageResolutionTier)
+	if err != nil {
+		return nil, err
+	}
+	abilities, err = filterAbilitiesByKeyExclusions(abilities, exclusions)
 	if err != nil {
 		return nil, err
 	}
@@ -132,6 +140,31 @@ func GetChannel(group string, model string, retry int, requestPath string, image
 		return nil, err
 	}
 	return channel, nil
+}
+
+func filterAbilitiesByKeyExclusions(abilities []Ability, exclusions ChannelKeyExclusions) ([]Ability, error) {
+	if len(abilities) == 0 || len(exclusions) == 0 {
+		return abilities, nil
+	}
+	channelIDs := make([]int, 0, len(exclusions))
+	for channelID := range exclusions {
+		channelIDs = append(channelIDs, channelID)
+	}
+	var channels []*Channel
+	if err := DB.Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	available := make(map[int]bool, len(channels))
+	for _, channel := range channels {
+		available[channel.Id] = channel.HasUntriedEnabledKey(exclusions[channel.Id])
+	}
+	filtered := make([]Ability, 0, len(abilities))
+	for _, ability := range abilities {
+		if excludedKeys, attempted := exclusions[ability.ChannelId]; !attempted || available[ability.ChannelId] || len(excludedKeys) == 0 {
+			filtered = append(filtered, ability)
+		}
+	}
+	return filtered, nil
 }
 
 func filterAbilitiesByImageResolution(abilities []Ability, model string, tier string) ([]Ability, error) {

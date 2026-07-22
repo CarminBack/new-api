@@ -22,7 +22,6 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -211,6 +210,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		service.BeginChannelRouteAttempt(c, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex))
 
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
@@ -225,13 +225,27 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		if newAPIError == nil {
 			relayInfo.LastError = nil
+			service.FinishSuccessfulChannelRouteAttempt(c)
+			service.RecordChannelCircuitSuccess(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
 			return
 		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+		retryParam.MarkAttempted(channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex))
 
-		willRetry := shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		_, specificChannel := c.Get("specific_channel_id")
+		decision := service.DecideChannelFailure(c, newAPIError, common.RetryTimes-retryParam.GetRetry(), specificChannel)
+		if decision.EvictAffinity {
+			service.ClearCurrentChannelAffinityCache(c)
+		}
+		service.FinishChannelRouteAttempt(c, newAPIError.StatusCode, decision)
+		if decision.CountForCircuit {
+			service.RecordChannelCircuitFailure(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class)
+		} else {
+			service.ReleaseChannelCircuitProbe(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
+		}
+		willRetry := decision.Retry
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, !willRetry)
 
 		if !willRetry {
@@ -318,43 +332,17 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 
-	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName)
+	newAPIError := middleware.SetupContextForSelectedChannelWithExclusions(c, channel, info.OriginModelName, retryParam.ExcludedKeys(channel.Id))
 	if newAPIError != nil {
+		service.ReleaseChannelCircuitProbe(c, channel.Id, info.OriginModelName, c.Request.URL.Path)
 		return nil, newAPIError
 	}
 	return channel, nil
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
-	if openaiErr == nil {
-		return false
-	}
-	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
-		return false
-	}
-	if types.IsChannelError(openaiErr) {
-		return true
-	}
-	if types.IsSkipRetryError(openaiErr) {
-		return false
-	}
-	if retryTimes <= 0 {
-		return false
-	}
-	if _, ok := c.Get("specific_channel_id"); ok {
-		return false
-	}
-	code := openaiErr.StatusCode
-	if code >= 200 && code < 300 {
-		return false
-	}
-	if code < 100 || code > 599 {
-		return true
-	}
-	if operation_setting.IsAlwaysSkipRetryCode(openaiErr.GetErrorCode()) {
-		return false
-	}
-	return operation_setting.ShouldRetryByStatusCode(code)
+	_, specificChannel := c.Get("specific_channel_id")
+	return service.DecideChannelFailure(c, openaiErr, retryTimes, specificChannel).Retry
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, recordErrorLog ...bool) {
@@ -393,6 +381,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
+		service.AppendChannelRouteAttemptsAdminInfo(c, adminInfo, false)
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
@@ -525,7 +514,7 @@ func RelayTask(c *gin.Context) {
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
 			channel = lockedCh
 			if retryParam.GetRetry() > 0 {
-				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
+				if setupErr := middleware.SetupContextForSelectedChannelWithExclusions(c, channel, relayInfo.OriginModelName, retryParam.ExcludedKeys(channel.Id)); setupErr != nil {
 					taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
 					break
 				}
@@ -551,13 +540,27 @@ func RelayTask(c *gin.Context) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		service.BeginChannelRouteAttempt(c, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex))
 
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
 		if taskErr == nil {
+			service.FinishSuccessfulChannelRouteAttempt(c)
+			service.RecordChannelCircuitSuccess(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
 			break
 		}
+		retryParam.MarkAttempted(channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex))
 
-		willRetry := shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry())
+		decision := decideTaskChannelFailure(c, taskErr, common.RetryTimes-retryParam.GetRetry())
+		if decision.EvictAffinity {
+			service.ClearCurrentChannelAffinityCache(c)
+		}
+		service.FinishChannelRouteAttempt(c, taskErr.StatusCode, decision)
+		if decision.CountForCircuit {
+			service.RecordChannelCircuitFailure(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class)
+		} else {
+			service.ReleaseChannelCircuitProbe(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
+		}
+		willRetry := decision.Retry
 		if !taskErr.LocalError {
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
@@ -619,46 +622,50 @@ func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
 }
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError, retryTimes int) bool {
+	return decideTaskChannelFailure(c, taskErr, retryTimes).Retry
+}
+
+func decideTaskChannelFailure(c *gin.Context, taskErr *dto.TaskError, retryTimes int) service.ChannelFailureDecision {
 	if taskErr == nil {
-		return false
-	}
-	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
-		return false
-	}
-	if retryTimes <= 0 {
-		return false
-	}
-	if _, ok := c.Get("specific_channel_id"); ok {
-		return false
-	}
-	if taskErr.StatusCode == http.StatusTooManyRequests {
-		return true
-	}
-	if taskErr.StatusCode == 307 {
-		return true
-	}
-	if taskErr.StatusCode/100 == 5 {
-		// 超时不重试
-		if operation_setting.IsAlwaysSkipRetryStatusCode(taskErr.StatusCode) {
-			return false
-		}
-		return true
-	}
-	if taskErr.StatusCode == http.StatusBadRequest {
-		return false
-	}
-	if taskErr.StatusCode == http.StatusForbidden {
-		return false
-	}
-	if taskErr.StatusCode == 408 {
-		// azure处理超时不重试
-		return false
+		return service.ChannelFailureDecision{Class: service.ChannelFailureTerminal, Reason: "no_error"}
 	}
 	if taskErr.LocalError {
-		return false
+		return service.ChannelFailureDecision{Class: service.ChannelFailureTerminal, Reason: "local_error"}
 	}
-	if taskErr.StatusCode/100 == 2 {
-		return false
+	if taskErr.StatusCode == http.StatusTemporaryRedirect {
+		decision := service.ChannelFailureDecision{
+			Class:           service.ChannelFailureTransient,
+			Reason:          "task_temporary_redirect",
+			Retry:           true,
+			EvictAffinity:   true,
+			CountForCircuit: true,
+		}
+		if retryTimes <= 0 {
+			decision.Retry = false
+			decision.Reason += ":budget_exhausted"
+		}
+		if _, specificChannel := c.Get("specific_channel_id"); specificChannel {
+			decision.Retry = false
+			decision.Reason += ":specific_channel"
+		}
+		return decision
 	}
-	return true
+	_, specificChannel := c.Get("specific_channel_id")
+	underlyingErr := taskErr.Error
+	if underlyingErr == nil {
+		message := taskErr.Message
+		if message == "" {
+			message = taskErr.Code
+		}
+		if message == "" {
+			message = http.StatusText(taskErr.StatusCode)
+		}
+		underlyingErr = errors.New(message)
+	}
+	apiErr := types.NewOpenAIError(underlyingErr, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
+	decision := service.DecideChannelFailure(c, apiErr, retryTimes, specificChannel)
+	if taskErr.StatusCode == http.StatusForbidden && decision.Class != service.ChannelFailureChannelFatal {
+		return service.ChannelFailureDecision{Class: service.ChannelFailureTerminal, Reason: "task_forbidden"}
+	}
+	return decision
 }

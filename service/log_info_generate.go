@@ -106,6 +106,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	}
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
+	AppendChannelRouteAttemptsAdminInfo(ctx, adminInfo, true)
 
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)

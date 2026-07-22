@@ -197,8 +197,18 @@ func (channel *Channel) GetKeys() []string {
 }
 
 func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
+	return channel.GetNextEnabledKeyExcluding(nil)
+}
+
+// GetNextEnabledKeyExcluding selects an enabled key that has not already been
+// attempted by the current request. The exclusion is request-local and does not
+// change persisted key status.
+func (channel *Channel) GetNextEnabledKeyExcluding(excluded map[int]struct{}) (string, int, *types.NewAPIError) {
 	// If not in multi-key mode, return the original key string directly.
 	if !channel.ChannelInfo.IsMultiKey {
+		if _, ok := excluded[0]; ok {
+			return "", 0, types.NewError(errors.New("no untried keys"), types.ErrorCodeChannelNoAvailableKey)
+		}
 		return channel.Key, 0, nil
 	}
 
@@ -225,10 +235,11 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		return common.ChannelStatusEnabled
 	}
 
-	// Collect indexes of enabled keys
+	// Collect indexes of enabled, untried keys.
 	enabledIdx := make([]int, 0, len(keys))
 	for i := range keys {
-		if getStatus(i) == common.ChannelStatusEnabled {
+		_, wasAttempted := excluded[i]
+		if getStatus(i) == common.ChannelStatusEnabled && !wasAttempted {
 			enabledIdx = append(enabledIdx, i)
 		}
 	}
@@ -268,7 +279,8 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		}
 		for i := 0; i < len(keys); i++ {
 			idx := (start + i) % len(keys)
-			if getStatus(idx) == common.ChannelStatusEnabled {
+			_, wasAttempted := excluded[idx]
+			if getStatus(idx) == common.ChannelStatusEnabled && !wasAttempted {
 				// update polling index for next call (point to the next position)
 				channel.ChannelInfo.MultiKeyPollingIndex = (idx + 1) % len(keys)
 				return keys[idx], idx, nil
@@ -280,6 +292,26 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		// Unknown mode, default to first enabled key (or original key string)
 		return keys[enabledIdx[0]], enabledIdx[0], nil
 	}
+}
+
+func (channel *Channel) HasUntriedEnabledKey(excluded map[int]struct{}) bool {
+	if len(excluded) == 0 {
+		return true
+	}
+	if !channel.ChannelInfo.IsMultiKey {
+		_, attempted := excluded[0]
+		return !attempted
+	}
+	keys := channel.GetKeys()
+	for i := range keys {
+		if status, ok := channel.ChannelInfo.MultiKeyStatusList[i]; ok && status != common.ChannelStatusEnabled {
+			continue
+		}
+		if _, attempted := excluded[i]; !attempted {
+			return true
+		}
+	}
+	return false
 }
 
 func (channel *Channel) SaveChannelInfo() error {

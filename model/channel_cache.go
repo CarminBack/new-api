@@ -115,10 +115,16 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
+type ChannelKeyExclusions map[int]map[int]struct{}
+
 func GetRandomSatisfiedChannel(group string, model string, retry int, requestPath string, imageResolutionTier string) (*Channel, error) {
+	return GetRandomSatisfiedChannelWithExclusions(group, model, retry, requestPath, imageResolutionTier, nil)
+}
+
+func GetRandomSatisfiedChannelWithExclusions(group string, model string, retry int, requestPath string, imageResolutionTier string, exclusions ChannelKeyExclusions) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry, requestPath, imageResolutionTier)
+		return GetChannelWithExclusions(group, model, retry, requestPath, imageResolutionTier, exclusions)
 	}
 
 	channelSyncLock.RLock()
@@ -135,6 +141,10 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, requestPat
 		channels = filterChannelsByImageResolution(channels, model, imageResolutionTier)
 	}
 
+	if len(channels) == 0 {
+		return nil, nil
+	}
+	channels = filterChannelsByKeyExclusions(channels, exclusions)
 	if len(channels) == 0 {
 		return nil, nil
 	}
@@ -212,6 +222,28 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, requestPat
 	}
 	// return null if no channel is not found
 	return nil, errors.New("channel not found")
+}
+
+// filterChannelsByKeyExclusions removes single-key channels that were already
+// attempted and multi-key channels whose enabled keys were all attempted.
+// Caller must hold channelSyncLock.
+func filterChannelsByKeyExclusions(channels []int, exclusions ChannelKeyExclusions) []int {
+	if len(exclusions) == 0 {
+		return channels
+	}
+	filtered := make([]int, 0, len(channels))
+	for _, channelID := range channels {
+		excludedKeys, attempted := exclusions[channelID]
+		if !attempted {
+			filtered = append(filtered, channelID)
+			continue
+		}
+		channel, ok := channelsIDM[channelID]
+		if ok && channel.HasUntriedEnabledKey(excludedKeys) {
+			filtered = append(filtered, channelID)
+		}
+	}
+	return filtered
 }
 
 // filterChannelsByRequestPathAndModel restricts candidates by request path and
