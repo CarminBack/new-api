@@ -61,11 +61,7 @@ func SaveImageGenerationResponse(c *gin.Context, info *relaycommon.RelayInfo, re
 	}
 
 	now := time.Now()
-	archiveBaseContext := context.Background()
-	if c.Request != nil {
-		archiveBaseContext = c.Request.Context()
-	}
-	archiveContext, cancelArchive := context.WithTimeout(archiveBaseContext, imageGenerationURLArchiveTimeout)
+	archiveContext, cancelArchive := context.WithTimeout(context.Background(), imageGenerationURLArchiveTimeout)
 	defer cancelArchive()
 
 	useTimeSeconds := int64(0)
