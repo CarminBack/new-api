@@ -4,8 +4,11 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestFlattenAistarsLabSeedanceModels(t *testing.T) {
@@ -152,4 +155,51 @@ func TestNormalizeAistarsLabSyncRequestUsesConfiguredMarkupRate(t *testing.T) {
 	normalized := normalizeAistarsLabSyncRequest(AistarsLabSyncRequest{})
 
 	assert.Equal(t, 1.42, normalized.MarkupRate)
+}
+
+func TestUpsertAistarsLabSeedanceModelMetaDeletesOnlyRemovedManagedAliases(t *testing.T) {
+	require.NoError(t, model.DB.AutoMigrate(&model.Model{}))
+
+	const (
+		activeAlias    = "seedance-test-c991"
+		removedAlias   = "seedance-test-c992"
+		unrelatedAlias = "seedance-test-c993"
+		officialAlias  = "seedance-test-c994"
+	)
+	names := []string{activeAlias, removedAlias, unrelatedAlias, officialAlias}
+	require.NoError(t, model.DB.Unscoped().Where("model_name IN ?", names).Delete(&model.Model{}).Error)
+	t.Cleanup(func() {
+		_ = model.DB.Unscoped().Where("model_name IN ?", names).Delete(&model.Model{}).Error
+	})
+
+	for _, item := range []*model.Model{
+		{ModelName: activeAlias, VendorID: 17, Status: 0, SyncOfficial: 0, NameRule: model.NameRuleExact},
+		{ModelName: removedAlias, VendorID: 17, Status: 1, SyncOfficial: 0, NameRule: model.NameRuleExact},
+		{ModelName: unrelatedAlias, VendorID: 99, Status: 1, SyncOfficial: 0, NameRule: model.NameRuleExact},
+		{ModelName: officialAlias, VendorID: 17, Status: 1, SyncOfficial: 1, NameRule: model.NameRuleExact},
+	} {
+		require.NoError(t, item.Insert())
+	}
+
+	require.NoError(t, upsertAistarsLabSeedanceModelMeta([]AistarsLabSeedanceModel{{
+		PublicModel: activeAlias,
+		Channel:     "991",
+		Quality:     "test",
+		BillingUnit: ratio_setting.TaskBillingUnitPerSecond,
+	}}))
+
+	var active model.Model
+	require.NoError(t, model.DB.Where("model_name = ?", activeAlias).First(&active).Error)
+	assert.Equal(t, 1, active.Status)
+
+	var removed model.Model
+	require.ErrorIs(t, model.DB.Where("model_name = ?", removedAlias).First(&removed).Error, gorm.ErrRecordNotFound)
+	require.NoError(t, model.DB.Unscoped().Where("model_name = ?", removedAlias).First(&removed).Error)
+	assert.True(t, removed.DeletedAt.Valid)
+
+	for _, name := range []string{unrelatedAlias, officialAlias} {
+		var preserved model.Model
+		require.NoError(t, model.DB.Where("model_name = ?", name).First(&preserved).Error)
+		assert.False(t, preserved.DeletedAt.Valid)
+	}
 }

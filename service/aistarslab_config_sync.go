@@ -544,9 +544,10 @@ func upsertAistarsLabSeedanceModelMeta(modelsToSync []AistarsLabSeedanceModel) e
 		}
 	}
 	if len(activeAliases) > 0 {
-		if err := model.DB.Model(&model.Model{}).
+		if err := model.DB.
+			Where("vendor_id = ? AND sync_official = ? AND name_rule = ?", 17, 0, model.NameRuleExact).
 			Where("model_name LIKE ? AND model_name NOT IN ?", "seedance-%-c%", activeAliases).
-			Update("status", 0).Error; err != nil {
+			Delete(&model.Model{}).Error; err != nil {
 			return err
 		}
 	}
