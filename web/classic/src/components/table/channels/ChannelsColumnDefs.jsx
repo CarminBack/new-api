@@ -51,6 +51,17 @@ import {
 } from '@douyinfe/semi-icons';
 import { FaRandom } from 'react-icons/fa';
 
+const getSafeApiUrl = (value) => {
+  try {
+    const url = new URL(String(value || '').trim());
+    return url.protocol === 'http:' || url.protocol === 'https:'
+      ? url.href
+      : '';
+  } catch {
+    return '';
+  }
+};
+
 // Render functions
 const renderType = (type, record = {}, t) => {
   const channelInfo = record?.channel_info;
@@ -348,6 +359,19 @@ export const getChannelsColumns = ({
           upstreamUpdateMeta.supported &&
           upstreamUpdateMeta.enabled &&
           (pendingAddCount > 0 || pendingRemoveCount > 0);
+        const safeApiUrl = getSafeApiUrl(record.base_url);
+        const linkedName = safeApiUrl ? (
+          <a
+            href={safeApiUrl}
+            target='_blank'
+            rel='noopener noreferrer'
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span>{text}</span>
+          </a>
+        ) : (
+          <span>{text}</span>
+        );
         const nameNode =
           record.remark && record.remark.trim() !== '' ? (
             <Tooltip
@@ -377,10 +401,10 @@ export const getChannelsColumns = ({
               trigger='hover'
               position='topLeft'
             >
-              <span>{text}</span>
+              {linkedName}
             </Tooltip>
           ) : (
-            <span>{text}</span>
+            linkedName
           );
 
         if (!passThroughEnabled && !showUpstreamUpdateTag) {
