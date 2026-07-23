@@ -149,6 +149,13 @@ func main() {
 		}
 		return a
 	}
+	service.GetTaskAdaptorForChannelFunc = func(platform constant.TaskPlatform, baseURL string) service.TaskPollingAdaptor {
+		a := relay.GetTaskAdaptorForChannel(platform, baseURL)
+		if a == nil {
+			return nil
+		}
+		return a
+	}
 
 	// Register the periodic channel test, upstream model update, and async task
 	// polling (Midjourney / Suno / video) jobs as scheduled system tasks

@@ -157,6 +157,44 @@ func TestNormalizeAistarsLabSyncRequestUsesConfiguredMarkupRate(t *testing.T) {
 	assert.Equal(t, 1.42, normalized.MarkupRate)
 }
 
+func TestReplaceAistarsLabCapabilitiesUsesIndependentFullSnapshot(t *testing.T) {
+	aistarslabCapabilityMu.Lock()
+	original := aistarslabCapabilities
+	aistarslabCapabilities = make(map[string]AistarsLabSeedanceModel)
+	aistarslabCapabilityMu.Unlock()
+	t.Cleanup(func() {
+		aistarslabCapabilityMu.Lock()
+		aistarslabCapabilities = original
+		aistarslabCapabilityMu.Unlock()
+	})
+
+	modes := []string{"text2video", "image2video"}
+	ratios := []string{"16:9", "9:16"}
+	replaceAistarsLabCapabilities([]AistarsLabSeedanceModel{{
+		PublicModel:  "seedance-test-c991",
+		Modes:        modes,
+		AspectRatios: ratios,
+	}})
+	modes[0] = "changed"
+	ratios[0] = "changed"
+
+	first, ok := GetAistarsLabSeedanceCapability("seedance-test-c991")
+	require.True(t, ok)
+	assert.Equal(t, []string{"text2video", "image2video"}, first.Modes)
+	assert.Equal(t, []string{"16:9", "9:16"}, first.AspectRatios)
+
+	first.Modes[0] = "caller-change"
+	again, ok := GetAistarsLabSeedanceCapability("seedance-test-c991")
+	require.True(t, ok)
+	assert.Equal(t, "text2video", again.Modes[0])
+
+	replaceAistarsLabCapabilities([]AistarsLabSeedanceModel{{PublicModel: "seedance-test-c992"}})
+	_, oldExists := GetAistarsLabSeedanceCapability("seedance-test-c991")
+	_, newExists := GetAistarsLabSeedanceCapability("seedance-test-c992")
+	assert.False(t, oldExists)
+	assert.True(t, newExists)
+}
+
 func TestUpsertAistarsLabSeedanceModelMetaDeletesOnlyRemovedManagedAliases(t *testing.T) {
 	require.NoError(t, model.DB.AutoMigrate(&model.Model{}))
 

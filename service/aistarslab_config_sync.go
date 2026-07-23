@@ -38,6 +38,8 @@ var (
 	aistarslabRawSeedancePattern   = regexp.MustCompile(`^([0-9]+:)?seedance-2\.0`)
 	aistarslabSyncOnce             sync.Once
 	aistarslabSyncRunning          atomic.Bool
+	aistarslabCapabilityMu         sync.RWMutex
+	aistarslabCapabilities         = make(map[string]AistarsLabSeedanceModel)
 )
 
 type AistarsLabSyncRequest struct {
@@ -207,8 +209,37 @@ func SyncAistarsLabConfig(ctx context.Context, req AistarsLabSyncRequest) (*Aist
 	if err := applyAistarsLabSeedanceSync(normalized.ChannelID, normalized.MarkupRate, models); err != nil {
 		return nil, err
 	}
+	replaceAistarsLabCapabilities(models)
 	model.RefreshPricing()
 	return result, nil
+}
+
+// GetAistarsLabSeedanceCapability returns the latest capability snapshot from
+// the provider config sync. The caller receives a copy so it cannot mutate the
+// shared registry.
+func GetAistarsLabSeedanceCapability(modelName string) (AistarsLabSeedanceModel, bool) {
+	aistarslabCapabilityMu.RLock()
+	item, ok := aistarslabCapabilities[strings.TrimSpace(modelName)]
+	aistarslabCapabilityMu.RUnlock()
+	if !ok {
+		return AistarsLabSeedanceModel{}, false
+	}
+	item.Modes = append([]string(nil), item.Modes...)
+	item.AspectRatios = append([]string(nil), item.AspectRatios...)
+	return item, true
+}
+
+func replaceAistarsLabCapabilities(models []AistarsLabSeedanceModel) {
+	next := make(map[string]AistarsLabSeedanceModel, len(models))
+	for _, item := range models {
+		copyItem := item
+		copyItem.Modes = append([]string(nil), item.Modes...)
+		copyItem.AspectRatios = append([]string(nil), item.AspectRatios...)
+		next[item.PublicModel] = copyItem
+	}
+	aistarslabCapabilityMu.Lock()
+	aistarslabCapabilities = next
+	aistarslabCapabilityMu.Unlock()
 }
 
 func normalizeAistarsLabSyncRequest(req AistarsLabSyncRequest) AistarsLabSyncRequest {

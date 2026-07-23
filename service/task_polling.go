@@ -37,6 +37,10 @@ type TaskPollingAdaptor interface {
 // 打破 service -> relay -> relay/channel -> service 的循环依赖。
 var GetTaskAdaptorFunc func(platform constant.TaskPlatform) TaskPollingAdaptor
 
+// GetTaskAdaptorForChannelFunc is the channel-aware variant used when an
+// OpenAI-compatible provider needs a specialized task adapter.
+var GetTaskAdaptorForChannelFunc func(platform constant.TaskPlatform, baseURL string) TaskPollingAdaptor
+
 // sweepTimedOutTasks 在主轮询之前独立清理超时任务。
 // 每次最多处理 100 条，剩余的下个周期继续处理。
 // 使用 per-task CAS (UpdateWithStatus) 防止覆盖被正常轮询已推进的任务。
@@ -396,7 +400,12 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 		}
 		return fmt.Errorf("CacheGetChannel failed: %w", err)
 	}
-	adaptor := GetTaskAdaptorFunc(platform)
+	var adaptor TaskPollingAdaptor
+	if GetTaskAdaptorForChannelFunc != nil {
+		adaptor = GetTaskAdaptorForChannelFunc(platform, cacheGetChannel.GetBaseURL())
+	} else {
+		adaptor = GetTaskAdaptorFunc(platform)
+	}
 	if adaptor == nil {
 		return fmt.Errorf("video adaptor not found")
 	}

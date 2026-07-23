@@ -31,6 +31,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/replicate"
 	"github.com/QuantumNous/new-api/relay/channel/siliconflow"
 	"github.com/QuantumNous/new-api/relay/channel/submodel"
+	taskaistarslab "github.com/QuantumNous/new-api/relay/channel/task/aistarslab"
 	taskali "github.com/QuantumNous/new-api/relay/channel/task/ali"
 	taskdoubao "github.com/QuantumNous/new-api/relay/channel/task/doubao"
 	taskGemini "github.com/QuantumNous/new-api/relay/channel/task/gemini"
@@ -165,4 +166,15 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 		}
 	}
 	return nil
+}
+
+// GetTaskAdaptorForChannel selects a task adaptor using both the configured
+// platform and channel URL. AistarsLab exposes an OpenAI-compatible endpoint,
+// so it is commonly configured as an OpenAI channel and must be detected by
+// its provider URL without changing other OpenAI channels.
+func GetTaskAdaptorForChannel(platform constant.TaskPlatform, baseURL string) channel.TaskAdaptor {
+	if taskaistarslab.IsAistarsLabBaseURL(baseURL) {
+		return &taskaistarslab.TaskAdaptor{}
+	}
+	return GetTaskAdaptor(platform)
 }

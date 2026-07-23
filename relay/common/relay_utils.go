@@ -273,7 +273,11 @@ func isKnownTaskField(field string) bool {
 		"mode":            true,
 		"image":           true,
 		"images":          true,
+		"videos":          true,
+		"audios":          true,
 		"size":            true,
+		"resolution":      true,
+		"mode_type":       true,
 		"duration":        true,
 		"input_reference": true, // Sora 特有字段
 	}
