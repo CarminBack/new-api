@@ -223,3 +223,76 @@ func TestDecideChannelFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestDecideChannelFailureForModelSolKeyCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name             string
+		model            string
+		path             string
+		message          string
+		responseStarted  bool
+		wantClass        ChannelFailureClass
+		wantRetry        bool
+		wantEvict        bool
+		wantCountCircuit bool
+	}{
+		{
+			name:             "unsupported ChatGPT account retries key",
+			model:            "gpt-5.6-sol",
+			path:             "/v1/chat/completions",
+			message:          "This ChatGPT account is not supported for Codex model gpt-5.6-sol",
+			wantClass:        ChannelFailureKeyCapability,
+			wantRetry:        true,
+			wantEvict:        true,
+			wantCountCircuit: false,
+		},
+		{
+			name:      "ordinary JSON 400 stays terminal",
+			model:     "gpt-5.6-sol",
+			path:      "/v1/chat/completions",
+			message:   "messages must contain the word 'json'",
+			wantClass: ChannelFailureTerminal,
+		},
+		{
+			name:      "different model stays terminal",
+			model:     "gpt-5.5",
+			path:      "/v1/chat/completions",
+			message:   "This ChatGPT account is not supported for Codex model",
+			wantClass: ChannelFailureTerminal,
+		},
+		{
+			name:      "image path does not retry",
+			model:     "gpt-5.6-sol",
+			path:      "/v1/images/generations",
+			message:   "This ChatGPT account is not supported for Codex model",
+			wantClass: ChannelFailureTerminal,
+		},
+		{
+			name:            "started response does not retry",
+			model:           "gpt-5.6-sol",
+			path:            "/v1/responses",
+			message:         "This ChatGPT account is not supported for Codex model",
+			responseStarted: true,
+			wantClass:       ChannelFailureKeyCapability,
+			wantEvict:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writer := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(writer)
+			ctx.Request = httptest.NewRequest(http.MethodPost, tt.path, nil)
+			if tt.responseStarted {
+				ctx.Writer.WriteHeaderNow()
+			}
+			err := types.NewError(errors.New(tt.message), types.ErrorCodeBadResponse, types.ErrOptionWithStatusCode(http.StatusBadRequest))
+			decision := DecideChannelFailureForModel(ctx, err, tt.model, 2, false, false)
+			require.Equal(t, tt.wantClass, decision.Class)
+			require.Equal(t, tt.wantRetry, decision.Retry)
+			require.Equal(t, tt.wantEvict, decision.EvictAffinity)
+			require.Equal(t, tt.wantCountCircuit, decision.CountForCircuit)
+		})
+	}
+}

@@ -190,6 +190,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.LastError = nil
 	allowUncertainRetry := allowsUncertainCrossChannelRetry(relayInfo, request)
 	uncertainRetryUsed := false
+	solCapabilityRetryCount := 0
+	const maxSolCapabilityRetries = 2
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		relayInfo.RetryIndex = retryParam.GetRetry()
@@ -237,13 +239,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		retryParam.MarkAttempted(channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex))
 
 		_, specificChannel := c.Get("specific_channel_id")
-		decision := service.DecideChannelFailure(
+		decision := service.DecideChannelFailureForModel(
 			c,
 			newAPIError,
+			relayInfo.OriginModelName,
 			common.RetryTimes-retryParam.GetRetry(),
 			specificChannel,
 			allowUncertainRetry && !uncertainRetryUsed,
 		)
+		if decision.Class == service.ChannelFailureKeyCapability && decision.Retry {
+			decision, solCapabilityRetryCount = applySolCapabilityRetryBudget(decision, solCapabilityRetryCount, maxSolCapabilityRetries)
+		}
 		if decision.EvictAffinity {
 			service.ClearCurrentChannelAffinityCache(c)
 		}
@@ -258,7 +264,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			service.ReleaseChannelCircuitProbe(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
 		}
 		willRetry := decision.Retry
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, !willRetry)
+		processChannelErrorWithDecision(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, decision, !willRetry)
 
 		if !willRetry {
 			break
@@ -275,6 +281,18 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func applySolCapabilityRetryBudget(decision service.ChannelFailureDecision, used int, limit int) (service.ChannelFailureDecision, int) {
+	if decision.Class != service.ChannelFailureKeyCapability || !decision.Retry || limit <= 0 {
+		return decision, used
+	}
+	if used >= limit {
+		decision.Retry = false
+		decision.Reason += ":sol_capability_budget_exhausted"
+		return decision, used
+	}
+	return decision, used + 1
 }
 
 var upgrader = websocket.Upgrader{
@@ -392,10 +410,14 @@ func allowsUncertainCrossChannelRetry(info *relaycommon.RelayInfo, request dto.R
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, recordErrorLog ...bool) {
+	processChannelErrorWithDecision(c, channelError, err, service.ChannelFailureDecision{}, recordErrorLog...)
+}
+
+func processChannelErrorWithDecision(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, decision service.ChannelFailureDecision, recordErrorLog ...bool) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if service.ShouldDisableChannel(err) && channelError.AutoBan {
+	if decision.Class != service.ChannelFailureKeyCapability && service.ShouldDisableChannel(err) && channelError.AutoBan {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})

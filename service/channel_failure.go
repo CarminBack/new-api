@@ -16,6 +16,10 @@ const (
 	ChannelFailureTransient    ChannelFailureClass = "transient"
 	ChannelFailureChannelFatal ChannelFailureClass = "channel_fatal"
 	ChannelFailureUncertain    ChannelFailureClass = "uncertain"
+	// ChannelFailureKeyCapability is a request-local failure indicating that
+	// the selected upstream key cannot serve the requested model. It should not
+	// be used as evidence that the whole channel is unhealthy.
+	ChannelFailureKeyCapability ChannelFailureClass = "key_capability"
 )
 
 type ChannelFailureDecision struct {
@@ -27,6 +31,13 @@ type ChannelFailureDecision struct {
 }
 
 func DecideChannelFailure(c *gin.Context, err *types.NewAPIError, retriesRemaining int, specificChannel bool, allowUncertainRetry bool) ChannelFailureDecision {
+	return DecideChannelFailureForModel(c, err, "", retriesRemaining, specificChannel, allowUncertainRetry)
+}
+
+// DecideChannelFailureForModel classifies an upstream error with the original
+// model available. The model-aware path is used by the main relay loop so a
+// narrow key-capability fallback cannot affect unrelated 400 responses.
+func DecideChannelFailureForModel(c *gin.Context, err *types.NewAPIError, modelName string, retriesRemaining int, specificChannel bool, allowUncertainRetry bool) ChannelFailureDecision {
 	if err == nil {
 		return ChannelFailureDecision{Class: ChannelFailureTerminal, Reason: "no_error"}
 	}
@@ -43,9 +54,10 @@ func DecideChannelFailure(c *gin.Context, err *types.NewAPIError, retriesRemaini
 		}
 	}
 
-	decision := classifyChannelFailure(err, message, path)
+	decision := classifyChannelFailure(err, message, path, modelName)
 	decision.Retry = decision.Class == ChannelFailureTransient ||
 		decision.Class == ChannelFailureChannelFatal ||
+		decision.Class == ChannelFailureKeyCapability ||
 		(decision.Class == ChannelFailureUncertain && allowUncertainRetry)
 	if responseStarted {
 		decision.Retry = false
@@ -62,13 +74,21 @@ func DecideChannelFailure(c *gin.Context, err *types.NewAPIError, retriesRemaini
 	return decision
 }
 
-func classifyChannelFailure(err *types.NewAPIError, message string, path string) ChannelFailureDecision {
+func classifyChannelFailure(err *types.NewAPIError, message string, path string, modelName string) ChannelFailureDecision {
 	if err.StatusCode == http.StatusGatewayTimeout || err.StatusCode == 524 {
 		return ChannelFailureDecision{
 			Class:           ChannelFailureUncertain,
 			Reason:          "upstream_timeout",
 			EvictAffinity:   true,
 			CountForCircuit: true,
+		}
+	}
+	if isSolKeyCapabilityFailure(err, message, path, modelName) {
+		return ChannelFailureDecision{
+			Class:           ChannelFailureKeyCapability,
+			Reason:          "sol_key_capability",
+			EvictAffinity:   true,
+			CountForCircuit: false,
 		}
 	}
 	if isDeterministicRequestFailure(err, message) {
@@ -121,6 +141,31 @@ func classifyChannelFailure(err *types.NewAPIError, message string, path string)
 		}
 	}
 	return ChannelFailureDecision{Class: ChannelFailureTerminal, Reason: "non_retryable_status"}
+}
+
+func isSolKeyCapabilityFailure(err *types.NewAPIError, message string, path string, modelName string) bool {
+	if err == nil || err.StatusCode != http.StatusBadRequest || !strings.EqualFold(strings.TrimSpace(modelName), "gpt-5.6-sol") {
+		return false
+	}
+	if !isSolCapabilityRetryPath(path) {
+		return false
+	}
+	unsupported := strings.Contains(message, "not supported") ||
+		strings.Contains(message, "unsupported") ||
+		strings.Contains(message, "does not support") ||
+		strings.Contains(message, "doesn't support")
+	accountOrCodex := strings.Contains(message, "chatgpt account") || strings.Contains(message, "codex")
+	return unsupported && accountOrCodex
+}
+
+func isSolCapabilityRetryPath(path string) bool {
+	path = strings.TrimSuffix(path, "/")
+	switch path {
+	case "/v1/chat/completions", "/v1/completions", "/v1/responses":
+		return true
+	default:
+		return false
+	}
 }
 
 func isDeterministicRequestFailure(err *types.NewAPIError, message string) bool {

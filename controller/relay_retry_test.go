@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -49,4 +50,25 @@ func TestAllowsUncertainCrossChannelRetry(t *testing.T) {
 			require.Equal(t, tt.want, allowsUncertainCrossChannelRetry(info, tt.request))
 		})
 	}
+}
+
+func TestApplySolCapabilityRetryBudget(t *testing.T) {
+	decision := service.ChannelFailureDecision{
+		Class:  service.ChannelFailureKeyCapability,
+		Retry:  true,
+		Reason: "sol_key_capability",
+	}
+
+	decision, used := applySolCapabilityRetryBudget(decision, 0, 2)
+	require.True(t, decision.Retry)
+	require.Equal(t, 1, used)
+
+	decision, used = applySolCapabilityRetryBudget(decision, used, 2)
+	require.True(t, decision.Retry)
+	require.Equal(t, 2, used)
+
+	decision, used = applySolCapabilityRetryBudget(decision, used, 2)
+	require.False(t, decision.Retry)
+	require.Equal(t, 2, used)
+	require.Contains(t, decision.Reason, "sol_capability_budget_exhausted")
 }
