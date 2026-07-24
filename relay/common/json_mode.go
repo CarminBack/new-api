@@ -10,6 +10,26 @@ import (
 
 const responsesJSONModeInstruction = "When producing the final textual output, return a valid json object."
 
+// EnsureChatJSONModeInstruction satisfies upstream JSON mode validation for
+// OpenAI-compatible chat requests whose messages do not mention JSON.
+func EnsureChatJSONModeInstruction(request *dto.GeneralOpenAIRequest) {
+	if request == nil || request.ResponseFormat == nil ||
+		strings.TrimSpace(request.ResponseFormat.Type) != "json_object" {
+		return
+	}
+
+	for _, message := range request.Messages {
+		if valueContainsJSONText(message.Content) || rawMessageContainsJSONText(message.ToolCalls) {
+			return
+		}
+	}
+
+	request.Messages = append([]dto.Message{{
+		Role:    request.GetSystemRoleName(),
+		Content: responsesJSONModeInstruction,
+	}}, request.Messages...)
+}
+
 // EnsureResponsesJSONModeInstruction satisfies upstream JSON mode validation
 // without changing requests that already mention JSON or use another format.
 func EnsureResponsesJSONModeInstruction(request *dto.OpenAIResponsesRequest) error {
