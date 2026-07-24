@@ -21,8 +21,6 @@ import (
 type Adaptor struct {
 }
 
-const codexJSONModeInstruction = "When producing the final textual output, return a valid json object."
-
 func (a *Adaptor) ConvertGeminiRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (any, error) {
 	return nil, errors.New("codex channel: endpoint not supported")
 }
@@ -97,7 +95,7 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if len(request.Instructions) == 0 {
 		request.Instructions = json.RawMessage(`""`)
 	}
-	if err := ensureJSONModeInstruction(&request); err != nil {
+	if err := relaycommon.EnsureResponsesJSONModeInstruction(&request); err != nil {
 		return nil, err
 	}
 
@@ -110,74 +108,6 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	request.MaxOutputTokens = nil
 	request.Temperature = nil
 	return request, nil
-}
-
-func ensureJSONModeInstruction(request *dto.OpenAIResponsesRequest) error {
-	if request == nil || len(request.Text) == 0 {
-		return nil
-	}
-
-	var textConfig struct {
-		Format struct {
-			Type string `json:"type"`
-		} `json:"format"`
-	}
-	if err := common.Unmarshal(request.Text, &textConfig); err != nil ||
-		!strings.EqualFold(strings.TrimSpace(textConfig.Format.Type), "json_object") {
-		return nil
-	}
-	if rawMessageContainsJSONText(request.Instructions) || rawMessageContainsJSONText(request.Input) {
-		return nil
-	}
-
-	var instructions string
-	if err := common.Unmarshal(request.Instructions, &instructions); err != nil {
-		return nil
-	}
-	if strings.TrimSpace(instructions) == "" {
-		instructions = codexJSONModeInstruction
-	} else {
-		instructions = codexJSONModeInstruction + "\n" + instructions
-	}
-
-	raw, err := common.Marshal(instructions)
-	if err != nil {
-		return err
-	}
-	request.Instructions = raw
-	return nil
-}
-
-func rawMessageContainsJSONText(raw json.RawMessage) bool {
-	if len(raw) == 0 {
-		return false
-	}
-
-	var value any
-	if err := common.Unmarshal(raw, &value); err != nil {
-		return false
-	}
-	return valueContainsJSONText(value)
-}
-
-func valueContainsJSONText(value any) bool {
-	switch typed := value.(type) {
-	case string:
-		return strings.Contains(strings.ToLower(typed), "json")
-	case []any:
-		for _, item := range typed {
-			if valueContainsJSONText(item) {
-				return true
-			}
-		}
-	case map[string]any:
-		for _, item := range typed {
-			if valueContainsJSONText(item) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {

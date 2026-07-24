@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const expectedJSONModeInstruction = "When producing the final textual output, return a valid json object."
+
 func TestConvertOpenAIResponsesRequestNormalizesJSONModeInstruction(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -29,7 +31,7 @@ func TestConvertOpenAIResponsesRequestNormalizesJSONModeInstruction(t *testing.T
 			input: mustCodexRawMessage(t, []map[string]any{
 				{"role": "user", "content": "Return an object with the result."},
 			}),
-			want: codexJSONModeInstruction,
+			want: expectedJSONModeInstruction,
 		},
 		{
 			name: "preserves existing instructions",
@@ -38,7 +40,7 @@ func TestConvertOpenAIResponsesRequestNormalizesJSONModeInstruction(t *testing.T
 			}),
 			instructions: mustCodexRawMessage(t, "Keep the answer concise."),
 			input:        mustCodexRawMessage(t, "Return an object with the result."),
-			want:         codexJSONModeInstruction + "\nKeep the answer concise.",
+			want:         expectedJSONModeInstruction + "\nKeep the answer concise.",
 		},
 		{
 			name: "keeps existing json instruction unchanged",
@@ -127,7 +129,7 @@ func TestChatCompletionsJSONModeGetsCodexInstructionAfterConversion(t *testing.T
 
 	var instructions string
 	require.NoError(t, common.Unmarshal(request.Instructions, &instructions))
-	assert.Equal(t, codexJSONModeInstruction, instructions)
+	assert.Equal(t, expectedJSONModeInstruction, instructions)
 }
 
 func TestConvertOpenAIResponsesRequestPreservesToolsWhenInjectingJSONInstruction(t *testing.T) {
@@ -158,7 +160,7 @@ func TestConvertOpenAIResponsesRequestPreservesToolsWhenInjectingJSONInstruction
 	assert.JSONEq(t, string(tools), string(got.Tools))
 	var instructions string
 	require.NoError(t, common.Unmarshal(got.Instructions, &instructions))
-	assert.Equal(t, codexJSONModeInstruction, instructions)
+	assert.Equal(t, expectedJSONModeInstruction, instructions)
 }
 
 func mustCodexRawMessage(t *testing.T, value any) json.RawMessage {
