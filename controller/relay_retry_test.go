@@ -3,15 +3,21 @@ package controller
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestShouldRetryTaskRelaySkipsForbidden(t *testing.T) {
@@ -71,4 +77,41 @@ func TestApplySolCapabilityRetryBudget(t *testing.T) {
 	require.False(t, decision.Retry)
 	require.Equal(t, 2, used)
 	require.Contains(t, decision.Reason, "sol_capability_budget_exhausted")
+}
+
+func TestGetChannelHydratesInitialMultiKeyChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalDB := model.DB
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = originalDB
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+	})
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+	model.DB = db
+	channel := &model.Channel{
+		Id:     37,
+		Key:    "key-a\nkey-b",
+		Status: common.ChannelStatusEnabled,
+		ChannelInfo: model.ChannelInfo{
+			IsMultiKey:   true,
+			MultiKeySize: 2,
+		},
+	}
+	require.NoError(t, db.Create(channel).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(ctx, constant.ContextKeyChannelId, channel.Id)
+	selected, apiErr := getChannel(ctx, &relaycommon.RelayInfo{}, &service.RetryParam{})
+
+	require.Nil(t, apiErr)
+	require.True(t, selected.ChannelInfo.IsMultiKey)
+	require.Len(t, selected.GetKeys(), 2)
+	param := &service.RetryParam{}
+	param.ExcludeChannel(selected)
+	require.Equal(t, map[int]struct{}{0: {}, 1: {}}, param.ExcludedKeys(channel.Id))
 }
