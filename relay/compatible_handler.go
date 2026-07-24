@@ -93,6 +93,8 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		return nil
 	}
 
+	clientIsStream := info.IsStream
+	upstreamRequestIsStream := clientIsStream
 	var requestBody io.Reader
 
 	if passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled {
@@ -173,6 +175,12 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+		var outboundStream struct {
+			Stream *bool `json:"stream"`
+		}
+		if err := common.Unmarshal(jsonData, &outboundStream); err == nil && outboundStream.Stream != nil {
+			upstreamRequestIsStream = *outboundStream.Stream
+		}
 
 		logger.LogDebug(c, "text request body: %s", jsonData)
 
@@ -186,7 +194,6 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		requestBody = body
 	}
 
-	clientIsStream := info.IsStream
 	var httpResp *http.Response
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
@@ -197,7 +204,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
-		upstreamIsStream := strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
+		upstreamIsStream := upstreamRequestIsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
 		info.IsStream = clientIsStream || upstreamIsStream
 		if httpResp.StatusCode != http.StatusOK {
 			newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
