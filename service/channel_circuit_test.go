@@ -92,6 +92,24 @@ func TestCompleteFailureOpensRouteAfterConfidenceIsSufficient(t *testing.T) {
 	require.True(t, AllowChannelCircuitAttempt(nil, 37, "other-model", "/v1/responses"))
 }
 
+func TestLateInflightFailureDoesNotExtendOpenWindow(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	contexts := make([]*gin.Context, 5)
+	for i := range contexts {
+		contexts[i], _ = gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelCircuitAttempt(contexts[i], 37, "gpt-test", "/v1/responses"))
+	}
+	for i := 0; i < 4; i++ {
+		RecordChannelCircuitFailure(contexts[i], 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	}
+	openedUntil := routeStateForTest(37, "gpt-test", "/v1/responses").OpenUntil
+
+	*now = now.Add(30 * time.Second)
+	RecordChannelCircuitFailure(contexts[4], 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+
+	require.Equal(t, openedUntil, routeStateForTest(37, "gpt-test", "/v1/responses").OpenUntil)
+}
+
 func TestHalfOpenProbeIsSingleAndRecoversGradually(t *testing.T) {
 	now := setupChannelHealthTest(t)
 	for i := 0; i < 4; i++ {
@@ -371,6 +389,29 @@ func TestChangedChannelKeepsSlowStartCapacity(t *testing.T) {
 	changedIdentity := buildChannelHealthIdentity(channel, 0, "gpt-test", "/v1/responses", channelCircuitNow())
 	require.Equal(t, channelHealthNewCapacity, changedIdentity.InitialCapacity)
 	require.Equal(t, channelHealthNewCapacity, buildChannelHealthIdentity(channel, 0, "gpt-test", "/v1/responses", channelCircuitNow()).InitialCapacity)
+}
+
+func TestObservedChannelConfigsExpireAfterInactivity(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	stale := &model.Channel{Id: 29, Key: "stale-key", CreatedTime: now.Add(-time.Hour).Unix()}
+	retained := &model.Channel{Id: 37, Key: "retained-key", CreatedTime: now.Add(-time.Hour).Unix()}
+	buildChannelHealthIdentity(stale, 0, "gpt-test", "/v1/responses", *now)
+	buildChannelHealthIdentity(retained, 0, "gpt-test", "/v1/responses", *now)
+
+	*now = now.Add(channelHealthStateTTL - time.Minute)
+	buildChannelHealthIdentity(retained, 0, "gpt-test", "/v1/responses", *now)
+	*now = now.Add(2 * time.Minute)
+	trigger := &model.Channel{Id: 54, Key: "trigger-key", CreatedTime: now.Add(-time.Hour).Unix()}
+	buildChannelHealthIdentity(trigger, 0, "gpt-test", "/v1/responses", *now)
+
+	memoryChannelHealth.Configs.RLock()
+	defer memoryChannelHealth.Configs.RUnlock()
+	_, staleExists := memoryChannelHealth.Configs.Observed[stale.Id]
+	_, retainedExists := memoryChannelHealth.Configs.Observed[retained.Id]
+	_, triggerExists := memoryChannelHealth.Configs.Observed[trigger.Id]
+	require.False(t, staleExists)
+	require.True(t, retainedExists)
+	require.True(t, triggerExists)
 }
 
 func TestDisabledKeyDoesNotHideRemainingHealthyKey(t *testing.T) {

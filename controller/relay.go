@@ -741,24 +741,6 @@ func decideTaskChannelFailure(c *gin.Context, taskErr *dto.TaskError, retryTimes
 	if taskErr.LocalError {
 		return service.ChannelFailureDecision{Class: service.ChannelFailureTerminal, Reason: "local_error"}
 	}
-	if taskErr.StatusCode == http.StatusTemporaryRedirect {
-		decision := service.ChannelFailureDecision{
-			Class:           service.ChannelFailureTransient,
-			Reason:          "task_temporary_redirect",
-			Retry:           true,
-			EvictAffinity:   true,
-			CountForCircuit: true,
-		}
-		if retryTimes <= 0 {
-			decision.Retry = false
-			decision.Reason += ":budget_exhausted"
-		}
-		if _, specificChannel := c.Get("specific_channel_id"); specificChannel {
-			decision.Retry = false
-			decision.Reason += ":specific_channel"
-		}
-		return decision
-	}
 	_, specificChannel := c.Get("specific_channel_id")
 	underlyingErr := taskErr.Error
 	if underlyingErr == nil {

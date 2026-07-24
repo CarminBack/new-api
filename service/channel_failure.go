@@ -264,6 +264,7 @@ func isPoolAccountFailure(err *types.NewAPIError, message string) bool {
 func isPotentiallyNonIdempotentPath(path string) bool {
 	return strings.HasPrefix(path, "/v1/images/") ||
 		strings.HasPrefix(path, "/v1/video") ||
+		strings.HasPrefix(path, "/kling/v1/videos") ||
 		strings.HasPrefix(path, "/mj/") ||
 		strings.HasPrefix(path, "/suno/") ||
 		strings.HasPrefix(path, "/jimeng")

@@ -29,6 +29,18 @@ func TestShouldRetryTaskRelaySkipsForbidden(t *testing.T) {
 	require.False(t, retry)
 }
 
+func TestTaskTemporaryRedirectRespectsReplayProtection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+
+	decision := decideTaskChannelFailure(ctx, &dto.TaskError{StatusCode: http.StatusTemporaryRedirect}, 1)
+
+	require.Equal(t, service.ChannelFailureTransient, decision.Class)
+	require.False(t, decision.Retry)
+	require.Contains(t, decision.Reason, "non_idempotent_path")
+}
+
 func TestAllowsUncertainCrossChannelRetry(t *testing.T) {
 	tests := []struct {
 		name    string

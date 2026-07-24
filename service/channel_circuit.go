@@ -106,6 +106,7 @@ type channelHealthReservation struct {
 type observedChannelConfig struct {
 	Fingerprint     string
 	InitialCapacity int
+	LastTouched     time.Time
 }
 
 var memoryChannelHealth struct {
@@ -118,7 +119,8 @@ var memoryChannelHealth struct {
 	}
 	Configs struct {
 		sync.RWMutex
-		Observed map[int]observedChannelConfig
+		Observed    map[int]observedChannelConfig
+		LastCleanup time.Time
 	}
 }
 
@@ -147,6 +149,7 @@ func resetMemoryChannelHealth() {
 	memoryChannelHealth.Keys.Unlock()
 	memoryChannelHealth.Configs.Lock()
 	memoryChannelHealth.Configs.Observed = make(map[int]observedChannelConfig)
+	memoryChannelHealth.Configs.LastCleanup = time.Time{}
 	memoryChannelHealth.Configs.Unlock()
 }
 
@@ -172,26 +175,38 @@ func initialChannelHealthCapacity(channel *model.Channel, fingerprint string, no
 	}
 	memoryChannelHealth.Configs.RLock()
 	observed, exists := memoryChannelHealth.Configs.Observed[channel.Id]
-	if exists && observed.Fingerprint == fingerprint {
+	maintenanceDue := memoryChannelHealth.Configs.LastCleanup.IsZero() || now.Sub(memoryChannelHealth.Configs.LastCleanup) >= time.Minute
+	touchDue := exists && now.Sub(observed.LastTouched) >= time.Minute
+	if exists && observed.Fingerprint == fingerprint && !maintenanceDue && !touchDue {
 		memoryChannelHealth.Configs.RUnlock()
 		return observed.InitialCapacity
 	}
 	memoryChannelHealth.Configs.RUnlock()
 	memoryChannelHealth.Configs.Lock()
 	defer memoryChannelHealth.Configs.Unlock()
+	if memoryChannelHealth.Configs.LastCleanup.IsZero() || now.Sub(memoryChannelHealth.Configs.LastCleanup) >= time.Minute {
+		for channelID, candidate := range memoryChannelHealth.Configs.Observed {
+			if now.Sub(candidate.LastTouched) >= channelHealthStateTTL {
+				delete(memoryChannelHealth.Configs.Observed, channelID)
+			}
+		}
+		memoryChannelHealth.Configs.LastCleanup = now
+	}
 	observed, exists = memoryChannelHealth.Configs.Observed[channel.Id]
 	if exists && observed.Fingerprint == fingerprint {
+		observed.LastTouched = now
+		memoryChannelHealth.Configs.Observed[channel.Id] = observed
 		return observed.InitialCapacity
 	}
 	if exists && observed.Fingerprint != fingerprint {
-		memoryChannelHealth.Configs.Observed[channel.Id] = observedChannelConfig{Fingerprint: fingerprint, InitialCapacity: channelHealthNewCapacity}
+		memoryChannelHealth.Configs.Observed[channel.Id] = observedChannelConfig{Fingerprint: fingerprint, InitialCapacity: channelHealthNewCapacity, LastTouched: now}
 		return channelHealthNewCapacity
 	}
 	if channel.CreatedTime > 0 && now.Sub(time.Unix(channel.CreatedTime, 0)) < channelHealthNewChannelAge {
-		memoryChannelHealth.Configs.Observed[channel.Id] = observedChannelConfig{Fingerprint: fingerprint, InitialCapacity: channelHealthNewCapacity}
+		memoryChannelHealth.Configs.Observed[channel.Id] = observedChannelConfig{Fingerprint: fingerprint, InitialCapacity: channelHealthNewCapacity, LastTouched: now}
 		return channelHealthNewCapacity
 	}
-	memoryChannelHealth.Configs.Observed[channel.Id] = observedChannelConfig{Fingerprint: fingerprint, InitialCapacity: channelHealthEstablishedCapacity}
+	memoryChannelHealth.Configs.Observed[channel.Id] = observedChannelConfig{Fingerprint: fingerprint, InitialCapacity: channelHealthEstablishedCapacity, LastTouched: now}
 	return channelHealthEstablishedCapacity
 }
 
@@ -694,6 +709,7 @@ func RecordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 	contributesToChannel := false
 	shard.Lock()
 	state := getRouteHealthStateLocked(shard, identity, now)
+	routeAlreadyOpen := now.Before(state.OpenUntil)
 	if state.InFlight > 0 {
 		state.InFlight--
 	}
@@ -732,7 +748,7 @@ func RecordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 		if failureCapacityFactor > 0 && failureLowerBound > channelHealthWarningLowerBound {
 			decreaseRouteCapacityLocked(state, now, failureCapacityFactor)
 		}
-		if failures > 0 && failureLowerBound > channelHealthOpenLowerBound {
+		if !routeAlreadyOpen && failures > 0 && failureLowerBound > channelHealthOpenLowerBound {
 			state.OpenUntil = now.Add(channelHealthOpenFor)
 			state.ProbeInFlight = false
 			state.Capacity = channelHealthRecoveryCapacity
@@ -743,7 +759,7 @@ func RecordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 		if poolFailures >= channelHealthAdaptiveMinimumFailures && poolLowerBound > channelHealthWarningLowerBound {
 			decreaseRouteCapacityLocked(state, now, 0.8)
 		}
-		if poolFailures >= channelHealthAdaptiveMinimumFailures && poolLowerBound > channelHealthOpenLowerBound {
+		if !routeAlreadyOpen && poolFailures >= channelHealthAdaptiveMinimumFailures && poolLowerBound > channelHealthOpenLowerBound {
 			state.OpenUntil = now.Add(channelHealthOpenFor)
 			state.ProbeInFlight = false
 			state.Capacity = channelHealthRecoveryCapacity

@@ -214,6 +214,15 @@ func TestDecideChannelFailure(t *testing.T) {
 			wantCountCircuit: true,
 		},
 		{
+			name:             "Kling video 503 is classified but never replayed",
+			path:             "/kling/v1/videos/text2video",
+			apiErr:           types.NewError(errors.New("unavailable"), types.ErrorCodeBadResponse, types.ErrOptionWithStatusCode(http.StatusServiceUnavailable)),
+			retriesRemaining: 2,
+			wantClass:        ChannelFailureTransient,
+			wantEvict:        true,
+			wantCountCircuit: true,
+		},
+		{
 			name:             "response already written disables retry",
 			path:             "/v1/responses",
 			apiErr:           types.NewError(errors.New("unavailable"), types.ErrorCodeBadResponse, types.ErrOptionWithStatusCode(http.StatusServiceUnavailable)),
