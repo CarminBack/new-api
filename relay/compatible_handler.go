@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	openaichannel "github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -185,6 +186,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		requestBody = body
 	}
 
+	clientIsStream := info.IsStream
 	var httpResp *http.Response
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
@@ -195,7 +197,8 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 
 	if resp != nil {
 		httpResp = resp.(*http.Response)
-		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
+		upstreamIsStream := strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
+		info.IsStream = clientIsStream || upstreamIsStream
 		if httpResp.StatusCode != http.StatusOK {
 			newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			// reset status code 重置状态码
@@ -204,7 +207,15 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		}
 	}
 
-	usage, newApiErr := adaptor.DoResponse(c, httpResp, info)
+	var usage any
+	var newApiErr *types.NewAPIError
+	if !clientIsStream && info.IsStream && info.ApiType == constant.APITypeOpenAI &&
+		info.RelayFormat == types.RelayFormatOpenAI && info.RelayMode == relayconstant.RelayModeChatCompletions {
+		usage, newApiErr = openaichannel.OaiChatBufferedStreamHandler(c, info, httpResp)
+		info.IsStream = false
+	} else {
+		usage, newApiErr = adaptor.DoResponse(c, httpResp, info)
+	}
 	if newApiErr != nil {
 		// reset status code 重置状态码
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)

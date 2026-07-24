@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -13,15 +14,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const expectedJSONModeInstruction = "When producing the final textual output, return a valid json object."
-
-func TestConvertOpenAIResponsesRequestNormalizesJSONModeInstruction(t *testing.T) {
+func TestConvertOpenAIResponsesRequestNormalizesJSONModeInput(t *testing.T) {
 	tests := []struct {
-		name         string
-		text         json.RawMessage
-		instructions json.RawMessage
-		input        json.RawMessage
-		want         string
+		name               string
+		text               json.RawMessage
+		instructions       json.RawMessage
+		input              json.RawMessage
+		wantInputJSON      bool
+		wantInputUnchanged bool
+		wantInstructions   string
 	}{
 		{
 			name: "injects missing json instruction",
@@ -31,25 +32,27 @@ func TestConvertOpenAIResponsesRequestNormalizesJSONModeInstruction(t *testing.T
 			input: mustCodexRawMessage(t, []map[string]any{
 				{"role": "user", "content": "Return an object with the result."},
 			}),
-			want: expectedJSONModeInstruction,
+			wantInputJSON: true,
 		},
 		{
 			name: "preserves existing instructions",
 			text: mustCodexRawMessage(t, map[string]any{
 				"format": map[string]any{"type": "json_object"},
 			}),
-			instructions: mustCodexRawMessage(t, "Keep the answer concise."),
-			input:        mustCodexRawMessage(t, "Return an object with the result."),
-			want:         expectedJSONModeInstruction + "\nKeep the answer concise.",
+			instructions:     mustCodexRawMessage(t, "Keep the answer concise."),
+			input:            mustCodexRawMessage(t, "Return an object with the result."),
+			wantInputJSON:    true,
+			wantInstructions: "Keep the answer concise.",
 		},
 		{
-			name: "keeps existing json instruction unchanged",
+			name: "injects input even when instructions mention json",
 			text: mustCodexRawMessage(t, map[string]any{
 				"format": map[string]any{"type": "json_object"},
 			}),
-			instructions: mustCodexRawMessage(t, "Return valid JSON."),
-			input:        mustCodexRawMessage(t, "Return an object with the result."),
-			want:         "Return valid JSON.",
+			instructions:     mustCodexRawMessage(t, "Return valid JSON."),
+			input:            mustCodexRawMessage(t, "Return an object with the result."),
+			wantInputJSON:    true,
+			wantInstructions: "Return valid JSON.",
 		},
 		{
 			name: "accepts json keyword in nested input text",
@@ -64,25 +67,27 @@ func TestConvertOpenAIResponsesRequestNormalizesJSONModeInstruction(t *testing.T
 					},
 				},
 			}),
-			want: "",
+			wantInputJSON:      true,
+			wantInputUnchanged: true,
 		},
 		{
 			name: "does not change json schema mode",
 			text: mustCodexRawMessage(t, map[string]any{
 				"format": map[string]any{"type": "json_schema"},
 			}),
-			input: mustCodexRawMessage(t, "Return an object with the result."),
-			want:  "",
+			input:              mustCodexRawMessage(t, "Return an object with the result."),
+			wantInputUnchanged: true,
 		},
 		{
-			name:  "does not change ordinary responses request",
-			input: mustCodexRawMessage(t, "Return an object with the result."),
-			want:  "",
+			name:               "does not change ordinary responses request",
+			input:              mustCodexRawMessage(t, "Return an object with the result."),
+			wantInputUnchanged: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			originalInput := append(json.RawMessage(nil), tt.input...)
 			adaptor := &Adaptor{}
 			converted, err := adaptor.ConvertOpenAIResponsesRequest(nil, nil, dto.OpenAIResponsesRequest{
 				Model:        "gpt-5.6-luna",
@@ -97,12 +102,16 @@ func TestConvertOpenAIResponsesRequestNormalizesJSONModeInstruction(t *testing.T
 
 			var instructions string
 			require.NoError(t, common.Unmarshal(request.Instructions, &instructions))
-			assert.Equal(t, tt.want, instructions)
+			assert.Equal(t, tt.wantInstructions, instructions)
+			assert.Equal(t, tt.wantInputJSON, strings.Contains(strings.ToLower(string(request.Input)), "json"))
+			if tt.wantInputUnchanged {
+				assert.JSONEq(t, string(originalInput), string(request.Input))
+			}
 		})
 	}
 }
 
-func TestChatCompletionsJSONModeGetsCodexInstructionAfterConversion(t *testing.T) {
+func TestChatCompletionsJSONModeGetsCodexInputAfterConversion(t *testing.T) {
 	chatRequest := &dto.GeneralOpenAIRequest{
 		Model: "gpt-5.6-luna",
 		Messages: []dto.Message{
@@ -127,9 +136,8 @@ func TestChatCompletionsJSONModeGetsCodexInstructionAfterConversion(t *testing.T
 	request, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
 
-	var instructions string
-	require.NoError(t, common.Unmarshal(request.Instructions, &instructions))
-	assert.Equal(t, expectedJSONModeInstruction, instructions)
+	assert.Contains(t, strings.ToLower(string(request.Input)), "json")
+	assert.JSONEq(t, `""`, string(request.Instructions))
 }
 
 func TestConvertOpenAIResponsesRequestPreservesToolsWhenInjectingJSONInstruction(t *testing.T) {
@@ -158,9 +166,8 @@ func TestConvertOpenAIResponsesRequestPreservesToolsWhenInjectingJSONInstruction
 	require.True(t, ok)
 
 	assert.JSONEq(t, string(tools), string(got.Tools))
-	var instructions string
-	require.NoError(t, common.Unmarshal(got.Instructions, &instructions))
-	assert.Equal(t, expectedJSONModeInstruction, instructions)
+	assert.Contains(t, strings.ToLower(string(got.Input)), "json")
+	assert.JSONEq(t, `""`, string(got.Instructions))
 }
 
 func mustCodexRawMessage(t *testing.T, value any) json.RawMessage {

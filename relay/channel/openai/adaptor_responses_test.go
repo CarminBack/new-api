@@ -1,9 +1,9 @@
 package openai
 
 import (
+	"strings"
 	"testing"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -106,7 +106,6 @@ func TestChatCompletionsJSONModeGetsInstructionForOpenAIResponsesChannel(t *test
 	request, ok := converted.(dto.OpenAIResponsesRequest)
 	require.True(t, ok)
 
-	var instructions string
-	require.NoError(t, common.Unmarshal(request.Instructions, &instructions))
-	assert.Equal(t, "When producing the final textual output, return a valid json object.", instructions)
+	assert.Contains(t, strings.ToLower(string(request.Input)), "json")
+	assert.Empty(t, request.Instructions)
 }

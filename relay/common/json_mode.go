@@ -46,28 +46,58 @@ func EnsureResponsesJSONModeInstruction(request *dto.OpenAIResponsesRequest) err
 		strings.TrimSpace(textConfig.Format.Type) != "json_object" {
 		return nil
 	}
-	if rawMessageContainsJSONText(request.Instructions) || rawMessageContainsJSONText(request.Input) {
+	if rawMessageContainsJSONText(request.Input) {
 		return nil
 	}
 
-	var instructions string
-	if len(request.Instructions) > 0 {
-		if err := common.Unmarshal(request.Instructions, &instructions); err != nil {
+	var input any
+	if len(request.Input) > 0 {
+		if err := common.Unmarshal(request.Input, &input); err != nil {
 			return nil
 		}
 	}
-	if strings.TrimSpace(instructions) == "" {
-		instructions = responsesJSONModeInstruction
-	} else {
-		instructions = responsesJSONModeInstruction + "\n" + instructions
+	switch typed := input.(type) {
+	case nil:
+		input = responsesJSONModeInstruction
+	case string:
+		input = responsesJSONModeInstruction + "\n" + typed
+	case []any:
+		input = prependJSONInstructionToResponsesItems(typed)
+	default:
+		return nil
 	}
 
-	raw, err := common.Marshal(instructions)
+	raw, err := common.Marshal(input)
 	if err != nil {
 		return err
 	}
-	request.Instructions = raw
+	request.Input = raw
 	return nil
+}
+
+func prependJSONInstructionToResponsesItems(items []any) []any {
+	for i := len(items) - 1; i >= 0; i-- {
+		message, ok := items[i].(map[string]any)
+		if !ok || !strings.EqualFold(strings.TrimSpace(common.Interface2String(message["role"])), "user") {
+			continue
+		}
+		switch content := message["content"].(type) {
+		case string:
+			message["content"] = responsesJSONModeInstruction + "\n" + content
+		case []any:
+			message["content"] = append([]any{map[string]any{
+				"type": "input_text",
+				"text": responsesJSONModeInstruction,
+			}}, content...)
+		default:
+			message["content"] = responsesJSONModeInstruction
+		}
+		return items
+	}
+	return append([]any{map[string]any{
+		"role":    "user",
+		"content": responsesJSONModeInstruction,
+	}}, items...)
 }
 
 func rawMessageContainsJSONText(raw json.RawMessage) bool {
