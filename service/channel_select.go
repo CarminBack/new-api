@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -147,10 +146,10 @@ func getRandomSatisfiedChannelWithCircuit(param *RetryParam, group string) (*mod
 		if err != nil || channel == nil {
 			return channel, err
 		}
-		if AllowChannelCircuitAttempt(param.Ctx, channel.Id, param.ModelName, param.RequestPath) {
+		if AllowChannelHealthAttempt(param.Ctx, channel, param.ModelName, param.RequestPath) {
 			return channel, nil
 		}
-		logger.LogWarn(param.Ctx, fmt.Sprintf("channel circuit open, skipping channel #%d for model %s path %s", channel.Id, param.ModelName, param.RequestPath))
+		logger.LogDebug(param.Ctx, "channel health unavailable, skipping channel #%d for model %s path %s", channel.Id, param.ModelName, param.RequestPath)
 		param.ExcludeChannel(channel)
 	}
 }

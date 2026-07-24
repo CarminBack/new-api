@@ -16,6 +16,7 @@ const (
 	ChannelFailureTransient    ChannelFailureClass = "transient"
 	ChannelFailureChannelFatal ChannelFailureClass = "channel_fatal"
 	ChannelFailureUncertain    ChannelFailureClass = "uncertain"
+	ChannelFailureRateLimited  ChannelFailureClass = "rate_limited"
 	// ChannelFailureKeyCapability is a request-local failure indicating that
 	// the selected upstream key cannot serve the requested model. It should not
 	// be used as evidence that the whole channel is unhealthy.
@@ -57,8 +58,13 @@ func DecideChannelFailureForModel(c *gin.Context, err *types.NewAPIError, modelN
 	decision := classifyChannelFailure(err, message, path, modelName)
 	decision.Retry = decision.Class == ChannelFailureTransient ||
 		decision.Class == ChannelFailureChannelFatal ||
+		decision.Class == ChannelFailureRateLimited ||
 		decision.Class == ChannelFailureKeyCapability ||
 		(decision.Class == ChannelFailureUncertain && allowUncertainRetry)
+	if isPotentiallyNonIdempotentPath(path) {
+		decision.Retry = false
+		decision.Reason += ":non_idempotent_path"
+	}
 	if responseStarted {
 		decision.Retry = false
 		decision.Reason += ":response_started"
@@ -75,6 +81,14 @@ func DecideChannelFailureForModel(c *gin.Context, err *types.NewAPIError, modelN
 }
 
 func classifyChannelFailure(err *types.NewAPIError, message string, path string, modelName string) ChannelFailureDecision {
+	if err.StatusCode == http.StatusTooManyRequests {
+		return ChannelFailureDecision{
+			Class:           ChannelFailureRateLimited,
+			Reason:          "upstream_rate_limited",
+			EvictAffinity:   true,
+			CountForCircuit: true,
+		}
+	}
 	if err.StatusCode == http.StatusGatewayTimeout || err.StatusCode == 524 {
 		return ChannelFailureDecision{
 			Class:           ChannelFailureUncertain,
@@ -88,7 +102,7 @@ func classifyChannelFailure(err *types.NewAPIError, message string, path string,
 			Class:           ChannelFailureKeyCapability,
 			Reason:          "sol_key_capability",
 			EvictAffinity:   true,
-			CountForCircuit: false,
+			CountForCircuit: true,
 		}
 	}
 	if isDeterministicRequestFailure(err, message) {

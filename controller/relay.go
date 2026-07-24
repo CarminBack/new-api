@@ -191,7 +191,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	allowUncertainRetry := allowsUncertainCrossChannelRetry(relayInfo, request)
 	uncertainRetryUsed := false
 	solCapabilityRetryCount := 0
+	generalRetryCount := 0
 	const maxSolCapabilityRetries = 2
+	const maxGeneralRetries = 1
+	service.RecordChannelPrimaryRequest(c)
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		relayInfo.RetryIndex = retryParam.GetRetry()
@@ -250,12 +253,26 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if decision.Class == service.ChannelFailureKeyCapability && decision.Retry {
 			decision, solCapabilityRetryCount = applySolCapabilityRetryBudget(decision, solCapabilityRetryCount, maxSolCapabilityRetries)
 		}
+		if decision.Retry && decision.Class != service.ChannelFailureKeyCapability {
+			if generalRetryCount >= maxGeneralRetries {
+				decision.Retry = false
+				decision.Reason += ":general_retry_limit"
+			} else {
+				generalRetryCount++
+			}
+		}
+		if decision.Retry && !service.AllowChannelRetry() {
+			decision.Retry = false
+			decision.Reason += ":global_retry_budget"
+		}
 		if decision.EvictAffinity {
 			service.ClearCurrentChannelAffinityCache(c)
 		}
-		if decision.Retry && decision.Class == service.ChannelFailureUncertain {
+		if decision.Retry && (decision.Class == service.ChannelFailureUncertain || decision.Class == service.ChannelFailureTransient) {
 			retryParam.ExcludeChannel(channel)
-			uncertainRetryUsed = true
+			if decision.Class == service.ChannelFailureUncertain {
+				uncertainRetryUsed = true
+			}
 		}
 		service.FinishChannelRouteAttempt(c, newAPIError.StatusCode, decision)
 		if decision.CountForCircuit {
@@ -417,7 +434,7 @@ func processChannelErrorWithDecision(c *gin.Context, channelError types.ChannelE
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if decision.Class != service.ChannelFailureKeyCapability && service.ShouldDisableChannel(err) && channelError.AutoBan {
+	if err.StatusCode != http.StatusTooManyRequests && decision.Class != service.ChannelFailureKeyCapability && service.ShouldDisableChannel(err) && channelError.AutoBan {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
@@ -575,6 +592,8 @@ func RelayTask(c *gin.Context) {
 		ImageResolutionTier: common.GetContextKeyString(c, constant.ContextKeyImageResolutionTier),
 		Retry:               common.GetPointer(0),
 	}
+	service.RecordChannelPrimaryRequest(c)
+	taskRetryCount := 0
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		var channel *model.Channel
@@ -582,7 +601,12 @@ func RelayTask(c *gin.Context) {
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
 			channel = lockedCh
 			if retryParam.GetRetry() > 0 {
+				if !service.AllowChannelHealthAttempt(c, channel, relayInfo.OriginModelName, c.Request.URL.Path) {
+					taskErr = service.TaskErrorWrapperLocal(errors.New("locked channel health unavailable"), "locked_channel_unavailable", http.StatusServiceUnavailable)
+					break
+				}
 				if setupErr := middleware.SetupContextForSelectedChannelWithExclusions(c, channel, relayInfo.OriginModelName, retryParam.ExcludedKeys(channel.Id)); setupErr != nil {
+					service.ReleaseChannelCircuitProbe(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
 					taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
 					break
 				}
@@ -619,6 +643,17 @@ func RelayTask(c *gin.Context) {
 		retryParam.MarkAttempted(channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex))
 
 		decision := decideTaskChannelFailure(c, taskErr, common.RetryTimes-retryParam.GetRetry())
+		if decision.Retry {
+			if taskRetryCount >= 1 {
+				decision.Retry = false
+				decision.Reason += ":general_retry_limit"
+			} else if !service.AllowChannelRetry() {
+				decision.Retry = false
+				decision.Reason += ":global_retry_budget"
+			} else {
+				taskRetryCount++
+			}
+		}
 		if decision.EvictAffinity {
 			service.ClearCurrentChannelAffinityCache(c)
 		}

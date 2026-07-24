@@ -129,7 +129,7 @@ func Distribute() func(c *gin.Context) {
 							autoGroups := service.GetUserAutoGroup(userGroup)
 							for _, g := range autoGroups {
 								if model.IsChannelEnabledForGroupModelWithImageResolution(g, modelRequest.Model, modelRequest.ImageResolutionTier, preferred.Id) {
-									if !service.AllowChannelCircuitAttempt(c, preferred.Id, modelRequest.Model, c.Request.URL.Path) {
+									if !service.AllowChannelHealthAttempt(c, preferred, modelRequest.Model, c.Request.URL.Path) {
 										affinityCircuitOpen = true
 										break
 									}
@@ -142,7 +142,7 @@ func Distribute() func(c *gin.Context) {
 								}
 							}
 						} else if model.IsChannelEnabledForGroupModelWithImageResolution(usingGroup, modelRequest.Model, modelRequest.ImageResolutionTier, preferred.Id) {
-							if service.AllowChannelCircuitAttempt(c, preferred.Id, modelRequest.Model, c.Request.URL.Path) {
+							if service.AllowChannelHealthAttempt(c, preferred, modelRequest.Model, c.Request.URL.Path) {
 								channel = preferred
 								selectGroup = usingGroup
 								affinityUsable = true
@@ -188,6 +188,10 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+		if ok && channel != nil && !service.AllowChannelHealthAttempt(c, channel, modelRequest.Model, c.Request.URL.Path) {
+			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+			return
+		}
 		if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
 			if channel != nil {
 				service.ReleaseChannelCircuitProbe(c, channel.Id, modelRequest.Model, c.Request.URL.Path)
@@ -196,6 +200,7 @@ func Distribute() func(c *gin.Context) {
 			return
 		}
 		c.Next()
+		service.ReleaseCurrentChannelHealthReservation(c)
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
@@ -526,9 +531,22 @@ func SetupContextForSelectedChannelWithExclusions(c *gin.Context, channel *model
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
-	key, index, newAPIError := channel.GetNextEnabledKeyExcluding(excludedKeys)
-	if newAPIError != nil {
-		return newAPIError
+	excludedKeys = service.ChannelHealthKeyExclusions(channel, modelName, c.Request.URL.Path, excludedKeys)
+	var key string
+	var index int
+	for {
+		var newAPIError *types.NewAPIError
+		key, index, newAPIError = channel.GetNextEnabledKeyExcluding(excludedKeys)
+		if newAPIError != nil {
+			return newAPIError
+		}
+		if service.AcquireChannelHealthKey(c, key) {
+			break
+		}
+		if excludedKeys == nil {
+			excludedKeys = make(map[int]struct{})
+		}
+		excludedKeys[index] = struct{}{}
 	}
 	if channel.ChannelInfo.IsMultiKey {
 		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
