@@ -190,9 +190,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.LastError = nil
 	allowUncertainRetry := allowsUncertainCrossChannelRetry(relayInfo, request)
 	uncertainRetryUsed := false
-	solCapabilityRetryCount := 0
 	generalRetryCount := 0
-	const maxSolCapabilityRetries = 2
 	const maxGeneralRetries = 1
 	service.RecordChannelPrimaryRequest(c)
 
@@ -250,10 +248,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			specificChannel,
 			allowUncertainRetry && !uncertainRetryUsed,
 		)
-		if decision.Class == service.ChannelFailureKeyCapability && decision.Retry {
-			decision, solCapabilityRetryCount = applySolCapabilityRetryBudget(decision, solCapabilityRetryCount, maxSolCapabilityRetries)
-		}
-		if decision.Retry && decision.Class != service.ChannelFailureKeyCapability {
+		if decision.Retry {
 			if generalRetryCount >= maxGeneralRetries {
 				decision.Retry = false
 				decision.Reason += ":general_retry_limit"
@@ -268,7 +263,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if decision.EvictAffinity {
 			service.ClearCurrentChannelAffinityCache(c)
 		}
-		if decision.Retry && (decision.Class == service.ChannelFailureUncertain || decision.Class == service.ChannelFailureTransient) {
+		if decision.Retry && shouldExcludeChannelForRetry(decision.Class) {
 			retryParam.ExcludeChannel(channel)
 			if decision.Class == service.ChannelFailureUncertain {
 				uncertainRetryUsed = true
@@ -300,16 +295,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 }
 
-func applySolCapabilityRetryBudget(decision service.ChannelFailureDecision, used int, limit int) (service.ChannelFailureDecision, int) {
-	if decision.Class != service.ChannelFailureKeyCapability || !decision.Retry || limit <= 0 {
-		return decision, used
+func shouldExcludeChannelForRetry(class service.ChannelFailureClass) bool {
+	switch class {
+	case service.ChannelFailureTransient,
+		service.ChannelFailureUncertain,
+		service.ChannelFailureRateLimited,
+		service.ChannelFailureKeyCapability,
+		service.ChannelFailurePoolAccount:
+		return true
+	default:
+		return false
 	}
-	if used >= limit {
-		decision.Retry = false
-		decision.Reason += ":sol_capability_budget_exhausted"
-		return decision, used
-	}
-	return decision, used + 1
 }
 
 var upgrader = websocket.Upgrader{
@@ -433,14 +429,14 @@ func allowsUncertainCrossChannelRetry(info *relaycommon.RelayInfo, request dto.R
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, recordErrorLog ...bool) {
-	processChannelErrorWithDecision(c, channelError, err, service.ChannelFailureDecision{}, recordErrorLog...)
+	processChannelErrorWithDecision(c, channelError, err, service.ChannelFailureDecision{Class: service.ChannelFailureChannelFatal}, recordErrorLog...)
 }
 
 func processChannelErrorWithDecision(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, decision service.ChannelFailureDecision, recordErrorLog ...bool) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if err.StatusCode != http.StatusTooManyRequests && decision.Class != service.ChannelFailureKeyCapability && service.ShouldDisableChannel(err) && channelError.AutoBan {
+	if allowsRelayAutoDisable(decision.Class) && service.ShouldDisableChannel(err) && channelError.AutoBan {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
@@ -482,6 +478,10 @@ func processChannelErrorWithDecision(c *gin.Context, channelError types.ChannelE
 		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 
+}
+
+func allowsRelayAutoDisable(class service.ChannelFailureClass) bool {
+	return class == service.ChannelFailureChannelFatal
 }
 
 func RelayMidjourney(c *gin.Context) {
@@ -671,10 +671,10 @@ func RelayTask(c *gin.Context) {
 		}
 		willRetry := decision.Retry
 		if !taskErr.LocalError {
-			processChannelError(c,
+			processChannelErrorWithDecision(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode), !willRetry)
+				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode), decision, !willRetry)
 		}
 
 		if !willRetry {
@@ -773,7 +773,7 @@ func decideTaskChannelFailure(c *gin.Context, taskErr *dto.TaskError, retryTimes
 	}
 	apiErr := types.NewOpenAIError(underlyingErr, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
 	decision := service.DecideChannelFailure(c, apiErr, retryTimes, specificChannel, false)
-	if taskErr.StatusCode == http.StatusForbidden && decision.Class != service.ChannelFailureChannelFatal {
+	if taskErr.StatusCode == http.StatusForbidden && decision.Class != service.ChannelFailureChannelFatal && decision.Class != service.ChannelFailurePoolAccount {
 		return service.ChannelFailureDecision{Class: service.ChannelFailureTerminal, Reason: "task_forbidden"}
 	}
 	return decision

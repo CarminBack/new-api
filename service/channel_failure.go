@@ -17,9 +17,9 @@ const (
 	ChannelFailureChannelFatal ChannelFailureClass = "channel_fatal"
 	ChannelFailureUncertain    ChannelFailureClass = "uncertain"
 	ChannelFailureRateLimited  ChannelFailureClass = "rate_limited"
-	// ChannelFailureKeyCapability is a request-local failure indicating that
-	// the selected upstream key cannot serve the requested model. It should not
-	// be used as evidence that the whole channel is unhealthy.
+	ChannelFailurePoolAccount  ChannelFailureClass = "pool_account"
+	// ChannelFailureKeyCapability is retained as a stable log value for Sol
+	// capability misses. The failure belongs to a pooled account, not the key.
 	ChannelFailureKeyCapability ChannelFailureClass = "key_capability"
 )
 
@@ -59,6 +59,7 @@ func DecideChannelFailureForModel(c *gin.Context, err *types.NewAPIError, modelN
 	decision.Retry = decision.Class == ChannelFailureTransient ||
 		decision.Class == ChannelFailureChannelFatal ||
 		decision.Class == ChannelFailureRateLimited ||
+		decision.Class == ChannelFailurePoolAccount ||
 		decision.Class == ChannelFailureKeyCapability ||
 		(decision.Class == ChannelFailureUncertain && allowUncertainRetry)
 	if isPotentiallyNonIdempotentPath(path) {
@@ -105,16 +106,24 @@ func classifyChannelFailure(err *types.NewAPIError, message string, path string,
 			CountForCircuit: true,
 		}
 	}
-	if isDeterministicRequestFailure(err, message) {
-		return ChannelFailureDecision{Class: ChannelFailureTerminal, Reason: "deterministic_request"}
-	}
-	if isChannelFatalFailure(err, message) {
+	if isExplicitGatewayCredentialFailure(message) {
 		return ChannelFailureDecision{
 			Class:           ChannelFailureChannelFatal,
-			Reason:          "channel_credentials_or_balance",
+			Reason:          "gateway_credentials",
 			EvictAffinity:   true,
 			CountForCircuit: true,
 		}
+	}
+	if isPoolAccountFailure(err, message) {
+		return ChannelFailureDecision{
+			Class:           ChannelFailurePoolAccount,
+			Reason:          "pooled_account_unavailable",
+			EvictAffinity:   true,
+			CountForCircuit: true,
+		}
+	}
+	if isDeterministicRequestFailure(err, message) {
+		return ChannelFailureDecision{Class: ChannelFailureTerminal, Reason: "deterministic_request"}
 	}
 	if types.IsChannelError(err) {
 		return ChannelFailureDecision{
@@ -210,7 +219,23 @@ func isDeterministicRequestFailure(err *types.NewAPIError, message string) bool 
 	return false
 }
 
-func isChannelFatalFailure(err *types.NewAPIError, message string) bool {
+func isExplicitGatewayCredentialFailure(message string) bool {
+	patterns := []string{
+		"invalid gateway api key",
+		"incorrect gateway api key",
+		"invalid channel api key",
+		"incorrect channel api key",
+		"gateway authentication failed",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(message, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPoolAccountFailure(err *types.NewAPIError, message string) bool {
 	if err.StatusCode == http.StatusUnauthorized || err.StatusCode == http.StatusPaymentRequired {
 		return true
 	}
@@ -222,6 +247,11 @@ func isChannelFatalFailure(err *types.NewAPIError, message string) bool {
 		"invalid api key",
 		"incorrect api key",
 		"not enabled for this group",
+		"account deactivated",
+		"account disabled",
+		"account suspended",
+		"account is not active",
+		"subscription expired",
 	}
 	for _, pattern := range patterns {
 		if strings.Contains(message, pattern) {

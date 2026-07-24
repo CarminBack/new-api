@@ -58,25 +58,50 @@ func TestAllowsUncertainCrossChannelRetry(t *testing.T) {
 	}
 }
 
-func TestApplySolCapabilityRetryBudget(t *testing.T) {
-	decision := service.ChannelFailureDecision{
-		Class:  service.ChannelFailureKeyCapability,
-		Retry:  true,
-		Reason: "sol_key_capability",
+func TestPoolFailuresRetryOnAnotherChannel(t *testing.T) {
+	for _, class := range []service.ChannelFailureClass{
+		service.ChannelFailureTransient,
+		service.ChannelFailureUncertain,
+		service.ChannelFailureRateLimited,
+		service.ChannelFailureKeyCapability,
+		service.ChannelFailurePoolAccount,
+	} {
+		require.True(t, shouldExcludeChannelForRetry(class), class)
+	}
+	require.False(t, shouldExcludeChannelForRetry(service.ChannelFailureChannelFatal))
+	require.False(t, shouldExcludeChannelForRetry(service.ChannelFailureTerminal))
+}
+
+func TestRelayAutoDisableOnlyAllowsExplicitGatewayFailure(t *testing.T) {
+	for _, class := range []service.ChannelFailureClass{
+		service.ChannelFailureTerminal,
+		service.ChannelFailureTransient,
+		service.ChannelFailureUncertain,
+		service.ChannelFailureRateLimited,
+		service.ChannelFailureKeyCapability,
+		service.ChannelFailurePoolAccount,
+	} {
+		require.False(t, allowsRelayAutoDisable(class), class)
+	}
+	require.True(t, allowsRelayAutoDisable(service.ChannelFailureChannelFatal))
+}
+
+func TestPoolRetryExcludesWholeChannel(t *testing.T) {
+	param := &service.RetryParam{}
+	channel := &model.Channel{
+		Id:   29,
+		Key:  "key-a\nkey-b",
+		Keys: []string{"key-a", "key-b"},
+		ChannelInfo: model.ChannelInfo{
+			IsMultiKey: true,
+		},
+	}
+	param.MarkAttempted(channel.Id, 0)
+	if shouldExcludeChannelForRetry(service.ChannelFailureKeyCapability) {
+		param.ExcludeChannel(channel)
 	}
 
-	decision, used := applySolCapabilityRetryBudget(decision, 0, 2)
-	require.True(t, decision.Retry)
-	require.Equal(t, 1, used)
-
-	decision, used = applySolCapabilityRetryBudget(decision, used, 2)
-	require.True(t, decision.Retry)
-	require.Equal(t, 2, used)
-
-	decision, used = applySolCapabilityRetryBudget(decision, used, 2)
-	require.False(t, decision.Retry)
-	require.Equal(t, 2, used)
-	require.Contains(t, decision.Reason, "sol_capability_budget_exhausted")
+	require.Equal(t, map[int]struct{}{0: {}, 1: {}}, param.ExcludedKeys(channel.Id))
 }
 
 func TestGetChannelHydratesInitialMultiKeyChannel(t *testing.T) {

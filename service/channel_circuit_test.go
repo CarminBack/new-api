@@ -123,6 +123,23 @@ func TestFailedHalfOpenProbeReopensForTwoMinutes(t *testing.T) {
 	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 }
 
+func TestRateLimitHalfOpenProbeClearsHardOpenState(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	for i := 0; i < 4; i++ {
+		recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	}
+	*now = now.Add(channelHealthOpenFor + time.Millisecond)
+	probeCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelCircuitAttempt(probeCtx, 37, "gpt-test", "/v1/responses"))
+	RecordChannelCircuitFailure(probeCtx, 37, "gpt-test", "/v1/responses", ChannelFailureRateLimited)
+
+	state := routeStateForTest(37, "gpt-test", "/v1/responses")
+	require.True(t, state.OpenUntil.IsZero())
+	require.False(t, state.ProbeInFlight)
+	require.Equal(t, channelHealthRecoveryCapacity, state.Capacity)
+	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+}
+
 func TestTwoIndependentUnhealthyRoutesOpenWholeChannel(t *testing.T) {
 	setupChannelHealthTest(t)
 	for _, route := range []struct {
@@ -137,7 +154,44 @@ func TestTwoIndependentUnhealthyRoutesOpenWholeChannel(t *testing.T) {
 	require.True(t, AllowChannelCircuitAttempt(nil, 9, "healthy-model", "/v1/embeddings"))
 }
 
-func TestRateLimitReducesCapacityOncePerBucketWithoutOpening(t *testing.T) {
+func TestPoolFailureAfterAggregateCooldownClearsWholeChannel(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	for _, modelName := range []string{"gpt-a", "gpt-b"} {
+		for i := 0; i < 4; i++ {
+			recordLegacyRouteOutcome(t, 8, modelName, "/v1/responses", ChannelFailureTransient)
+		}
+	}
+	require.False(t, AllowChannelCircuitAttempt(nil, 8, "healthy-model", "/v1/embeddings"))
+
+	*now = now.Add(channelHealthOpenFor + time.Millisecond)
+	probeCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelCircuitAttempt(probeCtx, 8, "healthy-model", "/v1/embeddings"))
+	RecordChannelCircuitFailure(probeCtx, 8, "healthy-model", "/v1/embeddings", ChannelFailurePoolAccount)
+
+	require.True(t, AllowChannelCircuitAttempt(nil, 8, "another-model", "/v1/chat/completions"))
+}
+
+func TestSingleRateLimitDoesNotReducePooledKeyOrRouteCapacity(t *testing.T) {
+	setupChannelHealthTest(t)
+	channel := &model.Channel{Id: 29, Key: "key-a", CreatedTime: channelCircuitNow().Add(-time.Hour).Unix()}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-test", "/v1/responses"))
+	require.True(t, AcquireChannelHealthKey(ctx, "key-a"))
+	common.SetContextKey(ctx, constant.ContextKeyChannelKey, "key-a")
+	RecordChannelCircuitFailure(ctx, channel.Id, "gpt-test", "/v1/responses", ChannelFailureRateLimited)
+
+	state := routeStateForTestWithChannel(channel, "gpt-test", "/v1/responses")
+	require.Equal(t, channelHealthEstablishedCapacity, state.Capacity)
+	require.True(t, state.OpenUntil.IsZero())
+	identity := buildChannelHealthIdentity(channel, 0, "gpt-test", "/v1/responses", channelCircuitNow())
+	memoryChannelHealth.Keys.RLock()
+	keyState := memoryChannelHealth.Keys.States[keyHealthRouteKey(identity, "key-a")]
+	memoryChannelHealth.Keys.RUnlock()
+	require.Equal(t, channelHealthEstablishedCapacity, keyState.Capacity)
+	require.Equal(t, 0, keyState.InFlight)
+}
+
+func TestSustainedRateLimitReducesRouteOnceWithoutOpening(t *testing.T) {
 	setupChannelHealthTest(t)
 	channel := &model.Channel{Id: 29, Key: "key-a", CreatedTime: channelCircuitNow().Add(-time.Hour).Unix()}
 	for i := 0; i < 5; i++ {
@@ -148,14 +202,13 @@ func TestRateLimitReducesCapacityOncePerBucketWithoutOpening(t *testing.T) {
 		RecordChannelCircuitFailure(ctx, channel.Id, "gpt-test", "/v1/responses", ChannelFailureRateLimited)
 	}
 	state := routeStateForTestWithChannel(channel, "gpt-test", "/v1/responses")
-	require.Equal(t, channelHealthEstablishedCapacity, state.Capacity)
+	require.Equal(t, 102, state.Capacity)
 	require.True(t, state.OpenUntil.IsZero())
 	identity := buildChannelHealthIdentity(channel, 0, "gpt-test", "/v1/responses", channelCircuitNow())
 	memoryChannelHealth.Keys.RLock()
 	keyState := memoryChannelHealth.Keys.States[keyHealthRouteKey(identity, "key-a")]
 	memoryChannelHealth.Keys.RUnlock()
-	require.Equal(t, 102, keyState.Capacity)
-	require.Equal(t, 0, keyState.InFlight)
+	require.Equal(t, channelHealthEstablishedCapacity, keyState.Capacity)
 }
 
 func TestAdmissionSkipsFullRouteAndReleasesCapacity(t *testing.T) {
@@ -251,7 +304,7 @@ func routeStateForTestWithChannel(channel *model.Channel, modelName string, requ
 	return channelRouteHealthState{}
 }
 
-func TestSolCapabilityIsolationUsesKeyAndConfigurationFingerprint(t *testing.T) {
+func TestSingleSolPoolCapabilityFailureDoesNotIsolateKey(t *testing.T) {
 	setupChannelHealthTest(t)
 	baseURL := "https://first.example.com"
 	channel := &model.Channel{
@@ -267,13 +320,43 @@ func TestSolCapabilityIsolationUsesKeyAndConfigurationFingerprint(t *testing.T) 
 	common.SetContextKey(ctx, constant.ContextKeyChannelKey, "key-a")
 	RecordChannelCircuitFailure(ctx, channel.Id, "gpt-5.6-sol", "/v1/responses", ChannelFailureKeyCapability)
 
-	excluded := ChannelHealthKeyExclusions(channel, "gpt-5.6-sol", "/v1/responses", nil)
-	require.Contains(t, excluded, 0)
-	require.NotContains(t, excluded, 1)
-
-	changedURL := "https://replacement.example.com"
-	channel.BaseURL = &changedURL
 	require.Empty(t, ChannelHealthKeyExclusions(channel, "gpt-5.6-sol", "/v1/responses", nil))
+	require.Equal(t, channelHealthEstablishedCapacity, routeStateForTestWithChannel(channel, "gpt-5.6-sol", "/v1/responses").Capacity)
+}
+
+func TestSolPoolCapabilityUsesStatisticalRouteHealthOnly(t *testing.T) {
+	setupChannelHealthTest(t)
+	channel := &model.Channel{Id: 29, Key: "key-a", CreatedTime: channelCircuitNow().Add(-time.Hour).Unix()}
+	for i := 0; i < 97; i++ {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-5.6-sol", "/v1/responses"))
+		RecordChannelCircuitSuccess(ctx, channel.Id, "gpt-5.6-sol", "/v1/responses")
+	}
+	for i := 0; i < 3; i++ {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-5.6-sol", "/v1/responses"))
+		RecordChannelCircuitFailure(ctx, channel.Id, "gpt-5.6-sol", "/v1/responses", ChannelFailureKeyCapability)
+	}
+	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-5.6-sol", "/v1/responses"))
+
+	setupChannelHealthTest(t)
+	for i := 0; i < 4; i++ {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-5.6-sol", "/v1/responses"))
+		RecordChannelCircuitFailure(ctx, channel.Id, "gpt-5.6-sol", "/v1/responses", ChannelFailureKeyCapability)
+	}
+	require.False(t, AllowChannelHealthAttempt(nil, channel, "gpt-5.6-sol", "/v1/responses"))
+	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-5.6-terra", "/v1/responses"))
+}
+
+func TestPoolFailuresNeverOpenWholeChannel(t *testing.T) {
+	setupChannelHealthTest(t)
+	for _, modelName := range []string{"gpt-a", "gpt-b"} {
+		for i := 0; i < 4; i++ {
+			recordLegacyRouteOutcome(t, 8, modelName, "/v1/responses", ChannelFailurePoolAccount)
+		}
+	}
+	require.True(t, AllowChannelCircuitAttempt(nil, 8, "healthy-model", "/v1/embeddings"))
 }
 
 func TestChangedChannelKeepsSlowStartCapacity(t *testing.T) {

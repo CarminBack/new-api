@@ -18,22 +18,22 @@ import (
 )
 
 const (
-	channelHealthWindow               = 2 * time.Minute
-	channelHealthBucketDuration       = 5 * time.Second
-	channelHealthBucketCount          = int(channelHealthWindow / channelHealthBucketDuration)
-	channelHealthOpenFor              = 2 * time.Minute
-	channelHealthStateTTL             = 30 * time.Minute
-	channelHealthShardCount           = 32
-	channelHealthEstablishedCapacity  = 128
-	channelHealthNewCapacity          = 16
-	channelHealthRecoveryCapacity     = 8
-	channelHealthMinCapacity          = 1
-	channelHealthMaxCapacity          = 512
-	channelHealthNewChannelAge        = 10 * time.Minute
-	channelHealthWarningLowerBound    = 0.10
-	channelHealthOpenLowerBound       = 0.50
-	channelHealthKeyFatalOpenFor      = 10 * time.Minute
-	channelHealthKeyCapabilityOpenFor = 15 * time.Minute
+	channelHealthWindow                  = 2 * time.Minute
+	channelHealthBucketDuration          = 5 * time.Second
+	channelHealthBucketCount             = int(channelHealthWindow / channelHealthBucketDuration)
+	channelHealthOpenFor                 = 2 * time.Minute
+	channelHealthStateTTL                = 30 * time.Minute
+	channelHealthShardCount              = 32
+	channelHealthEstablishedCapacity     = 128
+	channelHealthNewCapacity             = 16
+	channelHealthRecoveryCapacity        = 8
+	channelHealthMinCapacity             = 1
+	channelHealthMaxCapacity             = 512
+	channelHealthNewChannelAge           = 10 * time.Minute
+	channelHealthWarningLowerBound       = 0.10
+	channelHealthOpenLowerBound          = 0.50
+	channelHealthKeyFatalOpenFor         = 10 * time.Minute
+	channelHealthAdaptiveMinimumFailures = 4
 
 	ginKeyChannelHealthReservation = "channel_health_reservation"
 )
@@ -41,9 +41,11 @@ const (
 var channelCircuitNow = time.Now
 
 type channelHealthBucket struct {
-	Epoch     int64
-	Successes int
-	Failures  int
+	Epoch        int64
+	Successes    int
+	Failures     int
+	PoolFailures int
+	RateLimits   int
 }
 
 type channelRouteHealthState struct {
@@ -69,7 +71,6 @@ type channelKeyHealthState struct {
 	InFlight               int
 	Capacity               int
 	SuccessesSinceIncrease int
-	LastDecreaseEpoch      int64
 	LastTouched            time.Time
 }
 
@@ -262,21 +263,33 @@ func healthBucketEpoch(now time.Time) int64 {
 	return now.UnixNano() / channelHealthBucketDuration.Nanoseconds()
 }
 
-func recordRouteHealthOutcomeLocked(state *channelRouteHealthState, now time.Time, success bool) {
+func currentRouteHealthBucketLocked(state *channelRouteHealthState, now time.Time) *channelHealthBucket {
 	epoch := healthBucketEpoch(now)
 	index := int(epoch % int64(channelHealthBucketCount))
 	bucket := &state.Buckets[index]
 	if bucket.Epoch != epoch {
 		*bucket = channelHealthBucket{Epoch: epoch}
 	}
-	if success {
-		bucket.Successes++
-	} else {
+	return bucket
+}
+
+func recordRouteHealthSuccessLocked(state *channelRouteHealthState, now time.Time) {
+	currentRouteHealthBucketLocked(state, now).Successes++
+}
+
+func recordRouteHealthFailureLocked(state *channelRouteHealthState, now time.Time, class ChannelFailureClass) {
+	bucket := currentRouteHealthBucketLocked(state, now)
+	switch class {
+	case ChannelFailureRateLimited:
+		bucket.RateLimits++
+	case ChannelFailureKeyCapability, ChannelFailurePoolAccount:
+		bucket.PoolFailures++
+	default:
 		bucket.Failures++
 	}
 }
 
-func summarizeRouteHealthLocked(state *channelRouteHealthState, now time.Time) (successes int, failures int) {
+func summarizeRouteHealthLocked(state *channelRouteHealthState, now time.Time) (successes int, failures int, poolFailures int, rateLimits int) {
 	currentEpoch := healthBucketEpoch(now)
 	for i := range state.Buckets {
 		bucket := state.Buckets[i]
@@ -285,8 +298,10 @@ func summarizeRouteHealthLocked(state *channelRouteHealthState, now time.Time) (
 		}
 		successes += bucket.Successes
 		failures += bucket.Failures
+		poolFailures += bucket.PoolFailures
+		rateLimits += bucket.RateLimits
 	}
-	return successes, failures
+	return
 }
 
 func wilsonLowerBound(failures int, total int) float64 {
@@ -455,8 +470,7 @@ func finishChannelHealthKey(reservation channelHealthReservation, class ChannelF
 	if state.InFlight > 0 {
 		state.InFlight--
 	}
-	switch class {
-	case "success":
+	if class == "success" {
 		if state.Capacity < channelHealthMaxCapacity {
 			state.SuccessesSinceIncrease++
 			threshold := state.Capacity / 8
@@ -467,17 +481,6 @@ func finishChannelHealthKey(reservation channelHealthReservation, class ChannelF
 				state.Capacity++
 				state.SuccessesSinceIncrease = 0
 			}
-		}
-	case ChannelFailureRateLimited:
-		epoch := healthBucketEpoch(now)
-		if state.LastDecreaseEpoch != epoch {
-			state.LastDecreaseEpoch = epoch
-			capacity := int(math.Floor(float64(state.Capacity) * 0.8))
-			if capacity < channelHealthMinCapacity {
-				capacity = channelHealthMinCapacity
-			}
-			state.Capacity = capacity
-			state.SuccessesSinceIncrease = 0
 		}
 	}
 	state.LastTouched = now
@@ -681,42 +684,50 @@ func RecordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 	if c != nil {
 		selectedKey = common.GetContextKeyString(c, constant.ContextKeyChannelKey)
 	}
-	if class == ChannelFailureKeyCapability {
-		setChannelKeyHealth(identity, selectedKey, true, channelHealthKeyCapabilityOpenFor, now)
-	} else if class == ChannelFailureChannelFatal {
+	if class == ChannelFailureChannelFatal {
 		setChannelKeyHealth(identity, selectedKey, false, channelHealthKeyFatalOpenFor, now)
 	}
 	finishChannelHealthKey(reservation, class, now)
 
 	shard := channelHealthShardFor(identity.RouteKey)
 	opened := false
+	contributesToChannel := false
 	shard.Lock()
 	state := getRouteHealthStateLocked(shard, identity, now)
 	if state.InFlight > 0 {
 		state.InFlight--
 	}
-	if reservation.RouteProbe {
+	if reservation.RouteProbe && class != ChannelFailureRateLimited {
 		state.ProbeInFlight = false
 		state.OpenUntil = now.Add(channelHealthOpenFor)
 		state.Capacity = channelHealthRecoveryCapacity
 		opened = true
+		contributesToChannel = class == ChannelFailureUncertain || class == ChannelFailureTransient
 	} else {
+		if reservation.RouteProbe {
+			state.ProbeInFlight = false
+			state.OpenUntil = time.Time{}
+			state.Capacity = channelHealthRecoveryCapacity
+		}
 		failureCapacityFactor := 0.0
 		switch class {
 		case ChannelFailureRateLimited:
+			recordRouteHealthFailureLocked(state, now, class)
+		case ChannelFailureKeyCapability, ChannelFailurePoolAccount:
+			recordRouteHealthFailureLocked(state, now, class)
 		case ChannelFailureUncertain:
-			recordRouteHealthOutcomeLocked(state, now, false)
+			recordRouteHealthFailureLocked(state, now, class)
 			failureCapacityFactor = 0.5
 		case ChannelFailureTransient:
-			recordRouteHealthOutcomeLocked(state, now, false)
+			recordRouteHealthFailureLocked(state, now, class)
 			failureCapacityFactor = 0.7
 		case ChannelFailureChannelFatal:
 			if selectedKey == "" {
-				recordRouteHealthOutcomeLocked(state, now, false)
+				recordRouteHealthFailureLocked(state, now, class)
 				failureCapacityFactor = 0.5
 			}
 		}
-		successes, failures := summarizeRouteHealthLocked(state, now)
+		successes, failures, poolFailures, rateLimits := summarizeRouteHealthLocked(state, now)
 		failureLowerBound := wilsonLowerBound(failures, successes+failures)
 		if failureCapacityFactor > 0 && failureLowerBound > channelHealthWarningLowerBound {
 			decreaseRouteCapacityLocked(state, now, failureCapacityFactor)
@@ -726,16 +737,37 @@ func RecordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 			state.ProbeInFlight = false
 			state.Capacity = channelHealthRecoveryCapacity
 			opened = true
+			contributesToChannel = true
+		}
+		poolLowerBound := wilsonLowerBound(poolFailures, successes+poolFailures)
+		if poolFailures >= channelHealthAdaptiveMinimumFailures && poolLowerBound > channelHealthWarningLowerBound {
+			decreaseRouteCapacityLocked(state, now, 0.8)
+		}
+		if poolFailures >= channelHealthAdaptiveMinimumFailures && poolLowerBound > channelHealthOpenLowerBound {
+			state.OpenUntil = now.Add(channelHealthOpenFor)
+			state.ProbeInFlight = false
+			state.Capacity = channelHealthRecoveryCapacity
+			opened = true
+		}
+		rateLimitLowerBound := wilsonLowerBound(rateLimits, successes+rateLimits)
+		if rateLimits >= channelHealthAdaptiveMinimumFailures && rateLimitLowerBound > channelHealthWarningLowerBound {
+			decreaseRouteCapacityLocked(state, now, 0.8)
 		}
 	}
 	state.LastTouched = now
 	shard.Unlock()
 
 	if reservation.ChannelProbe {
-		reopenAggregateChannel(identity, now)
+		if contributesToChannel {
+			reopenAggregateChannel(identity, now)
+		} else {
+			releaseAggregateChannelProbe(identity, true)
+		}
 	}
 	if opened {
-		markAggregateRouteUnhealthy(identity, now)
+		if contributesToChannel {
+			markAggregateRouteUnhealthy(identity, now)
+		}
 		logger.LogWarn(c, fmt.Sprintf("adaptive channel route opened: channel #%d model %s path %s", channelID, modelName, requestPath))
 	}
 	clearHealthReservationContext(c)
@@ -756,7 +788,7 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 	if state.InFlight > 0 {
 		state.InFlight--
 	}
-	recordRouteHealthOutcomeLocked(state, now, true)
+	recordRouteHealthSuccessLocked(state, now)
 	if reservation.RouteProbe {
 		state.ProbeInFlight = false
 		state.OpenUntil = time.Time{}
@@ -834,7 +866,7 @@ func routeHealthLowerBound(channelID int, modelName string, requestPath string) 
 	if state == nil {
 		return 0
 	}
-	successes, failures := summarizeRouteHealthLocked(state, channelCircuitNow())
+	successes, failures, _, _ := summarizeRouteHealthLocked(state, channelCircuitNow())
 	return wilsonLowerBound(failures, successes+failures)
 }
 
