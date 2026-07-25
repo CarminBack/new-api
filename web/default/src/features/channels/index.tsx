@@ -19,10 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Settings2 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Tooltip,
   TooltipContent,
@@ -32,6 +34,7 @@ import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { getChannelOps } from './api'
+import { ChannelHealthPanel } from './components/channel-health-panel'
 import { ChannelsDialogs } from './components/channels-dialogs'
 import { ChannelsPrimaryButtons } from './components/channels-primary-buttons'
 import { ChannelsProvider } from './components/channels-provider'
@@ -52,6 +55,11 @@ export function Channels() {
   const retryLabel =
     typeof retryTimes === 'number' ? `${t('Max Retries')}: ${retryTimes}` : null
   let retryBadge = null
+  const [activeView, setActiveView] = useState<'channels' | 'health'>(() =>
+    localStorage.getItem('channels:active-view') === 'health'
+      ? 'health'
+      : 'channels'
+  )
   if (retryLabel) {
     retryBadge = isRoot ? (
       <Tooltip>
@@ -86,20 +94,43 @@ export function Channels() {
 
   return (
     <ChannelsProvider>
-      <SectionPageLayout fixedContent>
-        <SectionPageLayout.Title>
-          <span className='flex min-w-0 items-center gap-2'>
-            <span className='truncate'>{t('Channels')}</span>
-            {retryBadge}
-          </span>
-        </SectionPageLayout.Title>
-        <SectionPageLayout.Actions>
-          <ChannelsPrimaryButtons />
-        </SectionPageLayout.Actions>
-        <SectionPageLayout.Content>
-          <ChannelsTable />
-        </SectionPageLayout.Content>
-      </SectionPageLayout>
+      <Tabs
+        value={activeView}
+        onValueChange={(value) => {
+          const nextView = value === 'health' ? 'health' : 'channels'
+          localStorage.setItem('channels:active-view', nextView)
+          setActiveView(nextView)
+        }}
+        className='min-h-0 flex-1 gap-0'
+      >
+        <SectionPageLayout fixedContent>
+          <SectionPageLayout.Title>
+            <span className='flex min-w-0 items-center gap-2'>
+              <span className='truncate'>{t('Channels')}</span>
+              {retryBadge}
+              <TabsList className='h-7 shrink-0'>
+                <TabsTrigger value='channels' className='px-2 text-xs'>
+                  {t('Channel List')}
+                </TabsTrigger>
+                <TabsTrigger value='health' className='px-2 text-xs'>
+                  {t('Channel Health')}
+                </TabsTrigger>
+              </TabsList>
+            </span>
+          </SectionPageLayout.Title>
+          <SectionPageLayout.Actions>
+            {activeView === 'channels' && <ChannelsPrimaryButtons />}
+          </SectionPageLayout.Actions>
+          <SectionPageLayout.Content>
+            <TabsContent value='channels' className='h-full min-h-0'>
+              <ChannelsTable />
+            </TabsContent>
+            <TabsContent value='health' className='h-full min-h-0'>
+              <ChannelHealthPanel />
+            </TabsContent>
+          </SectionPageLayout.Content>
+        </SectionPageLayout>
+      </Tabs>
 
       <ChannelsDialogs />
     </ChannelsProvider>

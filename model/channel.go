@@ -1072,6 +1072,15 @@ func GetChannelsByIds(ids []int) ([]*Channel, error) {
 	return channels, err
 }
 
+func GetChannelHealthMetadata() ([]*Channel, error) {
+	var channels []*Channel
+	err := DB.
+		Select("id", "type", "name", "status", "test_model", "other_info", "channel_info").
+		Order("id asc").
+		Find(&channels).Error
+	return channels, err
+}
+
 func BatchSetChannelTag(ids []int, tag *string) error {
 	// 开启事务
 	tx := DB.Begin()

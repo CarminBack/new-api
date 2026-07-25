@@ -141,6 +141,132 @@ func TestFailedHalfOpenProbeReopensForTwoMinutes(t *testing.T) {
 	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 }
 
+func TestChannelHealthSnapshotAndRouteRecovery(t *testing.T) {
+	setupChannelHealthTest(t)
+	channel := &model.Channel{
+		Id:          29,
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "test-key",
+		Models:      "gpt-5.6-sol",
+		CreatedTime: channelCircuitNow().Add(-time.Hour).Unix(),
+	}
+
+	for i := 0; i < 4; i++ {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-5.6-sol", "/v1/responses"))
+		RecordChannelCircuitFailureDecision(ctx, channel.Id, "gpt-5.6-sol", "/v1/responses", ChannelFailureDecision{
+			Class:  ChannelFailureTransient,
+			Reason: "upstream_503",
+		}, http.StatusServiceUnavailable)
+	}
+
+	snapshots := GetChannelAdaptiveHealthSnapshots(false)
+	require.Len(t, snapshots, 1)
+	require.Equal(t, channel.Id, snapshots[0].ChannelID)
+	require.Len(t, snapshots[0].Routes, 1)
+	route := snapshots[0].Routes[0]
+	require.Equal(t, ChannelHealthStateCircuitOpen, route.State)
+	require.Equal(t, "gpt-5.6-sol", route.ModelName)
+	require.Equal(t, "/v1/responses", route.RequestPath)
+	require.Equal(t, ChannelFailureTransient, route.LastFailureClass)
+	require.Equal(t, "upstream_503", route.LastFailureReason)
+	require.Equal(t, http.StatusServiceUnavailable, route.LastFailureStatusCode)
+
+	result, err := RecoverChannelHealth(channel, ChannelHealthRecoveryRequest{
+		Scope:       ChannelHealthRecoveryScopeRoute,
+		ModelName:   "gpt-5.6-sol",
+		RequestPath: "/v1/responses",
+	})
+	require.NoError(t, err)
+	require.Positive(t, result.ChangedItems)
+	require.Equal(t, channelHealthRecoveryCapacity, result.Capacity)
+	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-5.6-sol", "/v1/responses"))
+
+	snapshots = GetChannelAdaptiveHealthSnapshots(false)
+	require.Len(t, snapshots, 1)
+	require.Equal(t, ChannelHealthStateRecovering, snapshots[0].Routes[0].State)
+}
+
+func TestChannelHealthSnapshotAndKeyRecoveryDoNotExposeKey(t *testing.T) {
+	setupChannelHealthTest(t)
+	channel := &model.Channel{
+		Id:          50,
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "secret-key-that-must-not-be-returned",
+		Models:      "gpt-test",
+		CreatedTime: channelCircuitNow().Add(-time.Hour).Unix(),
+	}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-test", "/v1/chat/completions"))
+	common.SetContextKey(ctx, constant.ContextKeyChannelKey, channel.Key)
+	require.True(t, AcquireChannelHealthKey(ctx, channel.Key))
+	RecordChannelCircuitFailureDecision(ctx, channel.Id, "gpt-test", "/v1/chat/completions", ChannelFailureDecision{
+		Class:  ChannelFailureChannelFatal,
+		Reason: "credential_rejected",
+	}, http.StatusUnauthorized)
+
+	snapshots := GetChannelAdaptiveHealthSnapshots(false)
+	require.Len(t, snapshots, 1)
+	require.Len(t, snapshots[0].Keys, 1)
+	require.Equal(t, 0, snapshots[0].Keys[0].KeyIndex)
+	require.Equal(t, ChannelHealthStateIsolated, snapshots[0].Keys[0].State)
+	encoded, err := common.Marshal(snapshots)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), channel.Key)
+
+	keyIndex := 0
+	result, err := RecoverChannelHealth(channel, ChannelHealthRecoveryRequest{
+		Scope:    ChannelHealthRecoveryScopeKey,
+		KeyIndex: &keyIndex,
+	})
+	require.NoError(t, err)
+	require.Positive(t, result.ChangedItems)
+	require.Empty(t, GetChannelAdaptiveHealthSnapshots(false))
+}
+
+func TestChannelHealthSnapshotAndRecoveryAreSafeDuringRouteCompletion(t *testing.T) {
+	setupChannelHealthTest(t)
+	channel := &model.Channel{
+		Id:          63,
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "test-key",
+		Models:      "gpt-test",
+		CreatedTime: channelCircuitNow().Add(-time.Hour).Unix(),
+	}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-test", "/v1/responses"))
+
+	start := make(chan struct{})
+	var completed sync.WaitGroup
+	completed.Add(3)
+	go func() {
+		defer completed.Done()
+		<-start
+		RecordChannelCircuitSuccess(ctx, channel.Id, "gpt-test", "/v1/responses")
+	}()
+	go func() {
+		defer completed.Done()
+		<-start
+		_, _ = RecoverChannelHealth(channel, ChannelHealthRecoveryRequest{
+			Scope:       ChannelHealthRecoveryScopeRoute,
+			ModelName:   "gpt-test",
+			RequestPath: "/v1/responses",
+		})
+	}()
+	go func() {
+		defer completed.Done()
+		<-start
+		_ = GetChannelAdaptiveHealthSnapshots(true)
+	}()
+	close(start)
+	completed.Wait()
+
+	state := routeStateForTestWithChannel(channel, "gpt-test", "/v1/responses")
+	require.Zero(t, state.InFlight)
+	require.GreaterOrEqual(t, state.Capacity, channelHealthMinCapacity)
+	require.LessOrEqual(t, state.Capacity, channelHealthMaxCapacity)
+}
+
 func TestRateLimitHalfOpenProbeClearsHardOpenState(t *testing.T) {
 	now := setupChannelHealthTest(t)
 	for i := 0; i < 4; i++ {

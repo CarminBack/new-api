@@ -50,16 +50,28 @@ type channelHealthBucket struct {
 
 type channelRouteHealthState struct {
 	Buckets                [channelHealthBucketCount]channelHealthBucket
+	ChannelID              int
+	Fingerprint            string
+	RouteLabel             string
+	InitialCapacity        int
 	OpenUntil              time.Time
 	ProbeInFlight          bool
 	InFlight               int
 	Capacity               int
 	SuccessesSinceIncrease int
 	LastDecreaseEpoch      int64
+	LastFailureClass       ChannelFailureClass
+	LastFailureReason      string
+	LastFailureStatusCode  int
+	LastFailureAt          time.Time
+	LastSuccessAt          time.Time
+	LastRecoveryAt         time.Time
 	LastTouched            time.Time
 }
 
 type channelAggregateHealthState struct {
+	ChannelID       int
+	Fingerprint     string
 	OpenUntil       time.Time
 	ProbeInFlight   bool
 	UnhealthyRoutes map[string]time.Time
@@ -67,6 +79,11 @@ type channelAggregateHealthState struct {
 }
 
 type channelKeyHealthState struct {
+	ChannelID              int
+	Fingerprint            string
+	RouteLabel             string
+	KeyIndex               int
+	Scope                  string
 	OpenUntil              time.Time
 	InFlight               int
 	Capacity               int
@@ -270,6 +287,10 @@ func getRouteHealthStateLocked(shard *channelRouteHealthShard, identity channelH
 		state = &channelRouteHealthState{Capacity: capacity}
 		shard.Routes[identity.RouteKey] = state
 	}
+	state.ChannelID = identity.ChannelID
+	state.Fingerprint = identity.Fingerprint
+	state.RouteLabel = identity.RouteLabel
+	state.InitialCapacity = identity.InitialCapacity
 	state.LastTouched = now
 	return state
 }
@@ -369,6 +390,15 @@ func keyHealthRouteKey(identity channelHealthIdentity, key string) string {
 	return identity.RouteKey + ":key:" + shortChannelHealthHash(key)
 }
 
+func channelHealthKeyIndex(identity channelHealthIdentity, selectedKey string) int {
+	for index, key := range identity.Keys {
+		if key == selectedKey {
+			return index
+		}
+	}
+	return -1
+}
+
 func keyHealthOpenLocked(key string, now time.Time) bool {
 	state, ok := memoryChannelHealth.Keys.States[key]
 	return ok && now.Before(state.OpenUntil)
@@ -432,6 +462,14 @@ func setChannelKeyHealth(identity channelHealthIdentity, selectedKey string, rou
 		memoryChannelHealth.Keys.LastCleanup = now
 	}
 	state := memoryChannelHealth.Keys.States[key]
+	state.ChannelID = identity.ChannelID
+	state.Fingerprint = identity.Fingerprint
+	state.KeyIndex = channelHealthKeyIndex(identity, selectedKey)
+	state.Scope = "channel"
+	if routeScoped {
+		state.RouteLabel = identity.RouteLabel
+		state.Scope = "route"
+	}
 	state.OpenUntil = now.Add(openFor)
 	state.LastTouched = now
 	memoryChannelHealth.Keys.States[key] = state
@@ -458,6 +496,11 @@ func AcquireChannelHealthKey(c *gin.Context, key string) bool {
 		return false
 	}
 	state := memoryChannelHealth.Keys.States[routeKey]
+	state.ChannelID = reservation.Identity.ChannelID
+	state.Fingerprint = reservation.Identity.Fingerprint
+	state.RouteLabel = reservation.Identity.RouteLabel
+	state.KeyIndex = channelHealthKeyIndex(reservation.Identity, key)
+	state.Scope = "route"
 	if state.Capacity == 0 {
 		state.Capacity = reservation.Identity.InitialCapacity
 		if state.Capacity < channelHealthMinCapacity {
@@ -519,6 +562,8 @@ func allowAggregateChannel(identity channelHealthIdentity, now time.Time) (allow
 		state = &channelAggregateHealthState{UnhealthyRoutes: make(map[string]time.Time)}
 		shard.States[identity.ChannelKey] = state
 	}
+	state.ChannelID = identity.ChannelID
+	state.Fingerprint = identity.Fingerprint
 	for route, expiry := range state.UnhealthyRoutes {
 		if !now.Before(expiry) {
 			delete(state.UnhealthyRoutes, route)
@@ -559,6 +604,8 @@ func markAggregateRouteUnhealthy(identity channelHealthIdentity, now time.Time) 
 		state = &channelAggregateHealthState{UnhealthyRoutes: make(map[string]time.Time)}
 		shard.States[identity.ChannelKey] = state
 	}
+	state.ChannelID = identity.ChannelID
+	state.Fingerprint = identity.Fingerprint
 	for route, expiry := range state.UnhealthyRoutes {
 		if !now.Before(expiry) {
 			delete(state.UnhealthyRoutes, route)
@@ -688,7 +735,7 @@ func releaseRouteReservation(reservation channelHealthReservation, releaseProbe 
 	}
 }
 
-func RecordChannelCircuitFailure(c *gin.Context, channelID int, modelName string, requestPath string, class ChannelFailureClass) {
+func recordChannelCircuitFailure(c *gin.Context, channelID int, modelName string, requestPath string, class ChannelFailureClass, reason string, statusCode int) {
 	if channelID <= 0 {
 		return
 	}
@@ -709,6 +756,10 @@ func RecordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 	contributesToChannel := false
 	shard.Lock()
 	state := getRouteHealthStateLocked(shard, identity, now)
+	state.LastFailureClass = class
+	state.LastFailureReason = reason
+	state.LastFailureStatusCode = statusCode
+	state.LastFailureAt = now
 	routeAlreadyOpen := now.Before(state.OpenUntil)
 	if state.InFlight > 0 {
 		state.InFlight--
@@ -789,6 +840,14 @@ func RecordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 	clearHealthReservationContext(c)
 }
 
+func RecordChannelCircuitFailure(c *gin.Context, channelID int, modelName string, requestPath string, class ChannelFailureClass) {
+	recordChannelCircuitFailure(c, channelID, modelName, requestPath, class, "", 0)
+}
+
+func RecordChannelCircuitFailureDecision(c *gin.Context, channelID int, modelName string, requestPath string, decision ChannelFailureDecision, statusCode int) {
+	recordChannelCircuitFailure(c, channelID, modelName, requestPath, decision.Class, decision.Reason, statusCode)
+}
+
 func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string, requestPath string) {
 	if channelID <= 0 {
 		return
@@ -805,11 +864,13 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 		state.InFlight--
 	}
 	recordRouteHealthSuccessLocked(state, now)
+	state.LastSuccessAt = now
 	if reservation.RouteProbe {
 		state.ProbeInFlight = false
 		state.OpenUntil = time.Time{}
 		state.Capacity = channelHealthRecoveryCapacity
 		state.SuccessesSinceIncrease = 0
+		state.LastRecoveryAt = now
 		recovered = true
 	} else {
 		increaseRouteCapacityLocked(state)

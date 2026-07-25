@@ -282,7 +282,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		service.FinishChannelRouteAttempt(c, newAPIError.StatusCode, decision)
 		if decision.CountForCircuit {
-			service.RecordChannelCircuitFailure(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class)
+			service.RecordChannelCircuitFailureDecision(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path, decision, newAPIError.StatusCode)
 		} else {
 			service.ReleaseChannelCircuitProbe(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
 		}
@@ -679,7 +679,7 @@ func RelayTask(c *gin.Context) {
 		}
 		service.FinishChannelRouteAttempt(c, taskErr.StatusCode, decision)
 		if decision.CountForCircuit {
-			service.RecordChannelCircuitFailure(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class)
+			service.RecordChannelCircuitFailureDecision(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path, decision, taskErr.StatusCode)
 		} else {
 			service.ReleaseChannelCircuitProbe(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
 		}

@@ -198,6 +198,100 @@ export interface ChannelBalanceResponse {
   currency?: string
 }
 
+export type ChannelHealthState =
+  | 'healthy'
+  | 'circuit_open'
+  | 'half_open'
+  | 'degraded'
+  | 'recovering'
+  | 'saturated'
+  | 'isolated'
+
+export interface ChannelRouteHealth {
+  model_name: string
+  request_path: string
+  state: ChannelHealthState
+  open_until: number
+  probe_in_flight: boolean
+  in_flight: number
+  capacity: number
+  initial_capacity: number
+  successes: number
+  failures: number
+  pool_failures: number
+  rate_limits: number
+  last_failure_class?: string
+  last_failure_reason?: string
+  last_failure_status_code?: number
+  last_failure_at?: number
+  last_success_at?: number
+  last_recovery_at?: number
+  last_touched: number
+}
+
+export interface ChannelKeyHealth {
+  key_index: number
+  scope: 'channel' | 'route'
+  model_name?: string
+  request_path?: string
+  state: ChannelHealthState
+  open_until: number
+  in_flight: number
+  capacity: number
+  last_touched: number
+}
+
+export interface ChannelPersistentKeyHealth {
+  key_index: number
+  status: number
+  reason?: string
+  disabled_time?: number
+}
+
+export interface ChannelHealthItem {
+  channel_id: number
+  channel_name: string
+  channel_type: number
+  channel_status: number
+  test_model?: string
+  status_reason?: string
+  status_time?: number
+  persistent_keys: ChannelPersistentKeyHealth[]
+  adaptive: {
+    channel_id: number
+    channel_state?: ChannelHealthState
+    channel_open_until: number
+    channel_probe_in_flight: boolean
+    routes: ChannelRouteHealth[]
+    keys: ChannelKeyHealth[]
+  }
+}
+
+export interface ChannelHealthResponse {
+  success: boolean
+  message?: string
+  data?: {
+    generated_at: number
+    state_scope: 'process'
+    summary: {
+      auto_disabled_channels: number
+      circuit_open_routes: number
+      degraded_routes: number
+      recovering_routes: number
+      saturated_routes: number
+      isolated_keys: number
+    }
+    items: ChannelHealthItem[]
+  }
+}
+
+export interface ChannelHealthRecoverParams {
+  scope: 'channel' | 'route' | 'key'
+  model_name?: string
+  request_path?: string
+  key_index?: number
+}
+
 export interface FetchModelsResponse {
   success: boolean
   message?: string

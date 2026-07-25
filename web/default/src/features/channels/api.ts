@@ -25,6 +25,8 @@ import type {
   BatchSetTagParams,
   Channel,
   ChannelBalanceResponse,
+  ChannelHealthRecoverParams,
+  ChannelHealthResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
   CopyChannelParams,
@@ -110,6 +112,31 @@ export async function getChannel(id: number): Promise<GetChannelResponse> {
  */
 export async function getChannelOps(): Promise<ChannelOpsResponse> {
   const res = await api.get('/api/channel/ops', channelActionConfig())
+  return res.data
+}
+
+export async function getChannelHealth(
+  includeHealthy = false
+): Promise<ChannelHealthResponse> {
+  const res = await api.get('/api/channel/health', {
+    params: { include_healthy: includeHealthy },
+  })
+  return res.data
+}
+
+export async function recoverChannelHealth(
+  channelId: number,
+  params: ChannelHealthRecoverParams
+): Promise<{
+  success: boolean
+  message?: string
+  data?: { scope: string; changed_items: number; capacity?: number }
+}> {
+  const res = await api.post(
+    `/api/channel/${channelId}/health/recover`,
+    params,
+    channelActionConfig()
+  )
   return res.data
 }
 

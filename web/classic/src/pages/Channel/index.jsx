@@ -17,13 +17,38 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useState } from 'react';
+import { TabPane, Tabs } from '@douyinfe/semi-ui';
+import { useTranslation } from 'react-i18next';
 import ChannelsTable from '../../components/table/channels';
+import ChannelHealthPanel from '../../components/table/channels/ChannelHealthPanel';
 
 const File = () => {
+  const { t } = useTranslation();
+  const [activeView, setActiveView] = useState(
+    localStorage.getItem('classic:channels-active-view') === 'health'
+      ? 'health'
+      : 'channels',
+  );
+
   return (
     <div className='mt-[60px] px-2'>
-      <ChannelsTable />
+      <Tabs
+        type='button'
+        activeKey={activeView}
+        onChange={(value) => {
+          localStorage.setItem('classic:channels-active-view', value);
+          setActiveView(value);
+        }}
+        className='mb-3'
+      >
+        <TabPane itemKey='channels' tab={t('渠道列表')}>
+          <ChannelsTable />
+        </TabPane>
+        <TabPane itemKey='health' tab={t('渠道健康')}>
+          <ChannelHealthPanel />
+        </TabPane>
+      </Tabs>
     </div>
   );
 };
