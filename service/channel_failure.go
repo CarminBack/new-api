@@ -120,7 +120,38 @@ func classifyChannelFailure(err *types.NewAPIError, message string, path string,
 			CountForCircuit: true,
 		}
 	}
-	if err.GetErrorCode() == types.ErrorCodeBadResponseBody &&
+	if isResponsesContentFailure(err, message) {
+		return ChannelFailureDecision{
+			Class:           ChannelFailureTerminal,
+			Reason:          "responses_policy_failure",
+			CountForCircuit: false,
+		}
+	}
+	if isResponsesAccountFailure(err, message) {
+		return ChannelFailureDecision{
+			Class:           ChannelFailurePoolAccount,
+			Reason:          "responses_account_failure",
+			EvictAffinity:   true,
+			CountForCircuit: false,
+		}
+	}
+	if isResponsesRateLimitFailure(err) {
+		return ChannelFailureDecision{
+			Class:           ChannelFailureRateLimited,
+			Reason:          "responses_rate_limited",
+			EvictAffinity:   true,
+			CountForCircuit: true,
+		}
+	}
+	if isResponsesServiceFailure(err) {
+		return ChannelFailureDecision{
+			Class:           ChannelFailureUncertain,
+			Reason:          "responses_upstream_failure",
+			EvictAffinity:   true,
+			CountForCircuit: true,
+		}
+	}
+	if (err.GetErrorCode() == types.ErrorCodeBadResponse || err.GetErrorCode() == types.ErrorCodeBadResponseBody) &&
 		(strings.Contains(message, "responses stream") || strings.Contains(message, "empty responses stream")) {
 		return ChannelFailureDecision{
 			Class:           ChannelFailureUncertain,
@@ -171,6 +202,68 @@ func classifyChannelFailure(err *types.NewAPIError, message string, path string,
 		}
 	}
 	return ChannelFailureDecision{Class: ChannelFailureTerminal, Reason: "non_retryable_status"}
+}
+
+// Responses terminal errors can be emitted after the stream has started. They
+// must still keep the no-retry boundary, but account, access, and policy
+// failures should not make the whole channel look unhealthy.
+func isResponsesAccountFailure(err *types.NewAPIError, message string) bool {
+	if err == nil || err.GetErrorType() != types.ErrorTypeOpenAIError {
+		return false
+	}
+	patterns := []string{
+		"account",
+		"api key",
+		"authentication",
+		"permission",
+		"not enabled",
+		"not supported",
+		"subscription",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(message, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func isResponsesContentFailure(err *types.NewAPIError, message string) bool {
+	if err == nil || err.GetErrorType() != types.ErrorTypeOpenAIError {
+		return false
+	}
+	for _, pattern := range []string{"content policy", "moderation", "safety policy", "prompt was blocked"} {
+		if strings.Contains(message, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func isResponsesRateLimitFailure(err *types.NewAPIError) bool {
+	if err == nil || err.GetErrorType() != types.ErrorTypeOpenAIError {
+		return false
+	}
+	switch err.GetErrorCode() {
+	case "rate_limit", "rate_limit_exceeded", "too_many_requests":
+		return true
+	default:
+		return false
+	}
+}
+
+func isResponsesServiceFailure(err *types.NewAPIError) bool {
+	if err == nil || err.GetErrorType() != types.ErrorTypeOpenAIError || err.StatusCode < http.StatusInternalServerError {
+		return false
+	}
+	// The generic fallback has no upstream reason and is deliberately not
+	// counted after output. Only structured upstream failure codes affect health.
+	switch err.GetErrorCode() {
+	case "server_error", "upstream_error", "internal_error", "overloaded_error":
+		return true
+	default:
+		return false
+	}
 }
 
 // NormalizeDeterministicRequestStatus keeps the upstream status in route
