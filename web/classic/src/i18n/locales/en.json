@@ -3839,6 +3839,9 @@
     "默认折叠侧边栏": "Default collapse sidebar",
     "默认测试模型": "Default Test Model",
     "默认用户消息": "Default User Message",
-    "默认补全倍率": "Default completion ratio"
+    "默认补全倍率": "Default completion ratio",
+    "请求中断": "Request interrupted",
+    "流式异常": "Stream error",
+    "未计费": "Unbilled"
   }
 }

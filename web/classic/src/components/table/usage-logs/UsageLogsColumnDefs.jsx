@@ -95,7 +95,41 @@ function buildChannelAffinityTooltip(affinity, t) {
 }
 
 // Render functions
-function renderType(type, t) {
+function renderType(type, t, record) {
+  if (
+    type === 2 &&
+    record?.quota === 0 &&
+    record?.prompt_tokens === 0 &&
+    record?.completion_tokens === 0
+  ) {
+    const streamStatus = getLogOther(record.other)?.stream_status;
+    if (
+      streamStatus?.billing_status === 'client_gone' ||
+      streamStatus?.end_reason === 'client_gone'
+    ) {
+      return (
+        <Tag color='orange' shape='circle'>
+          {t('请求中断')}
+        </Tag>
+      );
+    }
+    if (
+      streamStatus?.billing_status === 'stream_error' ||
+      streamStatus?.status === 'error'
+    ) {
+      return (
+        <Tag color='red' shape='circle'>
+          {t('流式异常')}
+        </Tag>
+      );
+    }
+    return (
+      <Tag color='grey' shape='circle'>
+        {t('未计费')}
+      </Tag>
+    );
+  }
+
   switch (type) {
     case 1:
       return (
@@ -676,7 +710,7 @@ export const getLogsColumns = ({
       title: t('类型'),
       dataIndex: 'type',
       render: (text, record, index) => {
-        return <>{renderType(text, t)}</>;
+        return <>{renderType(text, t, record)}</>;
       },
     },
     {

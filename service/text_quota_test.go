@@ -316,6 +316,62 @@ func TestAppendUsageBillingPathForLogWritesAdminInfo(t *testing.T) {
 	require.Equal(t, usageBillingPathLocal, adminInfo["usage_billing_path"])
 }
 
+func TestAppendStreamBillingStatus(t *testing.T) {
+	tests := []struct {
+		name        string
+		endReason   relaycommon.StreamEndReason
+		hasError    bool
+		totalTokens int
+		want        string
+	}{
+		{name: "charged", endReason: relaycommon.StreamEndReasonDone, totalTokens: 10, want: "charged"},
+		{name: "missing usage", endReason: relaycommon.StreamEndReasonEOF, want: "missing_usage"},
+		{name: "client gone", endReason: relaycommon.StreamEndReasonClientGone, totalTokens: 10, want: "client_gone"},
+		{name: "stream error", endReason: relaycommon.StreamEndReasonScannerErr, want: "stream_error"},
+		{name: "soft stream error", endReason: relaycommon.StreamEndReasonEOF, hasError: true, want: "stream_error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := relaycommon.NewStreamStatus()
+			status.SetEndReason(tt.endReason, nil)
+			if tt.hasError {
+				status.RecordError("bad chunk")
+			}
+			relayInfo := &relaycommon.RelayInfo{IsStream: true, StreamStatus: status}
+			other := map[string]interface{}{"stream_status": map[string]interface{}{}}
+
+			appendStreamBillingStatus(relayInfo, tt.totalTokens, other)
+
+			streamInfo, ok := other["stream_status"].(map[string]interface{})
+			require.True(t, ok)
+			require.Equal(t, tt.want, streamInfo["billing_status"])
+		})
+	}
+}
+
+func TestAppendStreamStatusIncludesResponsesBillingDiagnostics(t *testing.T) {
+	status := relaycommon.NewStreamStatus()
+	status.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
+	relayInfo := &relaycommon.RelayInfo{
+		IsStream:              true,
+		RelayFormat:           types.RelayFormatOpenAIResponses,
+		StreamStatus:          status,
+		StreamTerminalEvent:   "response.done",
+		StreamUsagePresent:    true,
+		ReceivedResponseCount: 4,
+	}
+	other := map[string]interface{}{}
+
+	appendStreamStatus(relayInfo, other)
+
+	streamInfo, ok := other["stream_status"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "response.done", streamInfo["terminal_event"])
+	require.Equal(t, true, streamInfo["usage_present"])
+	require.Equal(t, 4, streamInfo["received_event_count"])
+}
+
 func TestCacheWriteTokensTotal(t *testing.T) {
 	t.Run("split cache creation", func(t *testing.T) {
 		summary := textQuotaSummary{

@@ -41,6 +41,7 @@ import { cn } from '@/lib/utils'
 import { LOG_TYPE_ENUM } from '../constants'
 import type { UsageLog } from '../data/schema'
 import { parseLogOther } from '../lib/format'
+import { getUsageLogTypeConfig } from '../lib/log-type'
 import {
   getLogTypeConfig,
   isDisplayableLogType,
@@ -155,15 +156,16 @@ function SummaryField<TData>({
 
 function MobileLogTimeStatus({
   createdAt,
-  type,
+  log,
 }: {
   createdAt: unknown
-  type: unknown
+  log?: UsageLog
 }) {
   const { t } = useTranslation()
   const timestamp = typeof createdAt === 'number' ? createdAt : undefined
-  const logType = typeof type === 'number' ? type : undefined
-  const config = getLogTypeConfig(logType ?? LOG_TYPE_ENUM.UNKNOWN)
+  const config = log
+    ? getUsageLogTypeConfig(log)
+    : getLogTypeConfig(LOG_TYPE_ENUM.UNKNOWN)
   const variant = config.color as StatusVariant
 
   return (
@@ -331,10 +333,7 @@ function CommonLogsCard<TData>({
 
       <div className='grid grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)] gap-1.5'>
         <div className='bg-muted/20 min-w-0 rounded-md px-2 py-1.5'>
-          <MobileLogTimeStatus
-            createdAt={rowData?.created_at}
-            type={rowData?.type}
-          />
+          <MobileLogTimeStatus createdAt={rowData?.created_at} log={rowData} />
         </div>
         <SummaryField
           cell={cells.get('channel')}

@@ -212,6 +212,14 @@ export interface LogOtherData {
     error_count?: number
     end_error?: string
     errors?: string[]
+    terminal_event?: string
+    usage_present?: boolean
+    received_event_count?: number
+    billing_status?:
+      | 'charged'
+      | 'missing_usage'
+      | 'client_gone'
+      | 'stream_error'
   }
   // Violation fee fields
   violation_fee?: boolean

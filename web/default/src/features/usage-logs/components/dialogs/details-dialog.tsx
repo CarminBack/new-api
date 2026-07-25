@@ -58,11 +58,8 @@ import {
   getResponseTimeColor,
   renderAuditContent,
 } from '../../lib/format'
-import {
-  getLogTypeConfig,
-  isPerCallBilling,
-  isTimingLogType,
-} from '../../lib/utils'
+import { getUsageLogTypeConfig } from '../../lib/log-type'
+import { isPerCallBilling, isTimingLogType } from '../../lib/utils'
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
@@ -461,7 +458,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
   const details = props.log.content ?? ''
   const other = parseLogOther(props.log.other)
-  const typeConfig = getLogTypeConfig(props.log.type)
+  const typeConfig = getUsageLogTypeConfig(props.log)
 
   const isViolation = isViolationFeeLog(other)
   const isRefund = props.log.type === 6

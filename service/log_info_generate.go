@@ -149,7 +149,34 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 		}
 		streamInfo["errors"] = messages
 	}
+	if relayInfo.StreamTerminalEvent != "" {
+		streamInfo["terminal_event"] = relayInfo.StreamTerminalEvent
+	}
+	if relayInfo.StreamTerminalEvent != "" || relayInfo.GetFinalRequestRelayFormat() == types.RelayFormatOpenAIResponses {
+		streamInfo["usage_present"] = relayInfo.StreamUsagePresent
+		streamInfo["received_event_count"] = relayInfo.ReceivedResponseCount
+	}
 	other["stream_status"] = streamInfo
+}
+
+func appendStreamBillingStatus(relayInfo *relaycommon.RelayInfo, totalTokens int, other map[string]interface{}) {
+	if relayInfo == nil || other == nil || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
+		return
+	}
+	streamInfo, ok := other["stream_status"].(map[string]interface{})
+	if !ok || streamInfo == nil {
+		return
+	}
+
+	status := "missing_usage"
+	if relayInfo.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
+		status = "client_gone"
+	} else if !relayInfo.StreamStatus.IsNormalEnd() || relayInfo.StreamStatus.HasErrors() {
+		status = "stream_error"
+	} else if totalTokens > 0 {
+		status = "charged"
+	}
+	streamInfo["billing_status"] = status
 }
 
 func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {

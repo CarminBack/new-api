@@ -50,10 +50,10 @@ import {
   isViolationFeeLog,
   renderAuditContent,
 } from '../../lib/format'
+import { getUsageLogTypeConfig } from '../../lib/log-type'
 import {
   isDisplayableLogType,
   isTimingLogType,
-  getLogTypeConfig,
   isPerCallBilling,
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
@@ -297,7 +297,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       cell: ({ row }) => {
         const log = row.original
         const timestamp = row.getValue('created_at') as number
-        const config = getLogTypeConfig(log.type)
+        const config = getUsageLogTypeConfig(log)
 
         return (
           <div className='flex min-w-0 flex-col gap-0.5'>
