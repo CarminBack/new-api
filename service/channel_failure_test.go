@@ -165,6 +165,14 @@ func TestDecideChannelFailure(t *testing.T) {
 			wantCountCircuit: false,
 		},
 		{
+			name:             "structured content filter does not count channel circuit",
+			path:             "/v1/responses",
+			apiErr:           types.WithOpenAIError(types.OpenAIError{Type: "policy_error", Code: "content_filter", Message: "request rejected"}, http.StatusBadGateway, types.ErrOptionWithSkipRetry()),
+			retriesRemaining: 2,
+			wantClass:        ChannelFailureTerminal,
+			wantCountCircuit: false,
+		},
+		{
 			name:             "structured responses rate limit uses rate limit health class",
 			path:             "/v1/responses",
 			apiErr:           types.WithOpenAIError(types.OpenAIError{Type: "rate_limit_error", Code: "rate_limit_exceeded", Message: "too many requests"}, http.StatusBadGateway, types.ErrOptionWithSkipRetry()),

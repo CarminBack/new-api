@@ -211,6 +211,12 @@ func isResponsesAccountFailure(err *types.NewAPIError, message string) bool {
 	if err == nil || err.GetErrorType() != types.ErrorTypeOpenAIError {
 		return false
 	}
+	code := strings.ToLower(string(err.GetErrorCode()))
+	for _, pattern := range []string{"account", "authentication", "permission", "model_not_supported", "model_access", "subscription"} {
+		if strings.Contains(code, pattern) {
+			return true
+		}
+	}
 	patterns := []string{
 		"account",
 		"api key",
@@ -231,6 +237,12 @@ func isResponsesAccountFailure(err *types.NewAPIError, message string) bool {
 func isResponsesContentFailure(err *types.NewAPIError, message string) bool {
 	if err == nil || err.GetErrorType() != types.ErrorTypeOpenAIError {
 		return false
+	}
+	code := strings.ToLower(string(err.GetErrorCode()))
+	for _, pattern := range []string{"content_filter", "content_policy", "moderation", "safety", "policy_violation"} {
+		if strings.Contains(code, pattern) {
+			return true
+		}
 	}
 	for _, pattern := range []string{"content policy", "moderation", "safety policy", "prompt was blocked"} {
 		if strings.Contains(message, pattern) {
