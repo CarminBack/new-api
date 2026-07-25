@@ -157,6 +157,16 @@ func TestDecideChannelFailure(t *testing.T) {
 			wantCountCircuit: true,
 		},
 		{
+			name:             "generic late responses stream failure does not count channel circuit",
+			path:             "/v1/responses",
+			apiErr:           types.NewError(errors.New("responses stream error: response.failed"), types.ErrorCodeBadResponse, types.ErrOptionWithStatusCode(http.StatusBadGateway), types.ErrOptionWithSkipRetry()),
+			retriesRemaining: 2,
+			responseStarted:  true,
+			wantClass:        ChannelFailureUncertain,
+			wantEvict:        true,
+			wantCountCircuit: false,
+		},
+		{
 			name:             "responses policy failure does not count channel circuit",
 			path:             "/v1/responses",
 			apiErr:           types.WithOpenAIError(types.OpenAIError{Type: "policy_error", Code: "content_policy", Message: "prompt was blocked by content policy"}, http.StatusBadGateway, types.ErrOptionWithSkipRetry()),

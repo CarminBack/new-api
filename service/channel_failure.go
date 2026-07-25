@@ -67,6 +67,11 @@ func DecideChannelFailureForModel(c *gin.Context, err *types.NewAPIError, modelN
 	if responseStarted {
 		decision.Retry = false
 		decision.Reason += ":response_started"
+		if decision.Reason == "responses_stream_failure:response_started" {
+			// A generic late stream failure has no upstream cause. Do not let an
+			// already-started, ambiguous response punish the whole channel.
+			decision.CountForCircuit = false
+		}
 	}
 	if retriesRemaining <= 0 {
 		decision.Retry = false
