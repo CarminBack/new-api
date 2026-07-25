@@ -203,7 +203,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	uncertainRetryUsed := false
 	generalRetryCount := 0
 	const maxGeneralRetries = 1
-	service.RecordChannelPrimaryRequest(c)
+	service.RecordChannelPrimaryRequestFor(c, relayInfo.OriginModelName, c.Request.URL.Path)
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		relayInfo.RetryIndex = retryParam.GetRetry()
@@ -267,7 +267,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				generalRetryCount++
 			}
 		}
-		if decision.Retry && !service.AllowChannelRetry() {
+		if decision.Retry && !service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class, channel.Id) {
 			decision.Retry = false
 			decision.Reason += ":global_retry_budget"
 		}
@@ -612,7 +612,7 @@ func RelayTask(c *gin.Context) {
 		ImageResolutionTier: common.GetContextKeyString(c, constant.ContextKeyImageResolutionTier),
 		Retry:               common.GetPointer(0),
 	}
-	service.RecordChannelPrimaryRequest(c)
+	service.RecordChannelPrimaryRequestFor(c, relayInfo.OriginModelName, c.Request.URL.Path)
 	taskRetryCount := 0
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
@@ -667,7 +667,7 @@ func RelayTask(c *gin.Context) {
 			if taskRetryCount >= 1 {
 				decision.Retry = false
 				decision.Reason += ":general_retry_limit"
-			} else if !service.AllowChannelRetry() {
+			} else if !service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class, channel.Id) {
 				decision.Retry = false
 				decision.Reason += ":global_retry_budget"
 			} else {

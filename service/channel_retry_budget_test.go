@@ -9,26 +9,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestChannelRetryBudgetTracksTenPercentOfPrimaryTraffic(t *testing.T) {
+func TestChannelRetryBudgetTracksRouteAndGlobalBudget(t *testing.T) {
 	setupChannelHealthTest(t)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 50; i++ {
 		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-		RecordChannelPrimaryRequest(ctx)
-		RecordChannelPrimaryRequest(ctx)
+		RecordChannelPrimaryRequestFor(ctx, "gpt-test", "/v1/chat/completions")
+		ctx, _ = gin.CreateTestContext(httptest.NewRecorder())
+		RecordChannelPrimaryRequestFor(ctx, "other-model", "/v1/chat/completions")
 	}
 	for i := 0; i < 10; i++ {
-		require.True(t, AllowChannelRetry())
+		require.True(t, AllowChannelRetryFor(nil, "gpt-test", "/v1/chat/completions", ChannelFailureTransient, 1))
 	}
-	require.False(t, AllowChannelRetry())
+	for i := 0; i < 10; i++ {
+		require.True(t, AllowChannelRetryFor(nil, "other-model", "/v1/chat/completions", ChannelFailureTransient, 2))
+	}
+	for i := 0; i < 2; i++ {
+		require.True(t, AllowChannelRetryFor(nil, "gpt-test", "/v1/chat/completions", ChannelFailureTransient, 1))
+	}
+	for i := 0; i < 10; i++ {
+		if !AllowChannelRetryFor(nil, "gpt-test", "/v1/chat/completions", ChannelFailureTransient, 1) {
+			return
+		}
+	}
+	t.Fatal("expected route retry budget to be exhausted")
 }
 
 func TestChannelRetryBudgetHasSmallBurstAndExpires(t *testing.T) {
 	now := setupChannelHealthTest(t)
 	for i := 0; i < channelRetryBudgetMinimumBurst; i++ {
-		require.True(t, AllowChannelRetry())
+		require.True(t, AllowChannelRetryFor(nil, "gpt-test", "/v1/chat/completions", ChannelFailureTransient, 1))
 	}
-	require.False(t, AllowChannelRetry())
+	for i := 0; i < 2; i++ {
+		require.True(t, AllowChannelRetryFor(nil, "gpt-test", "/v1/chat/completions", ChannelFailureTransient, 1))
+	}
+	require.False(t, AllowChannelRetryFor(nil, "gpt-test", "/v1/chat/completions", ChannelFailureTransient, 1))
 
 	*now = now.Add(channelRetryBudgetWindow + time.Second)
-	require.True(t, AllowChannelRetry())
+	require.True(t, AllowChannelRetryFor(nil, "gpt-test", "/v1/chat/completions", ChannelFailureTransient, 1))
 }
