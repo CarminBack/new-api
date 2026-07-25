@@ -236,9 +236,16 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 	}
 }
 
-func sendResponsesStreamData(c *gin.Context, streamResponse dto.ResponsesStreamResponse, data string) {
+func sendResponsesStreamData(c *gin.Context, info *relaycommon.RelayInfo, streamResponse dto.ResponsesStreamResponse, data string) error {
 	if data == "" {
-		return
+		return nil
 	}
-	_ = helper.ResponseChunkData(c, streamResponse, data)
+	if err := helper.ResponseChunkData(c, streamResponse, data); err != nil {
+		return err
+	}
+	if info != nil {
+		info.SendResponseCount++
+		info.StreamDownstreamStarted = true
+	}
+	return nil
 }

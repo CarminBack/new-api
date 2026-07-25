@@ -50,9 +50,7 @@ func DecideChannelFailureForModel(c *gin.Context, err *types.NewAPIError, modelN
 		if c.Request != nil && c.Request.URL != nil {
 			path = c.Request.URL.Path
 		}
-		if c.Writer != nil {
-			responseStarted = c.Writer.Written()
-		}
+		responseStarted = channelResponseStarted(c)
 	}
 
 	decision := classifyChannelFailure(err, message, path, modelName)
@@ -118,6 +116,15 @@ func classifyChannelFailure(err *types.NewAPIError, message string, path string,
 		return ChannelFailureDecision{
 			Class:           ChannelFailurePoolAccount,
 			Reason:          "pooled_account_unavailable",
+			EvictAffinity:   true,
+			CountForCircuit: true,
+		}
+	}
+	if err.GetErrorCode() == types.ErrorCodeBadResponseBody &&
+		(strings.Contains(message, "responses stream") || strings.Contains(message, "empty responses stream")) {
+		return ChannelFailureDecision{
+			Class:           ChannelFailureUncertain,
+			Reason:          "responses_stream_failure",
 			EvictAffinity:   true,
 			CountForCircuit: true,
 		}
@@ -203,6 +210,11 @@ func isDeterministicRequestFailure(err *types.NewAPIError, message string) bool 
 		"context length exceeded",
 		"maximum context length",
 		"input is too long",
+		"invalid request",
+		"invalid model",
+		"model not found",
+		"unsupported model",
+		"does not support this model",
 		"messages must contain the word 'json'",
 		"messages must contain the word \"json\"",
 		"content policy",

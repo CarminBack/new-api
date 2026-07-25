@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
@@ -89,8 +90,17 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
+	payload := []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", resp.Type, data))
+	n, err := c.Writer.Write(payload)
+	if n > 0 {
+		common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, true)
+	}
+	if err != nil {
+		return fmt.Errorf("write responses stream data failed: %w", err)
+	}
+	if n != len(payload) {
+		return fmt.Errorf("write responses stream data failed: short write %d/%d", n, len(payload))
+	}
 	return FlushWriter(c)
 }
 

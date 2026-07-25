@@ -197,6 +197,20 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	}
 
 	dataChan := make(chan string, 10)
+	var scannerEndMu sync.Mutex
+	var scannerEndReason relaycommon.StreamEndReason
+	var scannerEndError error
+	setScannerEnd := func(reason relaycommon.StreamEndReason, err error) {
+		scannerEndMu.Lock()
+		scannerEndReason = reason
+		scannerEndError = err
+		scannerEndMu.Unlock()
+	}
+	getScannerEnd := func() (relaycommon.StreamEndReason, error) {
+		scannerEndMu.Lock()
+		defer scannerEndMu.Unlock()
+		return scannerEndReason, scannerEndError
+	}
 
 	wg.Add(1)
 	gopool.Go(func() {
@@ -221,6 +235,8 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				return
 			}
 		}
+		reason, err := getScannerEnd()
+		info.StreamStatus.SetEndReason(reason, err)
 	})
 
 	// Scanner goroutine with improved error handling
@@ -237,6 +253,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			wg.Done()
 		}()
 
+		setScannerEnd(relaycommon.StreamEndReasonEOF, nil)
 		for scanner.Scan() {
 			// 检查是否需要停止
 			select {
@@ -274,7 +291,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 					return
 				}
 			} else {
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+				setScannerEnd(relaycommon.StreamEndReasonDone, nil)
 				logger.LogDebug(c, "received [DONE], stopping scanner")
 				return
 			}
@@ -283,10 +300,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		if err := scanner.Err(); err != nil {
 			if err != io.EOF {
 				logger.LogError(c, "scanner error: "+err.Error())
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
+				setScannerEnd(relaycommon.StreamEndReasonScannerErr, err)
 			}
 		}
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
 	})
 
 	// 主循环等待完成或超时

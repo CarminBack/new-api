@@ -544,6 +544,15 @@ export const useLogsData = () => {
         if (ss.end_error) {
           streamValue += ` - ${ss.end_error}`;
         }
+        if (ss.terminal_event) {
+          streamValue += ` [${t('终态事件')}: ${ss.terminal_event}]`;
+        }
+        if (ss.billing_status) {
+          streamValue += ` [${t('计费状态')}: ${ss.billing_status}]`;
+        }
+        if (ss.received_event_count !== undefined || ss.sent_event_count !== undefined) {
+          streamValue += ` [${t('事件数')}: ${ss.received_event_count ?? 0}/${ss.sent_event_count ?? 0}]`;
+        }
         expandDataLocal.push({
           key: t('流状态'),
           value: streamValue,
@@ -558,6 +567,14 @@ export const useLogsData = () => {
             ),
           });
         }
+      }
+      if (isAdminUser && Array.isArray(other?.admin_info?.route_attempts) && other.admin_info.route_attempts.length > 0) {
+        expandDataLocal.push({
+          key: t('路由尝试'),
+          value: other.admin_info.route_attempts.map((attempt) =>
+            `${t('渠道')} ${attempt.channel_id ?? '-'}: ${attempt.status_code ?? '-'} / ${attempt.class ?? '-'}${attempt.retry ? ` / ${t('重试')}` : ''}${attempt.reason ? ` / ${attempt.reason}` : ''}`
+          ).join('\n'),
+        });
       }
       if (Array.isArray(other?.po) && other.po.length > 0) {
         expandDataLocal.push({

@@ -90,6 +90,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			// A stream may have already delivered bytes before the upstream
+			// failure was classified. Appending a JSON error body would corrupt
+			// the SSE protocol; route diagnostics and error logs still record it.
+			streamTracked, _ := common.GetContextKey(c, constant.ContextKeyStreamResponseTracking)
+			responseStarted := c.Writer != nil && c.Writer.Written()
+			if streamTracked != nil {
+				responseStarted = common.GetContextKeyBool(c, constant.ContextKeyStreamDownstreamStarted)
+			}
+			if responseStarted {
+				return
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())

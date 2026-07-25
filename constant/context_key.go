@@ -67,6 +67,10 @@ const (
 	// ContextKeyLanguage stores the user's language preference for i18n
 	ContextKeyLanguage ContextKey = "language"
 	ContextKeyIsStream ContextKey = "is_stream"
+	// ContextKeyStreamResponseTracking makes retry decisions use confirmed SSE
+	// body writes instead of HTTP headers that may have been prepared upstream.
+	ContextKeyStreamResponseTracking  ContextKey = "stream_response_tracking"
+	ContextKeyStreamDownstreamStarted ContextKey = "stream_downstream_started"
 
 	// ContextKeyAuditLogged marks that the current request has already recorded
 	// a manage/operation audit log inside the handler. When set, the admin-audit

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -92,25 +93,72 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 
 	defer service.CloseResponseBodyGracefully(resp)
+	common.SetContextKey(c, constant.ContextKeyStreamResponseTracking, true)
+	common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, false)
+	info.SendResponseCount = 0
+	info.ReceivedResponseCount = 0
+	info.StreamTerminalEvent = ""
+	info.StreamUsagePresent = false
+	info.StreamDownstreamStarted = false
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
 	var finalResponse *dto.OpenAIResponsesResponse
 	var streamErr *types.NewAPIError
+	type pendingEvent struct {
+		response dto.ResponsesStreamResponse
+		data     string
+	}
+	pending := make([]pendingEvent, 0, 3)
+
+	streamWriteError := func(err error) *types.NewAPIError {
+		return types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+	}
+	flushPending := func() bool {
+		for _, event := range pending {
+			if err := sendResponsesStreamData(c, info, event.response, event.data); err != nil {
+				streamErr = streamWriteError(err)
+				return false
+			}
+		}
+		pending = pending[:0]
+		return true
+	}
+	streamDownstreamStarted := func() bool {
+		return info.SendResponseCount > 0 ||
+			common.GetContextKeyBool(c, constant.ContextKeyStreamDownstreamStarted)
+	}
+	streamHasUpstreamOutput := func() bool {
+		return streamDownstreamStarted() || responseTextBuilder.Len() > 0 ||
+			(finalResponse != nil && len(finalResponse.Output) > 0)
+	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
-			sr.Error(err)
+			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+			if streamDownstreamStarted() {
+				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+			}
+			sr.Stop(streamErr)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+
 		switch streamResponse.Type {
 		case "response.completed", "response.done", "response.incomplete":
 			info.StreamTerminalEvent = streamResponse.Type
 			finalResponse = streamResponse.Response
 			usage, info.StreamUsagePresent = responsesUsage(finalResponse)
+			if !streamHasUpstreamOutput() && !info.StreamUsagePresent {
+				streamErr = types.NewOpenAIError(
+					fmt.Errorf("empty responses stream: terminal event %s contained no usage or output", streamResponse.Type),
+					types.ErrorCodeBadResponse,
+					http.StatusBadGateway,
+				)
+				sr.Stop(streamErr)
+				return
+			}
 			if finalResponse != nil {
 				if finalResponse.HasImageGenerationCall() {
 					c.Set("image_generation_call", true)
@@ -118,25 +166,68 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					c.Set("image_generation_call_size", finalResponse.GetSize())
 				}
 			}
+			if !flushPending() {
+				sr.Stop(streamErr)
+				return
+			}
+			if err := sendResponsesStreamData(c, info, streamResponse, data); err != nil {
+				streamErr = streamWriteError(err)
+				sr.Stop(streamErr)
+				return
+			}
 			sr.Done()
 		case "response.failed", "response.error":
 			info.StreamTerminalEvent = streamResponse.Type
+			skipRetry := streamDownstreamStarted()
 			if streamResponse.Response != nil {
 				if oaiErr := streamResponse.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
+					if skipRetry {
+						streamErr = types.WithOpenAIError(*oaiErr, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+					} else {
+						streamErr = types.WithOpenAIError(*oaiErr, http.StatusBadGateway)
+					}
 					sr.Stop(streamErr)
 					return
 				}
 			}
-			streamErr = types.NewOpenAIError(
-				fmt.Errorf("responses stream error: %s", streamResponse.Type),
-				types.ErrorCodeBadResponse,
-				http.StatusInternalServerError,
-				types.ErrOptionWithSkipRetry(),
-			)
+			if skipRetry {
+				streamErr = types.NewOpenAIError(
+					fmt.Errorf("responses stream error: %s", streamResponse.Type),
+					types.ErrorCodeBadResponse,
+					http.StatusBadGateway,
+					types.ErrOptionWithSkipRetry(),
+				)
+			} else {
+				streamErr = types.NewOpenAIError(
+					fmt.Errorf("responses stream error: %s", streamResponse.Type),
+					types.ErrorCodeBadResponse,
+					http.StatusBadGateway,
+				)
+			}
+			if !skipRetry {
+				sr.Stop(streamErr)
+				return
+			}
+			if !flushPending() {
+				sr.Stop(streamErr)
+				return
+			}
+			if err := sendResponsesStreamData(c, info, streamResponse, data); err != nil {
+				streamErr = streamWriteError(err)
+				sr.Stop(streamErr)
+				return
+			}
 			sr.Stop(streamErr)
 		case "response.output_text.delta":
 			responseTextBuilder.WriteString(streamResponse.Delta)
+			if !flushPending() {
+				sr.Stop(streamErr)
+				return
+			}
+			if err := sendResponsesStreamData(c, info, streamResponse, data); err != nil {
+				streamErr = streamWriteError(err)
+				sr.Stop(streamErr)
+			}
 		case dto.ResponsesOutputTypeItemDone:
 			// 函数调用处理
 			if streamResponse.Item != nil {
@@ -149,10 +240,46 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					}
 				}
 			}
+			if !flushPending() {
+				sr.Stop(streamErr)
+				return
+			}
+			if err := sendResponsesStreamData(c, info, streamResponse, data); err != nil {
+				streamErr = streamWriteError(err)
+				sr.Stop(streamErr)
+			}
+		default:
+			if streamResponse.Type == "response.created" || streamResponse.Type == "response.in_progress" || streamResponse.Type == "response.queued" {
+				pending = append(pending, pendingEvent{response: streamResponse, data: data})
+				return
+			}
+			if !flushPending() {
+				sr.Stop(streamErr)
+				return
+			}
+			if err := sendResponsesStreamData(c, info, streamResponse, data); err != nil {
+				streamErr = streamWriteError(err)
+				sr.Stop(streamErr)
+			}
 		}
 	})
 	if streamErr != nil {
 		return nil, streamErr
+	}
+	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
+		return &dto.Usage{}, nil
+	}
+	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonScannerErr {
+		if !streamDownstreamStarted() {
+			return nil, types.NewOpenAIError(fmt.Errorf("responses stream scanner error: %w", info.StreamStatus.EndError), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
+		return &dto.Usage{}, nil
+	}
+	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonEOF && info.StreamTerminalEvent == "" {
+		if !streamDownstreamStarted() {
+			return nil, types.NewOpenAIError(fmt.Errorf("empty responses stream: upstream ended before terminal event"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+		}
+		return &dto.Usage{}, nil
 	}
 	if info.StreamStatus != nil &&
 		(!info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors()) {

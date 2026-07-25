@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/QuantumNous/new-api/dto"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,6 +100,41 @@ func TestStreamScannerHandler_EmptyBody(t *testing.T) {
 
 	assert.False(t, called.Load(), "handler should not be called for empty body")
 }
+
+func TestResponseChunkDataPropagatesWriteFailure(t *testing.T) {
+	recorder := &failingResponseWriter{}
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	err := ResponseChunkData(c, dto.ResponsesStreamResponse{Type: "response.created"}, `{}`)
+
+	require.Error(t, err)
+}
+
+type failingResponseWriter struct {
+	header http.Header
+}
+
+func (w *failingResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failingResponseWriter) Write([]byte) (int, error)       { return 0, io.ErrClosedPipe }
+func (w *failingResponseWriter) WriteString(string) (int, error) { return 0, io.ErrClosedPipe }
+func (w *failingResponseWriter) WriteHeader(int)                 {}
+func (w *failingResponseWriter) Flush()                          {}
+func (w *failingResponseWriter) CloseNotify() <-chan bool        { return make(chan bool) }
+func (w *failingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return nil, nil, io.ErrClosedPipe
+}
+func (w *failingResponseWriter) Status() int         { return http.StatusOK }
+func (w *failingResponseWriter) Size() int           { return 0 }
+func (w *failingResponseWriter) Written() bool       { return false }
+func (w *failingResponseWriter) WriteHeaderNow()     {}
+func (w *failingResponseWriter) Pusher() http.Pusher { return nil }
 
 func TestStreamScannerHandler_1000Chunks(t *testing.T) {
 	t.Parallel()

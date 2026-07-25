@@ -1,10 +1,22 @@
 package service
 
 import (
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+func channelResponseStarted(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	if _, tracked := common.GetContextKey(c, constant.ContextKeyStreamResponseTracking); tracked {
+		return common.GetContextKeyBool(c, constant.ContextKeyStreamDownstreamStarted)
+	}
+	return c.Writer != nil && c.Writer.Written()
+}
 
 const (
 	ginKeyChannelAttemptCurrent = "channel_route_attempt_current"
@@ -55,9 +67,7 @@ func FinishChannelRouteAttempt(c *gin.Context, statusCode int, decision ChannelF
 	attempt.Class = decision.Class
 	attempt.Retry = decision.Retry
 	attempt.Reason = decision.Reason
-	if c.Writer != nil {
-		attempt.ResponseStarted = c.Writer.Written()
-	}
+	attempt.ResponseStarted = channelResponseStarted(c)
 	appendChannelRouteAttempt(c, attempt)
 	c.Set(ginKeyChannelAttemptCurrent, nil)
 }
@@ -116,9 +126,7 @@ func GetChannelRouteAttempts(c *gin.Context, includeCurrent bool) []ChannelRoute
 	}
 	current.Class = "success"
 	current.Reason = "success"
-	if c.Writer != nil {
-		current.ResponseStarted = c.Writer.Written()
-	}
+	current.ResponseStarted = channelResponseStarted(c)
 	current.startedAt = time.Time{}
 	return append(attempts, current)
 }

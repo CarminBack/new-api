@@ -105,11 +105,11 @@ func TestOaiResponsesStreamHandlerReturnsTerminalErrors(t *testing.T) {
 			assert.Nil(t, usage)
 			require.NotNil(t, apiErr)
 			assert.Contains(t, apiErr.Error(), "pool account failed")
-			assert.True(t, types.IsSkipRetryError(apiErr))
+			assert.False(t, types.IsSkipRetryError(apiErr), "a terminal upstream failure before output is eligible for channel retry")
 			assert.Equal(t, eventType, info.StreamTerminalEvent)
 			require.NotNil(t, info.StreamStatus)
 			assert.True(t, info.StreamStatus.HasErrors())
-			assert.Contains(t, recorder.Body.String(), eventType)
+			assert.Empty(t, recorder.Body.String(), "failed terminal events must not be forwarded before retry classification")
 		})
 	}
 }
@@ -120,9 +120,9 @@ func TestOaiResponsesStreamHandlerLeavesMissingUsageUncharged(t *testing.T) {
 
 	usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
 
-	require.Nil(t, apiErr)
-	require.NotNil(t, usage)
-	assert.Zero(t, usage.TotalTokens)
+	require.NotNil(t, apiErr)
+	assert.Nil(t, usage)
+	assert.False(t, types.IsSkipRetryError(apiErr))
 	assert.Equal(t, "response.done", info.StreamTerminalEvent)
 	assert.False(t, info.StreamUsagePresent)
 }
@@ -133,9 +133,9 @@ func TestOaiResponsesStreamHandlerRecordsEOFWithoutTerminalEvent(t *testing.T) {
 
 	usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
 
-	require.Nil(t, apiErr)
-	require.NotNil(t, usage)
-	assert.Zero(t, usage.TotalTokens)
+	require.NotNil(t, apiErr)
+	assert.Nil(t, usage)
+	assert.False(t, types.IsSkipRetryError(apiErr))
 	assert.Empty(t, info.StreamTerminalEvent)
 	require.NotNil(t, info.StreamStatus)
 	assert.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
@@ -174,4 +174,30 @@ func TestOaiResponsesStreamHandlerLeavesClientDisconnectUncharged(t *testing.T) 
 	assert.Zero(t, usageTotal)
 	require.NotNil(t, info.StreamStatus)
 	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+}
+
+func TestOaiResponsesStreamHandlerTerminalEventWinsOverEOF(t *testing.T) {
+	body := `data: {"type":"response.created","response":{"id":"resp_1"}}` + "\n" +
+		`data: {"type":"response.done","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n"
+	c, _, resp, info := newDirectResponsesStreamTestContext(t, strings.NewReader(body))
+
+	usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	assert.Equal(t, "response.done", info.StreamTerminalEvent)
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+}
+
+func TestOaiResponsesStreamHandlerDoesNotRetryAfterOutputWrite(t *testing.T) {
+	body := `data: {"type":"response.output_text.delta","delta":"hello"}` + "\n" +
+		`data: {"type":"response.failed","response":{"error":{"type":"upstream_error","message":"late failure"}}}` + "\n"
+	c, recorder, resp, info := newDirectResponsesStreamTestContext(t, strings.NewReader(body))
+
+	usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
+
+	assert.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	assert.True(t, types.IsSkipRetryError(apiErr))
+	assert.Contains(t, recorder.Body.String(), "hello")
 }

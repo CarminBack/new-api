@@ -182,9 +182,10 @@ type RelayInfo struct {
 	// 若为空，调用 GetFinalRequestRelayFormat 会回退到 RequestConversionChain 的最后一项或 RelayFormat。
 	FinalRequestRelayFormat types.RelayFormat
 
-	StreamStatus        *StreamStatus
-	StreamTerminalEvent string
-	StreamUsagePresent  bool
+	StreamStatus            *StreamStatus
+	StreamTerminalEvent     string
+	StreamUsagePresent      bool
+	StreamDownstreamStarted bool
 
 	ThinkingContentInfo
 	TokenCountMeta

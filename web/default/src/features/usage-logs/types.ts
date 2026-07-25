@@ -111,6 +111,16 @@ export interface LogOtherData {
     is_multi_key?: boolean
     multi_key_index?: number
     use_channel?: number[]
+		route_attempts?: Array<{
+		  channel_id?: number
+		  key_index?: number
+		  status_code?: number
+		  duration_ms?: number
+		  response_started?: boolean
+		  class?: string
+		  retry?: boolean
+		  reason?: string
+		}>
     local_count_tokens?: boolean
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo
@@ -215,6 +225,8 @@ export interface LogOtherData {
     terminal_event?: string
     usage_present?: boolean
     received_event_count?: number
+		downstream_started?: boolean
+		sent_event_count?: number
     billing_status?:
       | 'charged'
       | 'missing_usage'

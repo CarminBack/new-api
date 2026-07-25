@@ -1085,9 +1085,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
           )}
 
         {/* Stream status details (admin only) */}
-        {props.isAdmin &&
-          other?.stream_status &&
-          other.stream_status.status !== 'ok' && (
+        {props.isAdmin && other?.stream_status && (
             <DetailSection label={t('Stream Status')}>
               <DetailRow
                 label={t('Status')}
@@ -1112,6 +1110,24 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   value={String(other.stream_status.error_count)}
                 />
               )}
+              {other.stream_status.terminal_event && (
+                <DetailRow label={t('Terminal Event')} value={other.stream_status.terminal_event} mono />
+              )}
+              {other.stream_status.usage_present != null && (
+                <DetailRow label={t('Usage Present')} value={other.stream_status.usage_present ? t('Yes') : t('No')} />
+              )}
+              {other.stream_status.received_event_count != null && (
+                <DetailRow label={t('Received Events')} value={String(other.stream_status.received_event_count)} />
+              )}
+              {other.stream_status.sent_event_count != null && (
+                <DetailRow label={t('Sent Events')} value={String(other.stream_status.sent_event_count)} />
+              )}
+              {other.stream_status.billing_status && (
+                <DetailRow label={t('Billing Status')} value={other.stream_status.billing_status} mono />
+              )}
+              {other.stream_status.downstream_started != null && (
+                <DetailRow label={t('Downstream Started')} value={other.stream_status.downstream_started ? t('Yes') : t('No')} />
+              )}
               {other.stream_status.end_error && (
                 <DetailRow
                   label={t('End Error')}
@@ -1126,6 +1142,19 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 )}
             </DetailSection>
           )}
+
+        {props.isAdmin && other?.admin_info?.route_attempts && other.admin_info.route_attempts.length > 0 && (
+          <DetailSection label={t('Route Attempts')}>
+            {other.admin_info.route_attempts.map((attempt) => (
+              <DetailRow
+                key={`${attempt.channel_id}-${attempt.key_index ?? 'key'}-${attempt.status_code ?? 'status'}-${attempt.duration_ms ?? 'duration'}-${attempt.reason ?? 'reason'}`}
+                label={`${t('Channel')} ${attempt.channel_id ?? '-'}`}
+                value={`${attempt.status_code ?? '-'} / ${attempt.class ?? '-'}${attempt.retry ? ` / ${t('Retry')}` : ''}${attempt.reason ? ` / ${attempt.reason}` : ''}`}
+                mono
+              />
+            ))}
+          </DetailSection>
+        )}
 
         {/* Subscription billing details */}
         {isSubscription && other && (

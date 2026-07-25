@@ -344,3 +344,16 @@ func TestDecideChannelFailureForModelSolKeyCapability(t *testing.T) {
 		})
 	}
 }
+
+func TestResponsesEmptyStreamIsRetryableBeforeOutput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	err := types.NewError(errors.New("empty responses stream: upstream ended before terminal event"), types.ErrorCodeBadResponseBody, types.ErrOptionWithStatusCode(http.StatusBadGateway))
+
+	decision := DecideChannelFailureForModel(ctx, err, "gpt-5.6-sol", 1, false, true)
+
+	require.Equal(t, ChannelFailureUncertain, decision.Class)
+	require.True(t, decision.Retry)
+	require.Contains(t, decision.Reason, "responses_stream_failure")
+}

@@ -156,6 +156,8 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 		streamInfo["usage_present"] = relayInfo.StreamUsagePresent
 		streamInfo["received_event_count"] = relayInfo.ReceivedResponseCount
 	}
+	streamInfo["downstream_started"] = relayInfo.StreamDownstreamStarted
+	streamInfo["sent_event_count"] = relayInfo.SendResponseCount
 	other["stream_status"] = streamInfo
 }
 
