@@ -299,6 +299,15 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 		if err := scanner.Err(); err != nil {
 			if err != io.EOF {
+				select {
+				case <-ctx.Done():
+					logger.LogDebug(c, "scanner stopped after local cleanup: %s", err.Error())
+					return
+				case <-stopChan:
+					logger.LogDebug(c, "scanner stopped after stream completion: %s", err.Error())
+					return
+				default:
+				}
 				logger.LogError(c, "scanner error: "+err.Error())
 				setScannerEnd(relaycommon.StreamEndReasonScannerErr, err)
 			}

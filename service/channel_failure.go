@@ -173,6 +173,18 @@ func classifyChannelFailure(err *types.NewAPIError, message string, path string,
 	return ChannelFailureDecision{Class: ChannelFailureTerminal, Reason: "non_retryable_status"}
 }
 
+// NormalizeDeterministicRequestStatus keeps the upstream status in route
+// diagnostics while returning a client-correct 400 for request errors that an
+// upstream gateway wrapped as 5xx.
+func NormalizeDeterministicRequestStatus(err *types.NewAPIError, decision ChannelFailureDecision) {
+	if err == nil || err.StatusCode < http.StatusInternalServerError ||
+		decision.Class != ChannelFailureTerminal ||
+		!strings.HasPrefix(decision.Reason, "deterministic_request") {
+		return
+	}
+	err.StatusCode = http.StatusBadRequest
+}
+
 func isSolKeyCapabilityFailure(err *types.NewAPIError, message string, path string, modelName string) bool {
 	if err == nil || err.StatusCode != http.StatusBadRequest || !strings.EqualFold(strings.TrimSpace(modelName), "gpt-5.6-sol") {
 		return false

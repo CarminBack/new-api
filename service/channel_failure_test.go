@@ -271,6 +271,20 @@ func TestDecideChannelFailure(t *testing.T) {
 	}
 }
 
+func TestNormalizeDeterministicRequestStatus(t *testing.T) {
+	err := types.NewError(
+		errors.New("Your input exceeds the context window of this model"),
+		types.ErrorCodeBadResponse,
+		types.ErrOptionWithStatusCode(http.StatusBadGateway),
+	)
+	decision := DecideChannelFailureForModel(nil, err, "gpt-5.6-terra", 1, false, false)
+
+	require.Equal(t, ChannelFailureTerminal, decision.Class)
+	require.Equal(t, "deterministic_request", decision.Reason)
+	NormalizeDeterministicRequestStatus(err, decision)
+	require.Equal(t, http.StatusBadRequest, err.StatusCode)
+}
+
 func TestDecideChannelFailureForModelSolKeyCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {

@@ -363,13 +363,31 @@ func TestAppendStreamStatusIncludesResponsesBillingDiagnostics(t *testing.T) {
 	}
 	other := map[string]interface{}{}
 
-	appendStreamStatus(relayInfo, other)
+	appendStreamStatus(nil, relayInfo, other)
 
 	streamInfo, ok := other["stream_status"].(map[string]interface{})
 	require.True(t, ok)
 	require.Equal(t, "response.done", streamInfo["terminal_event"])
 	require.Equal(t, true, streamInfo["usage_present"])
 	require.Equal(t, 4, streamInfo["received_event_count"])
+}
+
+func TestAppendStreamStatusInfersDownstreamStartedFromSentEvents(t *testing.T) {
+	status := relaycommon.NewStreamStatus()
+	status.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+	relayInfo := &relaycommon.RelayInfo{
+		IsStream:          true,
+		StreamStatus:      status,
+		SendResponseCount: 3,
+	}
+	other := map[string]interface{}{}
+
+	appendStreamStatus(nil, relayInfo, other)
+
+	streamInfo, ok := other["stream_status"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, true, streamInfo["downstream_started"])
+	require.Equal(t, 3, streamInfo["sent_event_count"])
 }
 
 func TestCacheWriteTokensTotal(t *testing.T) {

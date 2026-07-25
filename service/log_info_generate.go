@@ -114,7 +114,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendFinalRequestFormat(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
-	appendStreamStatus(relayInfo, other)
+	appendStreamStatus(ctx, relayInfo, other)
 	return other
 }
 
@@ -125,7 +125,7 @@ func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]
 	other["po"] = relayInfo.ParamOverrideAudit
 }
 
-func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+func appendStreamStatus(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
 	if relayInfo == nil || other == nil || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
 		return
 	}
@@ -156,7 +156,11 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 		streamInfo["usage_present"] = relayInfo.StreamUsagePresent
 		streamInfo["received_event_count"] = relayInfo.ReceivedResponseCount
 	}
-	streamInfo["downstream_started"] = relayInfo.StreamDownstreamStarted
+	downstreamStarted := relayInfo.StreamDownstreamStarted || relayInfo.SendResponseCount > 0
+	if !downstreamStarted && ctx != nil {
+		downstreamStarted = common.GetContextKeyBool(ctx, constant.ContextKeyStreamDownstreamStarted)
+	}
+	streamInfo["downstream_started"] = downstreamStarted
 	streamInfo["sent_event_count"] = relayInfo.SendResponseCount
 	other["stream_status"] = streamInfo
 }

@@ -287,6 +287,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			service.ReleaseChannelCircuitProbe(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
 		}
 		willRetry := decision.Retry
+		if !willRetry {
+			service.NormalizeDeterministicRequestStatus(newAPIError, decision)
+		}
 		processChannelErrorWithDecision(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, decision, !willRetry)
 
 		if !willRetry {

@@ -3,6 +3,7 @@ package helper
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/dto"
 	"io"
@@ -486,6 +487,45 @@ func TestStreamScannerHandler_StreamStatus_HandlerDone(t *testing.T) {
 	require.NotNil(t, info.StreamStatus)
 	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
 	assert.False(t, info.StreamStatus.HasErrors())
+}
+
+type closeErrorReadCloser struct {
+	data      []byte
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func (r *closeErrorReadCloser) Read(p []byte) (int, error) {
+	if len(r.data) > 0 {
+		n := copy(p, r.data)
+		r.data = r.data[n:]
+		return n, nil
+	}
+	<-r.closed
+	return 0, errors.New("http2: response body closed")
+}
+
+func (r *closeErrorReadCloser) Close() error {
+	r.closeOnce.Do(func() { close(r.closed) })
+	return nil
+}
+
+func TestStreamScannerHandler_LocalCloseDoesNotBecomeScannerError(t *testing.T) {
+	body := &closeErrorReadCloser{
+		data:   []byte("data: terminal\n"),
+		closed: make(chan struct{}),
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	StreamScannerHandler(c, &http.Response{Body: body}, info, func(_ string, sr *StreamResult) {
+		sr.Done()
+	})
+
+	require.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
+	require.False(t, info.StreamStatus.HasErrors())
 }
 
 func TestStreamScannerHandler_StreamStatus_Timeout(t *testing.T) {
