@@ -264,17 +264,18 @@ const ChannelHealthPanel = () => {
     try {
       let response;
       if (row.persistent && row.scope === 'key') {
-        response = await API.post('/api/channel/multi_key/manage', {
+        const enableResponse = await API.post('/api/channel/multi_key/manage', {
           channel_id: row.item.channel_id,
           action: 'enable_key',
           key_index: row.keyIndex,
         });
-        if (response.data?.success) {
-          await API.post(
-            `/api/channel/${row.item.channel_id}/health/recover`,
-            recoveryPayload(row),
-          );
+        if (!enableResponse.data?.success) {
+          throw new Error(enableResponse.data?.message || t('恢复失败'));
         }
+        response = await API.post(
+          `/api/channel/${row.item.channel_id}/health/recover`,
+          recoveryPayload(row),
+        );
       } else {
         response = await API.post(
           `/api/channel/${row.item.channel_id}/health/recover`,

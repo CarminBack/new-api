@@ -438,10 +438,17 @@ export function ChannelHealthPanel() {
     try {
       let response: { success: boolean; message?: string }
       if (row.persistent && row.scope === 'key') {
-        response = await enableMultiKey(row.item.channel_id, row.keyIndex ?? -1)
-        if (response.success) {
-          await recoverChannelHealth(row.item.channel_id, recoveryPayload(row))
+        const enableResponse = await enableMultiKey(
+          row.item.channel_id,
+          row.keyIndex ?? -1
+        )
+        if (!enableResponse.success) {
+          throw new Error(enableResponse.message || t('Recovery failed'))
         }
+        response = await recoverChannelHealth(
+          row.item.channel_id,
+          recoveryPayload(row)
+        )
       } else {
         response = await recoverChannelHealth(
           row.item.channel_id,
