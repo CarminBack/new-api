@@ -71,6 +71,9 @@ const (
 	// body writes instead of HTTP headers that may have been prepared upstream.
 	ContextKeyStreamResponseTracking  ContextKey = "stream_response_tracking"
 	ContextKeyStreamDownstreamStarted ContextKey = "stream_downstream_started"
+	// ContextKeyUpstreamFailure stores a sanitized Responses failure summary for
+	// admin-only error diagnostics. It never contains request bodies or secrets.
+	ContextKeyUpstreamFailure ContextKey = "upstream_failure"
 
 	// ContextKeyAuditLogged marks that the current request has already recorded
 	// a manage/operation audit log inside the handler. When set, the admin-audit

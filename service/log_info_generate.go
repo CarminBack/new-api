@@ -107,6 +107,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 
 	AppendChannelAffinityAdminInfo(ctx, adminInfo)
 	AppendChannelRouteAttemptsAdminInfo(ctx, adminInfo, true)
+	AppendUpstreamFailureAdminInfo(ctx, adminInfo)
 
 	other["admin_info"] = adminInfo
 	appendRequestPath(ctx, relayInfo, other)
@@ -163,6 +164,21 @@ func appendStreamStatus(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, othe
 	streamInfo["downstream_started"] = downstreamStarted
 	streamInfo["sent_event_count"] = relayInfo.SendResponseCount
 	other["stream_status"] = streamInfo
+}
+
+// AppendUpstreamFailureAdminInfo copies the sanitized upstream failure summary
+// captured by a Responses parser into admin-only log metadata.
+func AppendUpstreamFailureAdminInfo(ctx *gin.Context, adminInfo map[string]interface{}) {
+	if ctx == nil || adminInfo == nil {
+		return
+	}
+	value, ok := common.GetContextKey(ctx, constant.ContextKeyUpstreamFailure)
+	if !ok || value == nil {
+		return
+	}
+	if failure, ok := value.(map[string]interface{}); ok && len(failure) > 0 {
+		adminInfo["upstream_failure"] = failure
+	}
 }
 
 func appendStreamBillingStatus(relayInfo *relaycommon.RelayInfo, totalTokens int, other map[string]interface{}) {

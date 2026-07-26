@@ -483,6 +483,7 @@ func processChannelErrorWithDecision(c *gin.Context, channelError types.ChannelE
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
 		service.AppendChannelRouteAttemptsAdminInfo(c, adminInfo, false)
+		service.AppendUpstreamFailureAdminInfo(c, adminInfo)
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {

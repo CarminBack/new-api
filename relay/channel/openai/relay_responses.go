@@ -178,7 +178,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Done()
 		case "response.failed", "response.error":
 			info.StreamTerminalEvent = streamResponse.Type
-			skipRetry := streamDownstreamStarted()
+			downstreamStarted := streamDownstreamStarted()
+			recordResponsesUpstreamFailure(c, info, streamResponse, downstreamStarted)
+			skipRetry := downstreamStarted
 			if streamResponse.Response != nil {
 				if oaiErr := streamResponse.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
 					if skipRetry {
