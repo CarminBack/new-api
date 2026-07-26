@@ -122,6 +122,56 @@ func TestBuildAistarsLabSeedanceAlias(t *testing.T) {
 	assert.Equal(t, "seedance-720p-fast-4img-c18", buildAistarsLabSeedanceAlias("seedance-2.0-720p-fast-4img", "720p", "18"))
 }
 
+func TestBuildAistarsLabDescription(t *testing.T) {
+	durationMin := 4
+	durationMax := 15
+
+	tests := []struct {
+		name     string
+		model    AistarsLabSeedanceModel
+		expected string
+	}{
+		{
+			name: "per item without frames",
+			model: AistarsLabSeedanceModel{
+				Channel:        "50",
+				Quality:        "720p",
+				BillingUnit:    ratio_setting.TaskBillingUnitPerItem,
+				Modes:          []string{"text2video", "image2video"},
+				AspectRatios:   []string{"16:9", "9:16", "1:1"},
+				DurationMin:    &durationMin,
+				DurationMax:    &durationMax,
+				InputImagesMax: 4,
+				InputVideosMax: 3,
+				InputAudiosMax: 1,
+			},
+			expected: "Seedance 2.0 720p，渠道 50。支持文生和全能参考，不支持首尾帧；按条计费；画幅：16:9、9:16、1:1；时长：4-15秒；最多4图/3视频/1音频。",
+		},
+		{
+			name: "per second with frames",
+			model: AistarsLabSeedanceModel{
+				Channel:        "48",
+				Quality:        "4k",
+				BillingUnit:    ratio_setting.TaskBillingUnitPerSecond,
+				Modes:          []string{"text2video", "image2video", "frames2video"},
+				AspectRatios:   []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"},
+				DurationMin:    &durationMin,
+				DurationMax:    &durationMax,
+				InputImagesMax: 9,
+				InputVideosMax: 3,
+				InputAudiosMax: 3,
+			},
+			expected: "Seedance 2.0 4K，渠道 48。支持文生、全能参考和首尾帧；按秒计费；画幅：16:9、9:16、1:1、4:3、3:4、21:9；时长：4-15秒；最多9图/3视频/3音频。",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, buildAistarsLabDescription(test.model))
+		})
+	}
+}
+
 func TestFilterOutAistarsLabSeedanceAliasesRemovesRawModels(t *testing.T) {
 	filtered := filterOutAistarsLabSeedanceAliases([]string{
 		"grok-video-1.5",

@@ -639,7 +639,42 @@ func buildAistarsLabDescription(item AistarsLabSeedanceModel) string {
 	if item.BillingUnit == ratio_setting.TaskBillingUnitPerItem {
 		unit = "按条计费"
 	}
-	return fmt.Sprintf("Seedance 2.0 %s，渠道 %s，%s", item.Quality, item.Channel, unit)
+	quality := item.Quality
+	if strings.EqualFold(quality, "4k") {
+		quality = "4K"
+	}
+
+	modeDescription := ""
+	hasText := common.StringsContains(item.Modes, "text2video")
+	hasImage := common.StringsContains(item.Modes, "image2video")
+	hasFrames := common.StringsContains(item.Modes, "frames2video")
+	switch {
+	case hasText && hasImage && hasFrames:
+		modeDescription = "支持文生、全能参考和首尾帧"
+	case hasText && hasImage:
+		modeDescription = "支持文生和全能参考，不支持首尾帧"
+	case hasText:
+		modeDescription = "仅支持文生视频"
+	case hasImage:
+		modeDescription = "仅支持全能参考"
+	case hasFrames:
+		modeDescription = "仅支持首尾帧"
+	}
+
+	details := make([]string, 0, 5)
+	if modeDescription != "" {
+		details = append(details, modeDescription)
+	}
+	details = append(details, unit)
+	if len(item.AspectRatios) > 0 {
+		details = append(details, "画幅："+strings.Join(item.AspectRatios, "、"))
+	}
+	if item.DurationMin != nil && item.DurationMax != nil {
+		details = append(details, fmt.Sprintf("时长：%d-%d秒", *item.DurationMin, *item.DurationMax))
+	}
+	details = append(details, fmt.Sprintf("最多%d图/%d视频/%d音频", item.InputImagesMax, item.InputVideosMax, item.InputAudiosMax))
+
+	return fmt.Sprintf("Seedance 2.0 %s，渠道 %s。%s。", quality, item.Channel, strings.Join(details, "；"))
 }
 
 func buildAistarsLabTags(item AistarsLabSeedanceModel) string {
