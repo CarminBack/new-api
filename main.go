@@ -131,6 +131,7 @@ func main() {
 
 	// Local image generation result retention cleanup.
 	service.StartImageGenerationCleanupTask()
+	service.StartTemporaryReferenceMediaCleanupTask()
 
 	// Optional AistarsLab video model/price sync task.
 	service.StartAistarsLabConfigSyncTask()

@@ -133,6 +133,16 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	}
 	metadata = mergePublicFields(req, metadata)
 	images, videos, audios := collectReferences(req, metadata)
+	for index, image := range images {
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(image)), "data:image/") {
+			continue
+		}
+		storedURL, storeErr := service.StoreTemporaryReferenceImage(image)
+		if storeErr != nil {
+			return invalidCapability("images", storeErr.Error())
+		}
+		images[index] = storedURL
+	}
 
 	capability := capabilityForModel(req.Model)
 	if !capability.known {

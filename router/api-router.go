@@ -331,6 +331,9 @@ func SetApiRouter(router *gin.Engine) {
 		imageGenerationRoute := apiRouter.Group("/image-generations")
 		imageGenerationRoute.GET("/:id/content", controller.GetImageGenerationContent)
 
+		referenceMediaRoute := apiRouter.Group("/reference-media")
+		referenceMediaRoute.GET("/:id/content", controller.GetTemporaryReferenceMediaContent)
+
 		taskRoute := apiRouter.Group("/task")
 		{
 			taskRoute.GET("/self", middleware.UserAuth(), controller.GetUserTask)

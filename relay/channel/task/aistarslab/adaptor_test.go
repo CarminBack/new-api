@@ -5,11 +5,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -171,6 +173,37 @@ func TestBuildRequestAcceptsUnifiedTopLevelFields(t *testing.T) {
 	require.Len(t, payload.Metadata.Images, 1)
 	require.Len(t, payload.Metadata.Videos, 1)
 	require.Len(t, payload.Metadata.Audios, 1)
+}
+
+func TestBuildRequestStoresBase64ReferenceImage(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("REFERENCE_MEDIA_STORAGE_DIR", dir)
+	originalServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://token.example.test"
+	t.Cleanup(func() { system_setting.ServerAddress = originalServerAddress })
+
+	c := testJSONContext(`{
+    "model": "seedance-720p-fast-c48",
+    "prompt": "base64 reference",
+    "duration": 4,
+    "mode_type": "image2video",
+    "images": ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL7WQAAAABJRU5ErkJggg=="]
+  }`)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "48:seedance-2.0-fast"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	a := &TaskAdaptor{}
+	require.Nil(t, a.ValidateRequestAndSetAction(c, info))
+	body, err := a.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	data, err := io.ReadAll(body)
+	require.NoError(t, err)
+
+	var payload requestPayload
+	require.NoError(t, common.Unmarshal(data, &payload))
+	require.Len(t, payload.Metadata.Images, 1)
+	require.True(t, strings.HasPrefix(payload.Metadata.Images[0], "https://token.example.test/api/reference-media/"))
+	entries, err := filepath.Glob(filepath.Join(dir, "*"))
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
 }
 
 func TestDoResponsePreservesProviderError(t *testing.T) {
