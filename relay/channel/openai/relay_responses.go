@@ -95,6 +95,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	defer service.CloseResponseBodyGracefully(resp)
 	common.SetContextKey(c, constant.ContextKeyStreamResponseTracking, true)
 	common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, false)
+	common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, false)
 	info.SendResponseCount = 0
 	info.ReceivedResponseCount = 0
 	info.StreamTerminalEvent = ""
@@ -127,6 +128,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	streamDownstreamStarted := func() bool {
 		return info.SendResponseCount > 0 ||
 			common.GetContextKeyBool(c, constant.ContextKeyStreamDownstreamStarted)
+	}
+	streamActualOutputStarted := func() bool {
+		return common.GetContextKeyBool(c, constant.ContextKeyStreamActualOutputStarted)
 	}
 	streamHasUpstreamOutput := func() bool {
 		return streamDownstreamStarted() || responseTextBuilder.Len() > 0 ||
@@ -178,9 +182,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Done()
 		case "response.failed", "response.error":
 			info.StreamTerminalEvent = streamResponse.Type
-			downstreamStarted := streamDownstreamStarted()
-			recordResponsesUpstreamFailure(c, info, streamResponse, downstreamStarted)
-			skipRetry := downstreamStarted
+			actualOutputStarted := streamActualOutputStarted()
+			recordResponsesUpstreamFailure(c, info, streamResponse, actualOutputStarted)
+			skipRetry := actualOutputStarted
 			if streamResponse.Response != nil {
 				if oaiErr := streamResponse.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
 					if skipRetry {

@@ -803,6 +803,51 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
+        {props.isAdmin && adminInfo?.request_diagnostic && (
+          <DetailSection label={t('Request Diagnostic')}>
+            <DetailRow
+              label={t('Captured')}
+              value={
+                adminInfo.request_diagnostic.captured ? t('Yes') : t('No')
+              }
+            />
+            {adminInfo.request_diagnostic.reason && (
+              <DetailRow
+                label={t('Status')}
+                value={adminInfo.request_diagnostic.reason}
+              />
+            )}
+            {adminInfo.request_diagnostic.body_size != null && (
+              <DetailRow
+                label={t('Body Size')}
+                value={`${adminInfo.request_diagnostic.body_size.toLocaleString()} bytes`}
+                mono
+              />
+            )}
+            {adminInfo.request_diagnostic.body != null && (
+              <div className='relative min-w-0'>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='absolute top-1 right-1 h-6 w-6 p-0'
+                  onClick={() =>
+                    copyToClipboard(
+                      JSON.stringify(adminInfo.request_diagnostic?.body, null, 2)
+                    )
+                  }
+                  title={t('Copy to clipboard')}
+                  aria-label={t('Copy to clipboard')}
+                >
+                  <Copy className='size-3' />
+                </Button>
+                <pre className='bg-background/60 max-h-96 overflow-auto rounded border p-2 pr-8 font-mono text-[11px] leading-relaxed whitespace-pre-wrap'>
+                  {JSON.stringify(adminInfo.request_diagnostic.body, null, 2)}
+                </pre>
+              </div>
+            )}
+          </DetailSection>
+        )}
+
         {/* Violation fee info */}
         {isViolation && other && (
           <DetailSection

@@ -71,6 +71,10 @@ const (
 	// body writes instead of HTTP headers that may have been prepared upstream.
 	ContextKeyStreamResponseTracking  ContextKey = "stream_response_tracking"
 	ContextKeyStreamDownstreamStarted ContextKey = "stream_downstream_started"
+	// ContextKeyStreamActualOutputStarted is set only after text, tool
+	// arguments, or generated image data has been sent downstream. Responses
+	// metadata events alone must not block a safe channel retry.
+	ContextKeyStreamActualOutputStarted ContextKey = "stream_actual_output_started"
 	// ContextKeyUpstreamFailure stores a sanitized Responses failure summary for
 	// admin-only error diagnostics. It never contains request bodies or secrets.
 	ContextKeyUpstreamFailure ContextKey = "upstream_failure"

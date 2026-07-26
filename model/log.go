@@ -700,6 +700,52 @@ func CountOldLog(ctx context.Context, targetTimestamp int64) (int64, error) {
 	return total, nil
 }
 
+// ClearExpiredRequestDiagnostics removes only the admin request bodies whose
+// retention window has elapsed. The surrounding error log remains available
+// for normal troubleshooting. ClickHouse logs are left untouched here because
+// row-level mutations are expensive; deployments using ClickHouse should use
+// its table TTL for the same retention policy.
+func ClearExpiredRequestDiagnostics(ctx context.Context, cutoffTimestamp int64, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		return 0, nil
+	}
+	var logs []*Log
+	if err := LOG_DB.WithContext(ctx).
+		Where("type = ? AND created_at < ? AND other LIKE ?", LogTypeError, cutoffTimestamp, "%request_diagnostic%").
+		Order("created_at asc, id asc").Limit(limit).Find(&logs).Error; err != nil {
+		return 0, err
+	}
+	var cleared int64
+	for _, log := range logs {
+		if err := ctx.Err(); err != nil {
+			return cleared, err
+		}
+		other, err := common.StrToMap(log.Other)
+		if err != nil || other == nil {
+			continue
+		}
+		adminInfo, ok := other["admin_info"].(map[string]interface{})
+		if !ok || adminInfo == nil {
+			continue
+		}
+		if _, ok := adminInfo["request_diagnostic"]; !ok {
+			continue
+		}
+		delete(adminInfo, "request_diagnostic")
+		if len(adminInfo) == 0 {
+			delete(other, "admin_info")
+		}
+		if err := LOG_DB.WithContext(ctx).Model(&Log{}).Where("id = ?", log.Id).Update("other", common.MapToJsonStr(other)).Error; err != nil {
+			return cleared, err
+		}
+		cleared++
+	}
+	return cleared, nil
+}
+
 func DeleteOldLogBatch(ctx context.Context, targetTimestamp int64, limit int) (int64, error) {
 	if limit <= 0 {
 		limit = 100

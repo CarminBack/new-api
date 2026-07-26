@@ -94,6 +94,9 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 	n, err := c.Writer.Write(payload)
 	if n > 0 {
 		common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, true)
+		if responsesEventHasActualOutput(resp) {
+			common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, true)
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("write responses stream data failed: %w", err)
@@ -102,6 +105,35 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 		return fmt.Errorf("write responses stream data failed: short write %d/%d", n, len(payload))
 	}
 	return FlushWriter(c)
+}
+
+// responsesEventHasActualOutput distinguishes response metadata from content
+// that may already have caused an upstream side effect. Metadata such as
+// response.created/in_progress is buffered and must remain retryable.
+func responsesEventHasActualOutput(resp dto.ResponsesStreamResponse) bool {
+	switch resp.Type {
+	case "response.output_text.delta",
+		"response.reasoning_summary_text.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.audio_transcript.delta",
+		"response.audio.delta",
+		"response.image_generation_call.partial_image",
+		"response.image_generation_call.completed":
+		return true
+	case dto.ResponsesOutputTypeItemAdded, dto.ResponsesOutputTypeItemDone:
+		return resp.Item != nil && len(resp.Item.Arguments) > 0
+	default:
+		return false
+	}
+}
+
+// MarkActualStreamOutput lets response converters that emit another protocol
+// (chat/Claude/Gemini) preserve the same retry boundary as native Responses.
+func MarkActualStreamOutput(c *gin.Context) {
+	if c != nil {
+		common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, true)
+	}
 }
 
 func StringData(c *gin.Context, str string) error {

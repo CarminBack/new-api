@@ -92,6 +92,17 @@ export interface ChannelAffinityInfo {
   using_group?: string
 }
 
+export interface RequestDiagnosticInfo {
+  captured?: boolean
+  truncated?: boolean
+  reason?: string
+  content_type?: string
+  body_size?: number
+  captured_at?: string
+  expires_at?: string
+  body?: unknown
+}
+
 export const USAGE_BILLING_PATH = {
   LOCAL: 'local',
   UPSTREAM: 'upstream',
@@ -145,6 +156,7 @@ export interface LogOtherData {
       original: number
       clamped: number
     }
+    request_diagnostic?: RequestDiagnosticInfo
   }
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.

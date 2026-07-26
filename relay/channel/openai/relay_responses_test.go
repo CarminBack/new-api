@@ -201,3 +201,17 @@ func TestOaiResponsesStreamHandlerDoesNotRetryAfterOutputWrite(t *testing.T) {
 	assert.True(t, types.IsSkipRetryError(apiErr))
 	assert.Contains(t, recorder.Body.String(), "hello")
 }
+
+func TestOaiResponsesStreamHandlerRetriesAfterMetadataOnlyFailure(t *testing.T) {
+	body := `data: {"type":"response.created","response":{"id":"resp_meta"}}` + "\n" +
+		`data: {"type":"response.in_progress","response":{"id":"resp_meta"}}` + "\n" +
+		`data: {"type":"response.failed","response":{"error":{"type":"server_error","message":"temporary"}}}` + "\n"
+	c, recorder, resp, info := newDirectResponsesStreamTestContext(t, strings.NewReader(body))
+
+	usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
+
+	assert.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	assert.False(t, types.IsSkipRetryError(apiErr))
+	assert.Empty(t, recorder.Body.String(), "metadata-only failure must not be sent to downstream")
+}

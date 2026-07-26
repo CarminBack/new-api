@@ -178,10 +178,7 @@ function renderType(type, t, record) {
 
 function buildStreamStatusTooltip(ss, t) {
   if (!ss) return null;
-  const lines = [
-    t('流状态') + '：' + t('异常'),
-    (ss.end_reason || 'unknown'),
-  ];
+  const lines = [t('流状态') + '：' + t('异常'), ss.end_reason || 'unknown'];
   if (ss.error_count > 0) {
     lines.push(`${t('软错误')}: ${ss.error_count}`);
   }
@@ -219,11 +216,7 @@ function renderIsStream(bool, t, streamStatus) {
                 userSelect: 'none',
               }}
             >
-              <CircleAlert
-                size={14}
-                strokeWidth={2.5}
-                color='currentColor'
-              />
+              <CircleAlert size={14} strokeWidth={2.5} color='currentColor' />
             </span>
           </Tooltip>
         )}
@@ -495,7 +488,11 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     };
   }
 
-  const summaryOpts = { ...other, displayMode: billingDisplayMode, outputMode: 'segments' };
+  const summaryOpts = {
+    ...other,
+    displayMode: billingDisplayMode,
+    outputMode: 'segments',
+  };
 
   if (other?.billing_mode === 'tiered_expr') {
     return { segments: renderTieredModelPriceSimple(summaryOpts) };
@@ -945,25 +942,56 @@ export const getLogsColumns = ({
           billingDisplayMode,
           t,
         );
+        const requestDiagnostic =
+          isAdminUser &&
+          getLogOther(record.other)?.admin_info?.request_diagnostic;
 
-        if (!detailSummary) {
+        const detailNode = !detailSummary ? (
+          <Typography.Paragraph
+            ellipsis={{
+              rows: 2,
+              showTooltip: {
+                type: 'popover',
+                opts: { style: { width: 240 } },
+              },
+            }}
+            style={{ maxWidth: 200, marginBottom: 0 }}
+          >
+            {text}
+          </Typography.Paragraph>
+        ) : (
+          renderCompactDetailSummary(detailSummary.segments)
+        );
+
+        if (requestDiagnostic) {
+          const bodyText = requestDiagnostic.body
+            ? JSON.stringify(requestDiagnostic.body, null, 2)
+            : requestDiagnostic.reason || t('Request body unavailable');
           return (
-            <Typography.Paragraph
-              ellipsis={{
-                rows: 2,
-                showTooltip: {
-                  type: 'popover',
-                  opts: { style: { width: 240 } },
-                },
-              }}
-              style={{ maxWidth: 200, marginBottom: 0 }}
+            <Popover
+              trigger='click'
+              content={
+                <pre
+                  style={{
+                    maxWidth: 640,
+                    maxHeight: 480,
+                    overflow: 'auto',
+                    margin: 0,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontSize: 11,
+                  }}
+                >
+                  {bodyText}
+                </pre>
+              }
             >
-              {text}
-            </Typography.Paragraph>
+              <span style={{ cursor: 'pointer' }}>{detailNode}</span>
+            </Popover>
           );
         }
 
-        return renderCompactDetailSummary(detailSummary.segments);
+        return detailNode;
       },
     },
   ];

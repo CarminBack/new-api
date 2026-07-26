@@ -13,7 +13,7 @@ func channelResponseStarted(c *gin.Context) bool {
 		return false
 	}
 	if _, tracked := common.GetContextKey(c, constant.ContextKeyStreamResponseTracking); tracked {
-		return common.GetContextKeyBool(c, constant.ContextKeyStreamDownstreamStarted)
+		return common.GetContextKeyBool(c, constant.ContextKeyStreamActualOutputStarted)
 	}
 	return c.Writer != nil && c.Writer.Written()
 }

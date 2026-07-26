@@ -70,6 +70,7 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	defer service.CloseResponseBodyGracefully(resp)
 	common.SetContextKey(c, constant.ContextKeyStreamResponseTracking, true)
 	common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, false)
+	common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, false)
 	info.SendResponseCount = 0
 	info.StreamDownstreamStarted = false
 

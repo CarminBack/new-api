@@ -22,8 +22,9 @@ func recordResponsesUpstreamFailure(c *gin.Context, info *relaycommon.RelayInfo,
 		return
 	}
 	diagnostic := map[string]interface{}{
-		"event":              event.Type,
-		"downstream_started": downstreamStarted,
+		"event":                 event.Type,
+		"downstream_started":    downstreamStarted,
+		"actual_output_started": downstreamStarted,
 	}
 	if info != nil {
 		diagnostic["received_event_count"] = info.ReceivedResponseCount

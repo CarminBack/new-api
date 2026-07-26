@@ -81,6 +81,7 @@ func GeminiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	common.SetContextKey(c, constant.ContextKeyStreamResponseTracking, true)
 	common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, false)
+	common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, false)
 	info.SendResponseCount = 0
 	info.StreamDownstreamStarted = false
 	responseID := helper.GetResponseID(c)

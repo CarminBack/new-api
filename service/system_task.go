@@ -85,6 +85,37 @@ func (logCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runner
 
 func init() {
 	RegisterSystemTaskHandler(logCleanupHandler{})
+	RegisterSystemTaskHandler(requestDiagnosticCleanupHandler{})
+}
+
+// requestDiagnosticCleanupHandler expires only the admin-visible request
+// bodies. The error log itself remains searchable after the body is removed.
+type requestDiagnosticCleanupHandler struct{}
+
+func (requestDiagnosticCleanupHandler) Type() string {
+	return model.SystemTaskTypeRequestDiagnosticCleanup
+}
+func (requestDiagnosticCleanupHandler) Enabled() bool           { return true }
+func (requestDiagnosticCleanupHandler) Interval() time.Duration { return time.Hour }
+func (requestDiagnosticCleanupHandler) NewPayload() any         { return nil }
+func (requestDiagnosticCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	cutoff := time.Now().Add(-RequestDiagnosticRetention()).Unix()
+	var cleared int64
+	for {
+		count, err := model.ClearExpiredRequestDiagnostics(ctx, cutoff, logCleanupBatchSize)
+		if err != nil {
+			failSystemTask(task, runnerID, err)
+			return
+		}
+		cleared += count
+		if count == 0 || count < logCleanupBatchSize {
+			break
+		}
+	}
+	result := map[string]interface{}{"cleared": cleared, "cutoff": cutoff}
+	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
+		logSystemTaskLockError(ctx, task, err)
+	}
 }
 
 type LogCleanupPayload struct {
