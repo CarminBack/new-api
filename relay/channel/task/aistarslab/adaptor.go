@@ -142,15 +142,17 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	}
 	metadata = mergePublicFields(req, metadata)
 	images, videos, audios := collectReferences(req, metadata)
-	for index, image := range images {
-		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(image)), "data:image/") {
-			continue
-		}
-		storedURL, storeErr := service.StoreTemporaryReferenceImage(image)
-		if storeErr != nil {
-			return invalidCapability("images", storeErr.Error())
-		}
-		images[index] = storedURL
+	images, err = stageReferenceMedia(images, "image", service.StoreTemporaryReferenceImage)
+	if err != nil {
+		return invalidCapability("images", err.Error())
+	}
+	videos, err = stageReferenceMedia(videos, "video", service.StoreTemporaryReferenceVideo)
+	if err != nil {
+		return invalidCapability("videos", err.Error())
+	}
+	audios, err = stageReferenceMedia(audios, "audio", service.StoreTemporaryReferenceAudio)
+	if err != nil {
+		return invalidCapability("audios", err.Error())
 	}
 
 	if !capability.known {
@@ -264,6 +266,26 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 
 func invalidCapability(param, message string) *dto.TaskError {
 	return service.TaskErrorWrapperLocal(fmt.Errorf("%s: %s", param, message), "invalid_request", http.StatusBadRequest)
+}
+
+func stageReferenceMedia(values []string, kind string, store func(string) (string, error)) ([]string, error) {
+	for index, value := range values {
+		value = strings.TrimSpace(value)
+		lower := strings.ToLower(value)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+			values[index] = value
+			continue
+		}
+		if !strings.HasPrefix(lower, "data:"+kind+"/") {
+			return nil, fmt.Errorf("reference %s must be an http(s) URL or data:%s/...;base64 URL", kind, kind)
+		}
+		storedURL, err := store(value)
+		if err != nil {
+			return nil, err
+		}
+		values[index] = storedURL
+	}
+	return values, nil
 }
 
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {

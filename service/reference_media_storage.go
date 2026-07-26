@@ -18,6 +18,8 @@ import (
 const (
 	referenceMediaRetention = 24 * time.Hour
 	referenceImageMaxBytes  = 30 * 1024 * 1024
+	referenceVideoMaxBytes  = 30 * 1024 * 1024
+	referenceAudioMaxBytes  = 20 * 1024 * 1024
 )
 
 var referenceMediaIDPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
@@ -33,20 +35,40 @@ func referenceMediaStorageDir() string {
 }
 
 func StoreTemporaryReferenceImage(dataURL string) (string, error) {
+	return storeTemporaryReferenceMedia(dataURL, "image", referenceImageMaxBytes)
+}
+
+func StoreTemporaryReferenceVideo(dataURL string) (string, error) {
+	return storeTemporaryReferenceMedia(dataURL, "video", referenceVideoMaxBytes)
+}
+
+func StoreTemporaryReferenceAudio(dataURL string) (string, error) {
+	return storeTemporaryReferenceMedia(dataURL, "audio", referenceAudioMaxBytes)
+}
+
+func storeTemporaryReferenceMedia(dataURL string, kind string, maxBytes int) (string, error) {
 	parts := strings.SplitN(strings.TrimSpace(dataURL), ",", 2)
-	if len(parts) != 2 || !strings.HasPrefix(strings.ToLower(parts[0]), "data:image/") || !strings.Contains(strings.ToLower(parts[0]), ";base64") {
-		return "", fmt.Errorf("reference image must be a data:image/...;base64 URL")
+	header := ""
+	if len(parts) > 0 {
+		header = strings.ToLower(parts[0])
 	}
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(parts[1]))
+	if len(parts) != 2 || !strings.HasPrefix(header, "data:"+kind+"/") || !strings.Contains(header, ";base64") {
+		return "", fmt.Errorf("reference %s must be a data:%s/...;base64 URL", kind, kind)
+	}
+	encoded := strings.TrimSpace(parts[1])
+	if len(encoded) > base64.StdEncoding.EncodedLen(maxBytes)+4 {
+		return "", fmt.Errorf("reference %s must be between 1 byte and %dMB", kind, maxBytes/(1024*1024))
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return "", fmt.Errorf("invalid reference image base64: %w", err)
+		return "", fmt.Errorf("invalid reference %s base64: %w", kind, err)
 	}
-	if len(raw) == 0 || len(raw) > referenceImageMaxBytes {
-		return "", fmt.Errorf("reference image must be between 1 byte and %dMB", referenceImageMaxBytes/(1024*1024))
+	if len(raw) == 0 || len(raw) > maxBytes {
+		return "", fmt.Errorf("reference %s must be between 1 byte and %dMB", kind, maxBytes/(1024*1024))
 	}
 	mimeType := http.DetectContentType(raw)
-	if mimeType != "image/png" && mimeType != "image/jpeg" && mimeType != "image/webp" && mimeType != "image/gif" {
-		return "", fmt.Errorf("unsupported reference image content type: %s", mimeType)
+	if !isSupportedReferenceMediaContentType(kind, mimeType) {
+		return "", fmt.Errorf("unsupported reference %s content type: %s", kind, mimeType)
 	}
 
 	baseURL, err := referenceMediaPublicBaseURL()
@@ -58,12 +80,27 @@ func StoreTemporaryReferenceImage(dataURL string) (string, error) {
 		return "", fmt.Errorf("create reference media storage: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(referenceMediaStorageDir(), id), raw, 0600); err != nil {
-		return "", fmt.Errorf("store reference image: %w", err)
+		return "", fmt.Errorf("store reference %s: %w", kind, err)
 	}
 
 	expires := time.Now().Add(referenceMediaRetention).Unix()
 	signature := generateReferenceMediaSignature(id, expires)
 	return fmt.Sprintf("%s/api/reference-media/%s/content?expires=%d&signature=%s", baseURL, id, expires, signature), nil
+}
+
+func isSupportedReferenceMediaContentType(kind string, mimeType string) bool {
+	switch kind {
+	case "image":
+		return mimeType == "image/png" || mimeType == "image/jpeg" || mimeType == "image/webp" || mimeType == "image/gif"
+	case "video":
+		return mimeType == "video/mp4" || mimeType == "video/webm" || mimeType == "video/quicktime" || mimeType == "video/mpeg" || mimeType == "video/x-msvideo"
+	case "audio":
+		return mimeType == "audio/mpeg" || mimeType == "audio/wav" || mimeType == "audio/wave" || mimeType == "audio/x-wav" ||
+			mimeType == "audio/ogg" || mimeType == "application/ogg" || mimeType == "audio/webm" || mimeType == "video/webm" ||
+			mimeType == "audio/mp4" || mimeType == "video/mp4" || mimeType == "audio/aac" || mimeType == "audio/flac" || mimeType == "audio/x-flac"
+	default:
+		return false
+	}
 }
 
 func GetTemporaryReferenceMediaPath(id string) string {

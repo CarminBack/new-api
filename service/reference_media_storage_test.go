@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/base64"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -40,6 +41,36 @@ func TestStoreTemporaryReferenceImageRejectsInvalidDataURL(t *testing.T) {
 	_, err := StoreTemporaryReferenceImage("aGVsbG8=")
 	require.Error(t, err)
 	_, err = StoreTemporaryReferenceImage("data:image/png;base64,not-base64")
+	require.Error(t, err)
+}
+
+func TestStoreTemporaryReferenceVideoAndAudio(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("REFERENCE_MEDIA_STORAGE_DIR", dir)
+	originalServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://token.example.test"
+	t.Cleanup(func() { system_setting.ServerAddress = originalServerAddress })
+
+	videoBytes := []byte{0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 0, 0, 'i', 's', 'o', 'm', 'm', 'p', '4', '2'}
+	audioBytes := []byte{'I', 'D', '3', 4, 0, 0, 0, 0, 0, 0}
+
+	videoURL, err := StoreTemporaryReferenceVideo("data:video/mp4;base64," + base64.StdEncoding.EncodeToString(videoBytes))
+	require.NoError(t, err)
+	audioURL, err := StoreTemporaryReferenceAudio("data:audio/mpeg;base64," + base64.StdEncoding.EncodeToString(audioBytes))
+	require.NoError(t, err)
+	assert.Contains(t, videoURL, "/api/reference-media/")
+	assert.Contains(t, audioURL, "/api/reference-media/")
+
+	entries, err := filepath.Glob(filepath.Join(dir, "*"))
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+}
+
+func TestStoreTemporaryReferenceVideoAndAudioRejectWrongContent(t *testing.T) {
+	encodedImage := strings.TrimPrefix(tinyPNGDataURL, "data:image/png;base64,")
+	_, err := StoreTemporaryReferenceVideo("data:video/mp4;base64," + encodedImage)
+	require.Error(t, err)
+	_, err = StoreTemporaryReferenceAudio("data:audio/mpeg;base64," + encodedImage)
 	require.Error(t, err)
 }
 

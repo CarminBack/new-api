@@ -2,6 +2,7 @@ package aistarslab
 
 import (
 	"bytes"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -232,6 +233,66 @@ func TestBuildRequestStoresBase64ReferenceImage(t *testing.T) {
 	entries, err := filepath.Glob(filepath.Join(dir, "*"))
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
+}
+
+func TestBuildRequestStoresBase64ReferenceVideoAndAudio(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("REFERENCE_MEDIA_STORAGE_DIR", dir)
+	originalServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://token.example.test"
+	t.Cleanup(func() { system_setting.ServerAddress = originalServerAddress })
+
+	videoBytes := []byte{0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 0, 0, 'i', 's', 'o', 'm', 'm', 'p', '4', '2'}
+	audioBytes := []byte{'I', 'D', '3', 4, 0, 0, 0, 0, 0, 0}
+	body, err := common.Marshal(map[string]any{
+		"model":     "seedance-720p-fast-c48",
+		"prompt":    "base64 media references",
+		"duration":  4,
+		"mode_type": "image2video",
+		"images":    []string{"https://example.com/reference.jpg"},
+		"videos":    []string{"data:video/mp4;base64," + base64.StdEncoding.EncodeToString(videoBytes)},
+		"audios":    []string{"data:audio/mpeg;base64," + base64.StdEncoding.EncodeToString(audioBytes)},
+	})
+	require.NoError(t, err)
+
+	c := testJSONContext(string(body))
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "48:seedance-2.0-fast"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	a := &TaskAdaptor{}
+	require.Nil(t, a.ValidateRequestAndSetAction(c, info))
+	requestBody, err := a.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	data, err := io.ReadAll(requestBody)
+	require.NoError(t, err)
+
+	var payload requestPayload
+	require.NoError(t, common.Unmarshal(data, &payload))
+	require.Equal(t, "https://example.com/reference.jpg", payload.Metadata.Images[0])
+	require.True(t, strings.HasPrefix(payload.Metadata.Videos[0], "https://token.example.test/api/reference-media/"))
+	require.True(t, strings.HasPrefix(payload.Metadata.Audios[0], "https://token.example.test/api/reference-media/"))
+	entries, err := filepath.Glob(filepath.Join(dir, "*"))
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+}
+
+func TestValidateRejectsNonURLReferenceVideoAndAudio(t *testing.T) {
+	for field, value := range map[string]string{
+		"videos": "raw-base64-without-data-url-prefix",
+		"audios": "blob:https://example.com/local-browser-object",
+	} {
+		body, err := common.Marshal(map[string]any{
+			"model":     "seedance-720p-fast-c48",
+			"prompt":    "invalid media reference",
+			"duration":  4,
+			"mode_type": "image2video",
+			"images":    []string{"https://example.com/reference.jpg"},
+			field:       []string{value},
+		})
+		require.NoError(t, err)
+		taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(testJSONContext(string(body)), &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
+		require.NotNil(t, taskErr)
+		require.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+		require.Contains(t, taskErr.Message, "http(s) URL")
+	}
 }
 
 func TestDoResponsePreservesProviderError(t *testing.T) {
