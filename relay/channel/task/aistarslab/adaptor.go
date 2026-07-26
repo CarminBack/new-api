@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -72,18 +73,19 @@ type responseTaskError struct {
 }
 
 type capability struct {
-	known       bool
-	channel     string
-	resolution  string
-	resolutions map[string]bool
-	minSeconds  int
-	maxSeconds  int
-	rations     map[string]bool
-	modes       map[string]bool
-	maxImages   int
-	maxVideos   int
-	maxAudios   int
-	perItem     bool
+	known          bool
+	channel        string
+	resolution     string
+	resolutions    map[string]bool
+	minSeconds     int
+	maxSeconds     int
+	rations        map[string]bool
+	modes          map[string]bool
+	maxImages      int
+	maxVideos      int
+	maxAudios      int
+	maxPromptChars int
+	perItem        bool
 }
 
 type TaskAdaptor struct {
@@ -127,6 +129,13 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if req.N == nil {
 		req.N = common.GetPointer(1)
 	}
+	capability := capabilityForModel(req.Model)
+	if capability.known && capability.maxPromptChars > 0 {
+		promptChars := utf8.RuneCountInString(req.Prompt)
+		if promptChars > capability.maxPromptChars {
+			return invalidCapability("prompt", fmt.Sprintf("must be at most %d characters for model %s (current %d)", capability.maxPromptChars, req.Model, promptChars))
+		}
+	}
 	metadata, err := parseMetadata(req.Metadata)
 	if err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_metadata", http.StatusBadRequest)
@@ -144,7 +153,6 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		images[index] = storedURL
 	}
 
-	capability := capabilityForModel(req.Model)
 	if !capability.known {
 		// Unknown models remain pass-through compatible. Their provider-side
 		// validation is still authoritative when the capability sync is stale.
@@ -638,16 +646,17 @@ func staticCapabilityForModel(modelName string) capability {
 		return capability{}
 	}
 	capability := capability{
-		known:       true,
-		channel:     channel,
-		minSeconds:  4,
-		maxSeconds:  15,
-		maxImages:   9,
-		maxVideos:   3,
-		maxAudios:   3,
-		resolutions: map[string]bool{},
-		rations:     map[string]bool{},
-		modes:       map[string]bool{"text2video": true, "image2video": true},
+		known:          true,
+		channel:        channel,
+		minSeconds:     4,
+		maxSeconds:     15,
+		maxImages:      9,
+		maxVideos:      3,
+		maxAudios:      3,
+		maxPromptChars: 2000,
+		resolutions:    map[string]bool{},
+		rations:        map[string]bool{},
+		modes:          map[string]bool{"text2video": true, "image2video": true},
 	}
 	for _, ratio := range []string{"16:9", "9:16", "1:1"} {
 		capability.rations[ratio] = true

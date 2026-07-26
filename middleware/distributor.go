@@ -188,20 +188,22 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		if ok && channel != nil && !service.AllowChannelHealthAttempt(c, channel, modelRequest.Model, c.Request.URL.Path) {
-			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
-			return
-		}
-		if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
-			if channel != nil {
-				service.ReleaseChannelCircuitProbe(c, channel.Id, modelRequest.Model, c.Request.URL.Path)
+		if shouldSelectChannel {
+			if ok && channel != nil && !service.AllowChannelHealthAttempt(c, channel, modelRequest.Model, c.Request.URL.Path) {
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+				return
 			}
-			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, setupErr.Error(), setupErr.GetErrorCode())
-			return
+			if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
+				if channel != nil {
+					service.ReleaseChannelCircuitProbe(c, channel.Id, modelRequest.Model, c.Request.URL.Path)
+				}
+				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, setupErr.Error(), setupErr.GetErrorCode())
+				return
+			}
 		}
 		c.Next()
 		service.ReleaseCurrentChannelHealthReservation(c)
-		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
+		if shouldSelectChannel && channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}

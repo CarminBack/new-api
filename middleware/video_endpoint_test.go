@@ -1,8 +1,11 @@
 package middleware
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -30,5 +33,27 @@ func TestVideoTaskRequestPaths(t *testing.T) {
 	}
 	for _, path := range rejected {
 		assert.False(t, isVideoTaskRequestPath(path), path)
+	}
+}
+
+func TestDistributeSkipsChannelSetupForVideoTaskFetch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(Distribute())
+	router.GET("/v1/video/generations/:task_id", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	router.GET("/v1/videos/:task_id", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	for _, path := range []string{
+		"/v1/video/generations/task_test",
+		"/v1/videos/task_test",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		assert.Equal(t, http.StatusNoContent, resp.Code, path)
 	}
 }

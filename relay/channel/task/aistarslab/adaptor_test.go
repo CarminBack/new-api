@@ -42,6 +42,7 @@ func TestCapabilityMatrixMatchesCurrentSeedanceLines(t *testing.T) {
 	require.Equal(t, 4, channel50.maxImages)
 	require.False(t, channel50.modes["frames2video"])
 	require.Equal(t, 1, channel50.maxAudios)
+	require.Equal(t, 2000, channel50.maxPromptChars)
 
 	channel48 := capabilityForModel("seedance-720p-c48")
 	require.True(t, channel48.modes["frames2video"])
@@ -53,6 +54,33 @@ func TestCapabilityMatrixMatchesCurrentSeedanceLines(t *testing.T) {
 	require.True(t, channel49.modes["frames2video"])
 	require.False(t, channel49.rations["21:9"])
 	require.True(t, channel49.perItem)
+}
+
+func TestValidateRejectsPromptLongerThanProviderLimitByUnicodeCharacters(t *testing.T) {
+	for _, prompt := range []string{
+		strings.Repeat("即", 2001),
+		strings.Repeat("a", 2001),
+	} {
+		body, err := common.Marshal(map[string]any{
+			"model":   "seedance-720p-fast-c47",
+			"prompt":  prompt,
+			"seconds": "4",
+		})
+		require.NoError(t, err)
+		c := testJSONContext(string(body))
+		taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
+		require.NotNil(t, taskErr)
+		require.Equal(t, 400, taskErr.StatusCode)
+		require.Contains(t, taskErr.Message, "2000")
+	}
+
+	body, err := common.Marshal(map[string]any{
+		"model":   "seedance-720p-fast-c47",
+		"prompt":  strings.Repeat("即", 2000),
+		"seconds": "4",
+	})
+	require.NoError(t, err)
+	require.Nil(t, (&TaskAdaptor{}).ValidateRequestAndSetAction(testJSONContext(string(body)), &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}))
 }
 
 func TestValidateAndBuildAistarsLabFramesRequest(t *testing.T) {
