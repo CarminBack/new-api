@@ -30,9 +30,12 @@ import {
   UserCog,
   Info,
   LogIn,
+  Loader2,
 } from 'lucide-react'
 import type { TFunction } from 'i18next'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
@@ -46,6 +49,7 @@ import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import type { UsageLog } from '../../data/schema'
+import { getLogOther } from '../../log-details-api'
 import {
   parseLogOther,
   getParamOverrideActionLabel,
@@ -457,7 +461,60 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
   const details = props.log.content ?? ''
-  const other = parseLogOther(props.log.other)
+  const [deferredOther, setDeferredOther] = useState<{
+    logId: number
+    other: string
+  } | null>(null)
+  const [isLoadingOther, setIsLoadingOther] = useState(false)
+  const loadedOther =
+    deferredOther?.logId === props.log.id ? deferredOther.other : null
+
+  useEffect(() => {
+    if (
+      !props.open ||
+      !props.isAdmin ||
+      !props.log.other_deferred ||
+      loadedOther != null
+    ) {
+      return
+    }
+
+    let cancelled = false
+    setIsLoadingOther(true)
+    const loadOther = async () => {
+      try {
+        const result = await getLogOther(props.log.id)
+        if (!result.success || !result.data) {
+          throw new Error(result.message || 'Failed to load log details')
+        }
+        if (!cancelled) {
+          setDeferredOther({ logId: props.log.id, other: result.data.other })
+        }
+      } catch {
+        if (!cancelled) {
+          toast.error(t('Failed to load logs'))
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingOther(false)
+        }
+      }
+    }
+    void loadOther()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    loadedOther,
+    props.isAdmin,
+    props.log.id,
+    props.log.other_deferred,
+    props.open,
+    t,
+  ])
+
+  const other = parseLogOther(loadedOther ?? props.log.other)
   const typeConfig = getUsageLogTypeConfig(props.log)
 
   const isViolation = isViolationFeeLog(other)
@@ -616,6 +673,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
       bodyClassName='pr-2 sm:pr-4'
     >
       <div className='w-full max-w-full min-w-0 space-y-2.5 overflow-x-hidden py-1 sm:space-y-3'>
+        {isLoadingOther && (
+          <div className='text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm'>
+            <Loader2 className='size-4 animate-spin' aria-hidden='true' />
+            <span>{t('Loading')}</span>
+          </div>
+        )}
         {/* Overview section - key identifiers */}
         <div className='min-w-0 space-y-1'>
           {props.log.request_id && (

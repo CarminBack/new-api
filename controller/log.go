@@ -33,6 +33,20 @@ func GetAllLogs(c *gin.Context) {
 	return
 }
 
+func GetLogOther(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "invalid log id")
+		return
+	}
+	other, err := model.GetLogOtherById(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"other": other})
+}
+
 func GetUserLogs(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	userId := c.GetInt("id")

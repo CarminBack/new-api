@@ -78,6 +78,7 @@ type Log struct {
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
 	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
 	Other             string `json:"other"`
+	OtherDeferred     bool   `json:"other_deferred,omitempty" gorm:"-"`
 }
 
 // don't use iota, avoid change log type value
@@ -508,7 +509,42 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		order = clickHouseLogOrder("logs.")
 	}
-	err = tx.Order(order).Limit(num).Offset(startIdx).Find(&logs).Error
+	listQuery := tx.Order(order).Limit(num).Offset(startIdx)
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) || (logType != LogTypeUnknown && logType != LogTypeError) {
+		err = listQuery.Find(&logs).Error
+	} else {
+		err = listQuery.Omit("other").Find(&logs).Error
+		if err == nil && logType == LogTypeUnknown {
+			otherIds := make([]int, 0, len(logs))
+			for _, log := range logs {
+				if log.Type == LogTypeError {
+					log.OtherDeferred = true
+					continue
+				}
+				otherIds = append(otherIds, log.Id)
+			}
+			if len(otherIds) > 0 {
+				var otherRows []struct {
+					Id    int
+					Other string
+				}
+				err = LOG_DB.Model(&Log{}).Select("id, other").Where("id IN ?", otherIds).Find(&otherRows).Error
+				if err == nil {
+					otherById := make(map[int]string, len(otherRows))
+					for _, row := range otherRows {
+						otherById[row.Id] = row.Other
+					}
+					for _, log := range logs {
+						log.Other = otherById[log.Id]
+					}
+				}
+			}
+		} else if err == nil {
+			for _, log := range logs {
+				log.OtherDeferred = true
+			}
+		}
+	}
 	if err != nil {
 		return nil, 0, err
 	}
@@ -557,6 +593,14 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	}
 
 	return logs, total, err
+}
+
+func GetLogOtherById(id int) (string, error) {
+	var log Log
+	if err := LOG_DB.Select("other").Where("id = ?", id).First(&log).Error; err != nil {
+		return "", err
+	}
+	return log.Other, nil
 }
 
 const logSearchCountLimit = 10000

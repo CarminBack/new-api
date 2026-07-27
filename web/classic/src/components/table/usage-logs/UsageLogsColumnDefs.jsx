@@ -24,9 +24,11 @@ import {
   Tag,
   Tooltip,
   Popover,
+  Spin,
   Typography,
 } from '@douyinfe/semi-ui';
 import {
+  API,
   renderGroup,
   renderQuota,
   stringToColor,
@@ -55,6 +57,73 @@ const colors = [
   'violet',
   'yellow',
 ];
+
+function RequestDiagnosticPopover({ record, detailNode, isAdminUser, t }) {
+  const initialDiagnostic =
+    isAdminUser && getLogOther(record.other)?.admin_info?.request_diagnostic;
+  const [requestDiagnostic, setRequestDiagnostic] =
+    React.useState(initialDiagnostic);
+  const [loaded, setLoaded] = React.useState(!record.other_deferred);
+  const [loading, setLoading] = React.useState(false);
+
+  if (!initialDiagnostic && !record.other_deferred) {
+    return detailNode;
+  }
+
+  const loadDeferredOther = async (visible) => {
+    if (!visible || loaded || loading || !isAdminUser) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await API.get(`/api/log/${record.id}/other`);
+      if (res.data?.success) {
+        const diagnostic = getLogOther(res.data.data?.other)?.admin_info
+          ?.request_diagnostic;
+        setRequestDiagnostic(diagnostic);
+        setLoaded(true);
+      }
+    } catch {
+      setLoaded(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const bodyText = requestDiagnostic?.body
+    ? JSON.stringify(requestDiagnostic.body, null, 2)
+    : requestDiagnostic?.reason || t('Request body unavailable');
+
+  return (
+    <Popover
+      trigger='click'
+      onVisibleChange={loadDeferredOther}
+      content={
+        loading ? (
+          <div style={{ padding: 24 }}>
+            <Spin size='small' />
+          </div>
+        ) : (
+          <pre
+            style={{
+              maxWidth: 640,
+              maxHeight: 480,
+              overflow: 'auto',
+              margin: 0,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontSize: 11,
+            }}
+          >
+            {bodyText}
+          </pre>
+        )
+      }
+    >
+      <span style={{ cursor: 'pointer' }}>{detailNode}</span>
+    </Popover>
+  );
+}
 
 function formatRatio(ratio) {
   if (ratio === undefined || ratio === null) {
@@ -942,10 +1011,6 @@ export const getLogsColumns = ({
           billingDisplayMode,
           t,
         );
-        const requestDiagnostic =
-          isAdminUser &&
-          getLogOther(record.other)?.admin_info?.request_diagnostic;
-
         const detailNode = !detailSummary ? (
           <Typography.Paragraph
             ellipsis={{
@@ -963,35 +1028,14 @@ export const getLogsColumns = ({
           renderCompactDetailSummary(detailSummary.segments)
         );
 
-        if (requestDiagnostic) {
-          const bodyText = requestDiagnostic.body
-            ? JSON.stringify(requestDiagnostic.body, null, 2)
-            : requestDiagnostic.reason || t('Request body unavailable');
-          return (
-            <Popover
-              trigger='click'
-              content={
-                <pre
-                  style={{
-                    maxWidth: 640,
-                    maxHeight: 480,
-                    overflow: 'auto',
-                    margin: 0,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    fontSize: 11,
-                  }}
-                >
-                  {bodyText}
-                </pre>
-              }
-            >
-              <span style={{ cursor: 'pointer' }}>{detailNode}</span>
-            </Popover>
-          );
-        }
-
-        return detailNode;
+        return (
+          <RequestDiagnosticPopover
+            record={record}
+            detailNode={detailNode}
+            isAdminUser={isAdminUser}
+            t={t}
+          />
+        );
       },
     },
   ];
