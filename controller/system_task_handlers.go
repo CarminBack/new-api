@@ -27,7 +27,14 @@ func RegisterScheduledSystemTasks() {
 
 type channelHealthProbeHandler struct{}
 
-const channelHealthProbeTimeout = 2 * time.Minute
+const channelHealthProbeTimeout = 15 * time.Second
+
+func channelHealthProbeTimeoutForPath(requestPath string) time.Duration {
+	if requestPath == "/v1/images/generations" {
+		return time.Minute
+	}
+	return channelHealthProbeTimeout
+}
 
 func (channelHealthProbeHandler) Type() string { return model.SystemTaskTypeChannelHealthProbe }
 
@@ -85,7 +92,11 @@ func (channelHealthProbeHandler) Run(ctx context.Context, task *model.SystemTask
 			summary.Failed++
 			continue
 		}
-		probeCtx, cancelProbe := context.WithTimeout(ctx, channelHealthProbeTimeout)
+		if channel.Status != common.ChannelStatusEnabled {
+			service.SuspendChannelHealth(channel)
+			continue
+		}
+		probeCtx, cancelProbe := context.WithTimeout(ctx, channelHealthProbeTimeoutForPath(target.RequestPath))
 		result := testChannel(probeCtx, channel, testUserID, target.ModelName, channelHealthProbeEndpointType(target.RequestPath), false)
 		cancelProbe()
 		if ctx.Err() != nil {

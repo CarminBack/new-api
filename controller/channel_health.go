@@ -183,7 +183,7 @@ func GetChannelHealth(c *gin.Context) {
 		"message": "",
 		"data": gin.H{
 			"generated_at": time.Now().Unix(),
-			"state_scope":  "process",
+			"state_scope":  "process_and_persistent",
 			"summary":      summary,
 			"items":        items,
 		},

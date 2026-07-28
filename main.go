@@ -101,6 +101,9 @@ func main() {
 
 		go model.SyncChannelCache(common.SyncFrequency)
 	}
+	if err := service.RestorePersistentChannelHealth(); err != nil {
+		common.SysError("failed to restore channel health state: " + err.Error())
+	}
 
 	// Warm pricing after channel cache initialization so Advanced Custom
 	// endpoint inference can read cached route settings on first request.

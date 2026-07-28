@@ -763,12 +763,16 @@ func DisableTagChannels(c *gin.Context) {
 		})
 		return
 	}
+	channels, _ := model.GetChannelsByTag(channelTag.Tag, false, false)
 	err = model.DisableChannelByTag(channelTag.Tag)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	model.InitChannelCache()
+	for _, channel := range channels {
+		service.SuspendChannelHealth(channel)
+	}
 	recordManageAudit(c, "channel.tag_disable", map[string]interface{}{
 		"tag": channelTag.Tag,
 	})
@@ -789,14 +793,22 @@ func EnableTagChannels(c *gin.Context) {
 		})
 		return
 	}
+	channels, _ := model.GetChannelsByTag(channelTag.Tag, false, false)
 	err = model.EnableChannelByTag(channelTag.Tag)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	recoveryScheduled := 0
+	for _, channel := range channels {
+		if channel.Status != common.ChannelStatusEnabled && service.ScheduleManualChannelRecovery(channel) {
+			recoveryScheduled++
+		}
+	}
 	model.InitChannelCache()
 	recordManageAudit(c, "channel.tag_enable", map[string]interface{}{
-		"tag": channelTag.Tag,
+		"tag":                channelTag.Tag,
+		"recovery_scheduled": recoveryScheduled,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -1096,15 +1108,24 @@ func UpdateChannelStatus(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
+	channel, _ := model.GetChannelById(id, true)
+	recoveryScheduled := false
 	changed := model.UpdateChannelStatus(id, "", req.Status, "manual operation")
 	if changed {
+		if req.Status == common.ChannelStatusEnabled && channel != nil && channel.Status != common.ChannelStatusEnabled {
+			recoveryScheduled = service.ScheduleManualChannelRecovery(channel)
+		}
 		model.InitChannelCache()
 		service.ResetProxyClientCache()
+		if req.Status == common.ChannelStatusManuallyDisabled {
+			service.SuspendChannelHealth(channel)
+		}
 	}
 	recordManageAudit(c, "channel.status_update", map[string]interface{}{
-		"id":      id,
-		"status":  req.Status,
-		"changed": changed,
+		"id":                 id,
+		"status":             req.Status,
+		"changed":            changed,
+		"recovery_scheduled": recoveryScheduled,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -1120,9 +1141,17 @@ func BatchUpdateChannelStatus(c *gin.Context) {
 		return
 	}
 	changedCount := 0
+	recoveryScheduled := 0
 	for _, id := range req.Ids {
+		channel, _ := model.GetChannelById(id, true)
 		if model.UpdateChannelStatus(id, "", req.Status, "manual batch operation") {
 			changedCount++
+			if req.Status == common.ChannelStatusEnabled && channel != nil && channel.Status != common.ChannelStatusEnabled && service.ScheduleManualChannelRecovery(channel) {
+				recoveryScheduled++
+			}
+			if req.Status == common.ChannelStatusManuallyDisabled {
+				service.SuspendChannelHealth(channel)
+			}
 		}
 	}
 	if changedCount > 0 {
@@ -1130,9 +1159,10 @@ func BatchUpdateChannelStatus(c *gin.Context) {
 		service.ResetProxyClientCache()
 	}
 	recordManageAudit(c, "channel.status_update_batch", map[string]interface{}{
-		"count":  changedCount,
-		"total":  len(req.Ids),
-		"status": req.Status,
+		"count":              changedCount,
+		"total":              len(req.Ids),
+		"status":             req.Status,
+		"recovery_scheduled": recoveryScheduled,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

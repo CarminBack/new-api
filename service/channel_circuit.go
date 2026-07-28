@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash/fnv"
+	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -18,36 +20,60 @@ import (
 )
 
 const (
-	channelHealthWindow                   = 2 * time.Minute
-	channelHealthBucketDuration           = 5 * time.Second
-	channelHealthBucketCount              = int(channelHealthWindow / channelHealthBucketDuration)
-	channelHealthOpenFor                  = 2 * time.Minute
-	channelHealthStateTTL                 = 30 * time.Minute
-	channelHealthShardCount               = 32
-	channelHealthEstablishedCapacity      = 128
-	channelHealthNewCapacity              = 16
-	channelHealthRecoveryCapacity         = 8
-	channelHealthMinCapacity              = 1
-	channelHealthMaxCapacity              = 512
-	channelHealthNewChannelAge            = 10 * time.Minute
-	channelHealthKeyFatalOpenFor          = 10 * time.Minute
-	channelHealthSuspectWindow            = 30 * time.Second
-	channelHealthSuspectMinimumFailures   = 5
-	channelHealthSuspectMinimumSamples    = 20
-	channelHealthSuspectFailureRate       = 0.90
-	channelHealthRateLimitConfirmFor      = 2 * time.Minute
-	channelHealthRecoverySuccessTarget    = 3
-	channelHealthRecoveryMaxStartCapacity = 64
+	channelHealthWindow                  = 2 * time.Minute
+	channelHealthBucketDuration          = 5 * time.Second
+	channelHealthBucketCount             = int(channelHealthWindow / channelHealthBucketDuration)
+	channelHealthOpenFor                 = 2 * time.Minute
+	channelHealthStateTTL                = 30 * time.Minute
+	channelHealthShardCount              = 32
+	channelHealthEstablishedCapacity     = 128
+	channelHealthNewCapacity             = 16
+	channelHealthMinCapacity             = 1
+	channelHealthMaxCapacity             = 512
+	channelHealthNewChannelAge           = 10 * time.Minute
+	channelHealthKeyFatalOpenFor         = 10 * time.Minute
+	channelHealthSuspectWindow           = 30 * time.Second
+	channelHealthSuspectMinimumSamples   = 20
+	channelHealthSuspectFailureRate      = 0.90
+	channelHealthSuspectMinimumDuration  = 10 * time.Second
+	channelHealthSlowSingleRouteFailures = 5
+	channelHealthSlowMultiRouteFailures  = 3
+	channelHealthSlowMultiRouteCount     = 2
+	channelHealthAggregateMinimumSamples = 50
+	channelHealthAggregateFailureRate    = 0.80
+	channelHealthLatencyMinimumSamples   = 20
+	channelHealthLatencyTimeoutRate      = 0.50
+	channelHealthLatencyMaxSuccessRate   = 0.30
+	channelHealthRateLimitConfirmFor     = 2 * time.Minute
+	channelHealthRecoverySuccessTarget   = 0
+	channelHealthProbeLease              = 20 * time.Second
+	channelHealthImageProbeLease         = 75 * time.Second
 
 	ginKeyChannelHealthReservation = "channel_health_reservation"
 )
 
 var channelCircuitNow = time.Now
+var channelHealthProbeSequence atomic.Uint64
+
+type ChannelHealthProbeScope string
+
+const (
+	ChannelHealthProbeScopeRoute   ChannelHealthProbeScope = "route"
+	ChannelHealthProbeScopeChannel ChannelHealthProbeScope = "channel"
+)
+
+type ChannelHealthProbeType string
+
+const (
+	ChannelHealthProbeTypeInitial  ChannelHealthProbeType = "initial"
+	ChannelHealthProbeTypeRecovery ChannelHealthProbeType = "recovery"
+)
 
 type channelHealthBucket struct {
 	Epoch        int64
 	Successes    int
 	Failures     int
+	Timeouts     int
 	PoolFailures int
 	RateLimits   int
 }
@@ -61,6 +87,9 @@ type channelRouteHealthState struct {
 	OpenUntil              time.Time
 	ProbeInFlight          bool
 	ProbeGeneration        uint64
+	ProbeID                uint64
+	ProbeType              ChannelHealthProbeType
+	ProbeLeaseUntil        time.Time
 	InFlight               int
 	Capacity               int
 	SuccessesSinceIncrease int
@@ -76,17 +105,38 @@ type channelRouteHealthState struct {
 	LastFailureStatusCode  int
 	LastFailureAt          time.Time
 	LastSuccessAt          time.Time
+	BurstFailureStartedAt  time.Time
+	NoSuccessFailureAt     time.Time
+	FailuresSinceSuccess   int
 	LastRecoveryAt         time.Time
 	LastTouched            time.Time
 }
 
 type channelAggregateHealthState struct {
-	ChannelID       int
-	Fingerprint     string
-	OpenUntil       time.Time
-	ProbeInFlight   bool
-	UnhealthyRoutes map[string]time.Time
-	LastTouched     time.Time
+	Buckets                  [channelHealthBucketCount]channelHealthBucket
+	ChannelID                int
+	Fingerprint              string
+	OpenUntil                time.Time
+	Suspect                  bool
+	ProbeDue                 time.Time
+	ProbeInFlight            bool
+	ProbeRevision            uint64
+	ProbeID                  uint64
+	ProbeType                ChannelHealthProbeType
+	ProbeScope               ChannelHealthProbeScope
+	ProbeRouteLabel          string
+	ProbeRouteKey            string
+	ProbeLeaseUntil          time.Time
+	NoSuccessFailureAt       time.Time
+	FailuresSinceSuccess     int
+	FailedRoutesSinceSuccess map[string]struct{}
+	RecentFailureRoutes      map[string]time.Time
+	UnhealthyRoutes          map[string]time.Time
+	LastFailureReason        string
+	LastFailureStatusCode    int
+	LastFailureAt            time.Time
+	LastSuccessAt            time.Time
+	LastTouched              time.Time
 }
 
 type channelKeyHealthState struct {
@@ -368,6 +418,10 @@ func summarizeRecentRouteHealthLocked(state *channelRouteHealthState, now time.T
 	return
 }
 
+func isInfrastructureFailureClass(class ChannelFailureClass) bool {
+	return class == ChannelFailureTransient || class == ChannelFailureUncertain || class == ChannelFailureChannelFatal
+}
+
 func shouldScheduleChannelProbeLocked(state *channelRouteHealthState, now time.Time, class ChannelFailureClass) bool {
 	if state.Suspect || !state.OpenUntil.IsZero() || state.ProbeInFlight {
 		return false
@@ -388,8 +442,12 @@ func shouldScheduleChannelProbeLocked(state *channelRouteHealthState, now time.T
 	}
 	successes, failures, _ := summarizeRecentRouteHealthLocked(state, now, channelHealthSuspectWindow)
 	total := successes + failures
-	return (failures >= channelHealthSuspectMinimumFailures && successes == 0) ||
-		(total >= channelHealthSuspectMinimumSamples && float64(failures)/float64(total) >= channelHealthSuspectFailureRate)
+	burstFailure := total >= channelHealthSuspectMinimumSamples &&
+		float64(failures)/float64(total) >= channelHealthSuspectFailureRate &&
+		!state.BurstFailureStartedAt.IsZero() && now.Sub(state.BurstFailureStartedAt) >= channelHealthSuspectMinimumDuration
+	slowFailure := state.FailuresSinceSuccess >= channelHealthSlowSingleRouteFailures &&
+		!state.NoSuccessFailureAt.IsZero() && now.Sub(state.NoSuccessFailureAt) >= channelHealthWindow
+	return burstFailure || slowFailure
 }
 
 func ChannelHealthProbeSupportsPath(requestPath string) bool {
@@ -402,28 +460,11 @@ func ChannelHealthProbeSupportsPath(requestPath string) bool {
 	}
 }
 
-func channelRecoveryStartCapacity(state *channelRouteHealthState) int {
-	target := state.CapacityBeforeOpen
-	if target <= 0 {
-		target = state.InitialCapacity
+func channelHealthProbeLeaseForPath(requestPath string) time.Duration {
+	if requestPath == "/v1/images/generations" {
+		return channelHealthImageProbeLease
 	}
-	if target <= 0 {
-		target = channelHealthMinCapacity
-	}
-	capacity := target / 2
-	if capacity < channelHealthRecoveryCapacity {
-		capacity = channelHealthRecoveryCapacity
-	}
-	if capacity > channelHealthRecoveryMaxStartCapacity {
-		capacity = channelHealthRecoveryMaxStartCapacity
-	}
-	if capacity > target {
-		capacity = target
-	}
-	if capacity < channelHealthMinCapacity {
-		capacity = channelHealthMinCapacity
-	}
-	return capacity
+	return channelHealthProbeLease
 }
 
 func startRouteRecoveryLocked(state *channelRouteHealthState, now time.Time) {
@@ -438,11 +479,17 @@ func startRouteRecoveryLocked(state *channelRouteHealthState, now time.Time) {
 	state.OpenUntil = time.Time{}
 	state.ProbeDue = time.Time{}
 	state.ProbeInFlight = false
+	state.ProbeID = 0
+	state.ProbeType = ""
+	state.ProbeLeaseUntil = time.Time{}
 	state.Suspect = false
 	state.RateLimitSince = time.Time{}
+	state.BurstFailureStartedAt = time.Time{}
+	state.NoSuccessFailureAt = time.Time{}
+	state.FailuresSinceSuccess = 0
 	state.CapacityBeforeOpen = target
-	state.RecoveryTargetCapacity = target
-	state.Capacity = channelRecoveryStartCapacity(state)
+	state.RecoveryTargetCapacity = 0
+	state.Capacity = target
 	state.RecoverySuccesses = 0
 	state.RecoveryFailures = 0
 	state.SuccessesSinceIncrease = 0
@@ -627,13 +674,10 @@ func finishChannelHealthKey(reservation channelHealthReservation, class ChannelF
 	memoryChannelHealth.Keys.States[reservation.SelectedKeyHealth] = state
 }
 
-func allowAggregateChannel(identity channelHealthIdentity, now time.Time) bool {
-	shard := channelAggregateHealthShardFor(identity.ChannelKey)
-	shard.Lock()
-	defer shard.Unlock()
+func getAggregateHealthStateLocked(shard *channelAggregateHealthShard, identity channelHealthIdentity, now time.Time) *channelAggregateHealthState {
 	if shard.LastCleanup.IsZero() || now.Sub(shard.LastCleanup) >= time.Minute {
 		for key, candidate := range shard.States {
-			if !candidate.ProbeInFlight && candidate.OpenUntil.IsZero() && len(candidate.UnhealthyRoutes) == 0 &&
+			if !candidate.ProbeInFlight && !candidate.Suspect && candidate.OpenUntil.IsZero() && len(candidate.UnhealthyRoutes) == 0 &&
 				now.Sub(candidate.LastTouched) >= channelHealthStateTTL {
 				delete(shard.States, key)
 			}
@@ -642,8 +686,21 @@ func allowAggregateChannel(identity channelHealthIdentity, now time.Time) bool {
 	}
 	state := shard.States[identity.ChannelKey]
 	if state == nil {
-		state = &channelAggregateHealthState{UnhealthyRoutes: make(map[string]time.Time)}
+		state = &channelAggregateHealthState{
+			FailedRoutesSinceSuccess: make(map[string]struct{}),
+			RecentFailureRoutes:      make(map[string]time.Time),
+			UnhealthyRoutes:          make(map[string]time.Time),
+		}
 		shard.States[identity.ChannelKey] = state
+	}
+	if state.FailedRoutesSinceSuccess == nil {
+		state.FailedRoutesSinceSuccess = make(map[string]struct{})
+	}
+	if state.RecentFailureRoutes == nil {
+		state.RecentFailureRoutes = make(map[string]time.Time)
+	}
+	if state.UnhealthyRoutes == nil {
+		state.UnhealthyRoutes = make(map[string]time.Time)
 	}
 	state.ChannelID = identity.ChannelID
 	state.Fingerprint = identity.Fingerprint
@@ -653,6 +710,145 @@ func allowAggregateChannel(identity channelHealthIdentity, now time.Time) bool {
 		}
 	}
 	state.LastTouched = now
+	return state
+}
+
+func currentAggregateHealthBucketLocked(state *channelAggregateHealthState, now time.Time) *channelHealthBucket {
+	epoch := healthBucketEpoch(now)
+	index := int(epoch % int64(channelHealthBucketCount))
+	bucket := &state.Buckets[index]
+	if bucket.Epoch != epoch {
+		*bucket = channelHealthBucket{Epoch: epoch}
+	}
+	return bucket
+}
+
+func summarizeAggregateHealthLocked(state *channelAggregateHealthState, now time.Time) (successes int, failures int, timeouts int) {
+	currentEpoch := healthBucketEpoch(now)
+	for i := range state.Buckets {
+		bucket := state.Buckets[i]
+		if bucket.Epoch <= 0 || currentEpoch-bucket.Epoch < 0 || currentEpoch-bucket.Epoch >= int64(channelHealthBucketCount) {
+			continue
+		}
+		successes += bucket.Successes
+		failures += bucket.Failures
+		timeouts += bucket.Timeouts
+	}
+	return
+}
+
+func shouldScheduleAggregateProbeLocked(state *channelAggregateHealthState, now time.Time) bool {
+	if state.Suspect || !state.OpenUntil.IsZero() || state.ProbeInFlight {
+		return false
+	}
+	noSuccess := state.FailuresSinceSuccess >= channelHealthSlowMultiRouteFailures &&
+		len(state.FailedRoutesSinceSuccess) >= channelHealthSlowMultiRouteCount &&
+		!state.NoSuccessFailureAt.IsZero() && now.Sub(state.NoSuccessFailureAt) >= channelHealthWindow
+	successes, failures, timeouts := summarizeAggregateHealthLocked(state, now)
+	total := successes + failures
+	multiRouteWindow := len(state.RecentFailureRoutes) >= channelHealthSlowMultiRouteCount
+	poorSuccessRate := multiRouteWindow && total >= channelHealthAggregateMinimumSamples &&
+		float64(failures)/float64(total) >= channelHealthAggregateFailureRate
+	latencyFailure := multiRouteWindow && total >= channelHealthLatencyMinimumSamples &&
+		float64(timeouts)/float64(total) >= channelHealthLatencyTimeoutRate &&
+		float64(successes)/float64(total) <= channelHealthLatencyMaxSuccessRate
+	return noSuccess || poorSuccessRate || latencyFailure
+}
+
+func recordAggregateFailure(identity channelHealthIdentity, now time.Time, class ChannelFailureClass, reason string, statusCode int) bool {
+	if !isInfrastructureFailureClass(class) {
+		return false
+	}
+	_, requestPath := splitChannelRouteLabel(identity.RouteLabel)
+	if !ChannelHealthProbeSupportsPath(requestPath) {
+		return false
+	}
+	shard := channelAggregateHealthShardFor(identity.ChannelKey)
+	shard.Lock()
+	defer shard.Unlock()
+	state := getAggregateHealthStateLocked(shard, identity, now)
+	bucket := currentAggregateHealthBucketLocked(state, now)
+	bucket.Failures++
+	if statusCode == http.StatusGatewayTimeout || statusCode == 524 {
+		bucket.Timeouts++
+	}
+	if state.NoSuccessFailureAt.IsZero() {
+		state.NoSuccessFailureAt = now
+	}
+	state.FailuresSinceSuccess++
+	state.FailedRoutesSinceSuccess[identity.RouteLabel] = struct{}{}
+	state.RecentFailureRoutes[identity.RouteLabel] = now
+	for routeLabel, failedAt := range state.RecentFailureRoutes {
+		if now.Sub(failedAt) >= channelHealthWindow {
+			delete(state.RecentFailureRoutes, routeLabel)
+		}
+	}
+	state.LastFailureReason = reason
+	state.LastFailureStatusCode = statusCode
+	state.LastFailureAt = now
+	if !shouldScheduleAggregateProbeLocked(state, now) {
+		return false
+	}
+	state.Suspect = true
+	state.ProbeDue = now
+	state.ProbeType = ChannelHealthProbeTypeInitial
+	state.ProbeScope = ChannelHealthProbeScopeChannel
+	state.ProbeRouteLabel = identity.RouteLabel
+	state.ProbeRouteKey = identity.RouteKey
+	persistAggregateHealthStateLocked(identity, state, persistentChannelHealthSuspect)
+	return true
+}
+
+func recordAggregateSuccess(identity channelHealthIdentity, now time.Time) {
+	shard := channelAggregateHealthShardFor(identity.ChannelKey)
+	shard.Lock()
+	defer shard.Unlock()
+	state := getAggregateHealthStateLocked(shard, identity, now)
+	hadPersistentState := state.Suspect || state.ProbeInFlight || !state.OpenUntil.IsZero()
+	currentAggregateHealthBucketLocked(state, now).Successes++
+	state.NoSuccessFailureAt = time.Time{}
+	state.FailuresSinceSuccess = 0
+	state.FailedRoutesSinceSuccess = make(map[string]struct{})
+	state.LastSuccessAt = now
+	state.Suspect = false
+	state.ProbeDue = time.Time{}
+	if state.ProbeInFlight && (state.ProbeScope == ChannelHealthProbeScopeChannel || state.ProbeRouteLabel == identity.RouteLabel) {
+		state.ProbeRevision++
+		state.ProbeInFlight = false
+		state.ProbeID = 0
+		state.ProbeLeaseUntil = time.Time{}
+	}
+	if !state.OpenUntil.IsZero() {
+		state.OpenUntil = time.Time{}
+		state.UnhealthyRoutes = make(map[string]time.Time)
+	}
+	if hadPersistentState {
+		deletePersistentHealthState(identity.ChannelKey)
+	}
+}
+
+func recoverChannelRoutesAfterProbe(channelID int, fingerprint string, now time.Time) {
+	for index := range memoryChannelHealth.RouteShards {
+		shard := &memoryChannelHealth.RouteShards[index]
+		shard.Lock()
+		for _, state := range shard.Routes {
+			if state.ChannelID != channelID || state.Fingerprint != fingerprint {
+				continue
+			}
+			if !state.OpenUntil.IsZero() || state.Suspect || state.ProbeInFlight {
+				state.ProbeGeneration++
+				startRouteRecoveryLocked(state, now)
+			}
+		}
+		shard.Unlock()
+	}
+}
+
+func allowAggregateChannel(identity channelHealthIdentity, now time.Time) bool {
+	shard := channelAggregateHealthShardFor(identity.ChannelKey)
+	shard.Lock()
+	defer shard.Unlock()
+	state := getAggregateHealthStateLocked(shard, identity, now)
 	if !state.OpenUntil.IsZero() {
 		return false
 	}
@@ -679,7 +875,13 @@ func markAggregateRouteUnhealthy(identity channelHealthIdentity, now time.Time) 
 	state.LastTouched = now
 	if len(state.UnhealthyRoutes) >= 2 {
 		state.OpenUntil = now.Add(channelHealthOpenFor)
+		state.ProbeDue = state.OpenUntil
+		state.ProbeType = ChannelHealthProbeTypeRecovery
+		state.ProbeScope = ChannelHealthProbeScopeChannel
+		state.ProbeRouteLabel = identity.RouteLabel
+		state.ProbeRouteKey = identity.RouteKey
 		state.ProbeInFlight = false
+		persistAggregateHealthStateLocked(identity, state, persistentChannelHealthOpen)
 	}
 }
 
@@ -692,6 +894,8 @@ func markAggregateRouteHealthy(identity channelHealthIdentity) {
 		state.ProbeInFlight = false
 		if len(state.UnhealthyRoutes) < 2 {
 			state.OpenUntil = time.Time{}
+			state.ProbeDue = time.Time{}
+			deletePersistentHealthState(identity.ChannelKey)
 		}
 	}
 }
@@ -786,8 +990,10 @@ func recordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 	shard := channelHealthShardFor(identity.RouteKey)
 	opened := false
 	suspected := false
+	aggregateEligible := isInfrastructureFailureClass(class) && (class != ChannelFailureChannelFatal || selectedKey == "")
 	shard.Lock()
 	state := getRouteHealthStateLocked(shard, identity, now)
+	previousFailureAt := state.LastFailureAt
 	state.LastFailureClass = class
 	state.LastFailureReason = reason
 	state.LastFailureStatusCode = statusCode
@@ -811,33 +1017,37 @@ func recordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 			recordRouteHealthFailureLocked(state, now, class)
 		}
 	}
-	if state.OpenUntil.IsZero() && state.RecoveryTargetCapacity > 0 &&
-		(class == ChannelFailureTransient || class == ChannelFailureUncertain) {
-		state.RecoveryFailures++
-		state.RecoverySuccesses = 0
-		if state.RecoveryFailures >= 2 {
-			state.CapacityBeforeOpen = state.RecoveryTargetCapacity
-			state.RecoveryTargetCapacity = 0
-			state.OpenUntil = now.Add(channelHealthOpenFor)
-			state.ProbeDue = state.OpenUntil
-			state.ProbeInFlight = false
-			state.Suspect = false
-			opened = true
+	if aggregateEligible {
+		if state.BurstFailureStartedAt.IsZero() || (!previousFailureAt.IsZero() && now.Sub(previousFailureAt) > channelHealthSuspectMinimumDuration) {
+			state.BurstFailureStartedAt = now
 		}
+		if state.NoSuccessFailureAt.IsZero() {
+			state.NoSuccessFailureAt = now
+		}
+		state.FailuresSinceSuccess++
 	}
-	if !opened && shouldScheduleChannelProbeLocked(state, now, class) {
+	if !opened && (class != ChannelFailureChannelFatal || selectedKey == "") && shouldScheduleChannelProbeLocked(state, now, class) {
 		state.Suspect = true
 		state.ProbeDue = now
+		state.ProbeType = ChannelHealthProbeTypeInitial
+		persistRouteHealthStateLocked(identity, state, persistentChannelHealthSuspect)
 		suspected = true
 	}
 	state.LastTouched = now
 	shard.Unlock()
+	channelSuspected := false
+	if aggregateEligible {
+		channelSuspected = recordAggregateFailure(identity, now, class, reason, statusCode)
+	}
 
 	if opened {
 		markAggregateRouteUnhealthy(identity, now)
 		logger.LogWarn(c, fmt.Sprintf("adaptive channel route opened: channel #%d model %s path %s", channelID, modelName, requestPath))
 	} else if suspected {
 		logger.LogWarn(c, fmt.Sprintf("adaptive channel route pending verification: channel #%d model %s path %s", channelID, modelName, requestPath))
+	}
+	if channelSuspected {
+		logger.LogWarn(c, fmt.Sprintf("adaptive channel pending verification: channel #%d after failures across routes", channelID))
 	}
 	clearHealthReservationContext(c)
 }
@@ -858,16 +1068,26 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 	reservation := currentHealthReservation(c, channelID, modelName, requestPath)
 	identity := reservation.Identity
 	finishChannelHealthKey(reservation, "success", now)
+	recordAggregateSuccess(identity, now)
 	shard := channelHealthShardFor(identity.RouteKey)
 	recovered := false
 	shard.Lock()
 	state := getRouteHealthStateLocked(shard, identity, now)
+	hadPersistentState := state.Suspect || state.ProbeInFlight || !state.OpenUntil.IsZero()
 	if state.InFlight > 0 {
 		state.InFlight--
 	}
 	recordRouteHealthSuccessLocked(state, now)
 	state.LastSuccessAt = now
+	state.NoSuccessFailureAt = time.Time{}
+	state.FailuresSinceSuccess = 0
 	state.RateLimitSince = time.Time{}
+	if state.ProbeInFlight {
+		state.ProbeGeneration++
+		state.ProbeInFlight = false
+		state.ProbeID = 0
+		state.ProbeLeaseUntil = time.Time{}
+	}
 	if !state.OpenUntil.IsZero() {
 		startRouteRecoveryLocked(state, now)
 		recovered = true
@@ -876,19 +1096,13 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 		state.Suspect = false
 		state.ProbeDue = time.Time{}
 	}
-	if state.RecoveryTargetCapacity > 0 && !recovered {
-		state.RecoveryFailures = 0
-		state.RecoverySuccesses++
-		if state.RecoverySuccesses >= channelHealthRecoverySuccessTarget {
-			state.Capacity = state.RecoveryTargetCapacity
-			state.RecoveryTargetCapacity = 0
-			state.RecoverySuccesses = 0
-			state.CapacityBeforeOpen = 0
-		}
-	} else if !recovered {
+	if !recovered {
 		increaseRouteCapacityLocked(state)
 	}
 	state.LastTouched = now
+	if hadPersistentState {
+		deletePersistentHealthState(identity.RouteKey)
+	}
 	shard.Unlock()
 	if recovered {
 		markAggregateRouteHealthy(identity)
@@ -948,6 +1162,10 @@ type ChannelHealthProbeTarget struct {
 	ModelName   string
 	RequestPath string
 	DueAt       time.Time
+	Scope       ChannelHealthProbeScope
+	ProbeType   ChannelHealthProbeType
+	Revision    uint64
+	ProbeID     uint64
 	identity    channelHealthIdentity
 	wasOpen     bool
 	generation  uint64
@@ -962,12 +1180,36 @@ type ChannelHealthProbeResult struct {
 
 func HasDueChannelHealthProbe() bool {
 	now := channelCircuitNow()
+	blockedChannels := make(map[int]struct{})
+	for index := range memoryChannelHealth.ChannelShards {
+		shard := &memoryChannelHealth.ChannelShards[index]
+		shard.Lock()
+		for _, state := range shard.States {
+			dueAt := state.ProbeDue
+			if !state.OpenUntil.IsZero() {
+				dueAt = state.OpenUntil
+			}
+			probeAvailable := !state.ProbeInFlight || !state.ProbeLeaseUntil.After(now)
+			if probeAvailable && !dueAt.IsZero() && !dueAt.After(now) && (state.Suspect || !state.OpenUntil.IsZero()) {
+				shard.Unlock()
+				return true
+			}
+			if state.Suspect || !state.OpenUntil.IsZero() || (state.ProbeInFlight && state.ProbeLeaseUntil.After(now)) {
+				blockedChannels[state.ChannelID] = struct{}{}
+			}
+		}
+		shard.Unlock()
+	}
 	for index := range memoryChannelHealth.RouteShards {
 		shard := &memoryChannelHealth.RouteShards[index]
 		shard.Lock()
 		for _, state := range shard.Routes {
+			if _, blocked := blockedChannels[state.ChannelID]; blocked {
+				continue
+			}
 			due := (state.Suspect && !state.ProbeDue.After(now)) || (!state.OpenUntil.IsZero() && !state.OpenUntil.After(now))
-			if due && !state.ProbeInFlight {
+			probeAvailable := !state.ProbeInFlight || !state.ProbeLeaseUntil.After(now)
+			if due && probeAvailable {
 				shard.Unlock()
 				return true
 			}
@@ -984,15 +1226,71 @@ func ClaimDueChannelHealthProbes(limit int) []ChannelHealthProbeTarget {
 	now := channelCircuitNow()
 	targets := make([]ChannelHealthProbeTarget, 0, limit)
 	claimedChannels := make(map[int]struct{})
+	for index := range memoryChannelHealth.ChannelShards {
+		shard := &memoryChannelHealth.ChannelShards[index]
+		shard.Lock()
+		for channelKey, state := range shard.States {
+			if len(targets) >= limit {
+				break
+			}
+			if _, claimed := claimedChannels[state.ChannelID]; claimed {
+				continue
+			}
+			dueAt := state.ProbeDue
+			wasOpen := !state.OpenUntil.IsZero()
+			if wasOpen {
+				dueAt = state.OpenUntil
+			}
+			if dueAt.IsZero() || dueAt.After(now) || (!state.Suspect && !wasOpen) || (state.ProbeInFlight && state.ProbeLeaseUntil.After(now)) {
+				continue
+			}
+			modelName, requestPath := splitChannelRouteLabel(state.ProbeRouteLabel)
+			if state.ProbeRouteKey == "" || !ChannelHealthProbeSupportsPath(requestPath) {
+				continue
+			}
+			probeType := state.ProbeType
+			if wasOpen || probeType == "" {
+				if wasOpen {
+					probeType = ChannelHealthProbeTypeRecovery
+				} else {
+					probeType = ChannelHealthProbeTypeInitial
+				}
+			}
+			state.ProbeRevision++
+			state.ProbeID = channelHealthProbeSequence.Add(1)
+			state.ProbeType = probeType
+			state.ProbeScope = ChannelHealthProbeScopeChannel
+			state.ProbeInFlight = true
+			state.ProbeLeaseUntil = now.Add(channelHealthProbeLeaseForPath(requestPath))
+			state.LastTouched = now
+			identity := channelHealthIdentity{
+				ChannelID:   state.ChannelID,
+				Fingerprint: state.Fingerprint,
+				ChannelKey:  channelKey,
+				RouteKey:    state.ProbeRouteKey,
+				RouteLabel:  state.ProbeRouteLabel,
+			}
+			targets = append(targets, ChannelHealthProbeTarget{
+				ChannelID: state.ChannelID, ModelName: modelName, RequestPath: requestPath, DueAt: dueAt,
+				Scope: ChannelHealthProbeScopeChannel, ProbeType: probeType, Revision: state.ProbeRevision,
+				ProbeID: state.ProbeID, identity: identity, wasOpen: wasOpen,
+			})
+			persistAggregateHealthStateLocked(identity, state, persistentChannelHealthProbing)
+			claimedChannels[state.ChannelID] = struct{}{}
+		}
+		shard.Unlock()
+		if len(targets) >= limit {
+			return targets
+		}
+	}
 	for index := range memoryChannelHealth.RouteShards {
 		shard := &memoryChannelHealth.RouteShards[index]
-		claimedBeforeShard := len(targets)
 		shard.Lock()
 		for routeKey, state := range shard.Routes {
 			if len(targets) >= limit {
 				break
 			}
-			if _, claimed := claimedChannels[state.ChannelID]; claimed || state.ProbeInFlight {
+			if _, claimed := claimedChannels[state.ChannelID]; claimed || (state.ProbeInFlight && state.ProbeLeaseUntil.After(now)) {
 				continue
 			}
 			dueAt := state.ProbeDue
@@ -1012,29 +1310,71 @@ func ClaimDueChannelHealthProbes(limit int) []ChannelHealthProbeTarget {
 				InitialCapacity: state.InitialCapacity,
 			}
 			identity.ChannelKey = fmt.Sprintf("%d:%s:all", state.ChannelID, state.Fingerprint)
+			channelID := state.ChannelID
+			probeType := ChannelHealthProbeTypeInitial
+			if wasOpen {
+				probeType = ChannelHealthProbeTypeRecovery
+			}
+			probeID := channelHealthProbeSequence.Add(1)
 			state.ProbeInFlight = true
 			state.ProbeGeneration++
+			state.ProbeID = probeID
+			state.ProbeType = probeType
+			probeLease := channelHealthProbeLeaseForPath(requestPath)
+			state.ProbeLeaseUntil = now.Add(probeLease)
 			state.LastTouched = now
-			targets = append(targets, ChannelHealthProbeTarget{
+			target := ChannelHealthProbeTarget{
 				ChannelID:   state.ChannelID,
 				ModelName:   modelName,
 				RequestPath: requestPath,
 				DueAt:       dueAt,
+				Scope:       ChannelHealthProbeScopeRoute,
+				ProbeType:   probeType,
+				ProbeID:     probeID,
 				identity:    identity,
 				wasOpen:     wasOpen,
 				generation:  state.ProbeGeneration,
-			})
-			claimedChannels[state.ChannelID] = struct{}{}
-		}
-		shard.Unlock()
-		for _, target := range targets[claimedBeforeShard:] {
-			aggregateShard := channelAggregateHealthShardFor(target.identity.ChannelKey)
+			}
+			persistRouteHealthStateLocked(identity, state, persistentChannelHealthProbing)
+			shard.Unlock()
+
+			aggregateShard := channelAggregateHealthShardFor(identity.ChannelKey)
 			aggregateShard.Lock()
-			if aggregate := aggregateShard.States[target.identity.ChannelKey]; aggregate != nil && !aggregate.OpenUntil.IsZero() {
+			aggregate := getAggregateHealthStateLocked(aggregateShard, identity, now)
+			coordinatorAvailable := (!aggregate.ProbeInFlight || !aggregate.ProbeLeaseUntil.After(now)) &&
+				!aggregate.Suspect && aggregate.OpenUntil.IsZero()
+			if coordinatorAvailable {
+				aggregate.ProbeRevision++
+				aggregate.ProbeID = probeID
+				aggregate.ProbeType = probeType
+				aggregate.ProbeScope = ChannelHealthProbeScopeRoute
+				aggregate.ProbeRouteLabel = identity.RouteLabel
+				aggregate.ProbeRouteKey = identity.RouteKey
 				aggregate.ProbeInFlight = true
+				aggregate.ProbeLeaseUntil = now.Add(probeLease)
+				target.Revision = aggregate.ProbeRevision
 			}
 			aggregateShard.Unlock()
+
+			if !coordinatorAvailable {
+				shard.Lock()
+				if current := shard.Routes[routeKey]; current != nil && current.ProbeInFlight && current.ProbeID == probeID {
+					current.ProbeInFlight = false
+					current.ProbeID = 0
+					current.ProbeLeaseUntil = time.Time{}
+					persistentState := persistentChannelHealthSuspect
+					if !current.OpenUntil.IsZero() || probeType == ChannelHealthProbeTypeRecovery {
+						persistentState = persistentChannelHealthOpen
+					}
+					persistRouteHealthStateLocked(identity, current, persistentState)
+				}
+				continue
+			}
+			targets = append(targets, target)
+			claimedChannels[channelID] = struct{}{}
+			shard.Lock()
 		}
+		shard.Unlock()
 		if len(targets) >= limit {
 			break
 		}
@@ -1047,15 +1387,67 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 		return
 	}
 	now := channelCircuitNow()
+	aggregateShard := channelAggregateHealthShardFor(target.identity.ChannelKey)
+	aggregateShard.Lock()
+	aggregate := aggregateShard.States[target.identity.ChannelKey]
+	if aggregate == nil || !aggregate.ProbeInFlight || aggregate.ProbeRevision != target.Revision ||
+		aggregate.ProbeID != target.ProbeID || aggregate.ProbeType != target.ProbeType || aggregate.ProbeScope != target.Scope {
+		aggregateShard.Unlock()
+		return
+	}
+	if target.Scope == ChannelHealthProbeScopeChannel {
+		aggregate.ProbeInFlight = false
+		aggregate.ProbeID = 0
+		aggregate.ProbeLeaseUntil = time.Time{}
+		aggregate.LastTouched = now
+		if result.Success {
+			aggregate.Buckets = [channelHealthBucketCount]channelHealthBucket{}
+			aggregate.Suspect = false
+			aggregate.ProbeDue = time.Time{}
+			aggregate.OpenUntil = time.Time{}
+			aggregate.NoSuccessFailureAt = time.Time{}
+			aggregate.FailuresSinceSuccess = 0
+			aggregate.FailedRoutesSinceSuccess = make(map[string]struct{})
+			aggregate.RecentFailureRoutes = make(map[string]time.Time)
+			aggregate.UnhealthyRoutes = make(map[string]time.Time)
+			aggregate.LastSuccessAt = now
+			recoverChannelRoutesAfterProbe(target.ChannelID, target.identity.Fingerprint, now)
+			deletePersistentChannelHealthStates(target.ChannelID)
+			aggregateShard.Unlock()
+			logger.LogInfo(context.Background(), fmt.Sprintf("adaptive channel probe succeeded: channel #%d model %s path %s", target.ChannelID, target.ModelName, target.RequestPath))
+			return
+		}
+		aggregate.Suspect = false
+		aggregate.OpenUntil = now.Add(channelHealthOpenFor)
+		aggregate.ProbeDue = aggregate.OpenUntil
+		aggregate.ProbeType = ChannelHealthProbeTypeRecovery
+		aggregate.LastFailureReason = result.Reason
+		aggregate.LastFailureStatusCode = result.StatusCode
+		aggregate.LastFailureAt = now
+		persistAggregateHealthStateLocked(target.identity, aggregate, persistentChannelHealthOpen)
+		aggregateShard.Unlock()
+		logger.LogWarn(context.Background(), fmt.Sprintf("adaptive channel probe failed: channel #%d model %s path %s", target.ChannelID, target.ModelName, target.RequestPath))
+		return
+	}
+
 	shard := channelHealthShardFor(target.identity.RouteKey)
 	shard.Lock()
 	state := shard.Routes[target.identity.RouteKey]
 	if state == nil || state.ChannelID != target.ChannelID || state.Fingerprint != target.identity.Fingerprint ||
-		!state.ProbeInFlight || state.ProbeGeneration != target.generation {
+		!state.ProbeInFlight || state.ProbeGeneration != target.generation || state.ProbeID != target.ProbeID || state.ProbeType != target.ProbeType {
 		shard.Unlock()
+		aggregate.ProbeInFlight = false
+		aggregate.ProbeID = 0
+		aggregate.ProbeLeaseUntil = time.Time{}
+		aggregateShard.Unlock()
 		return
 	}
 	state.ProbeInFlight = false
+	state.ProbeID = 0
+	state.ProbeLeaseUntil = time.Time{}
+	aggregate.ProbeInFlight = false
+	aggregate.ProbeID = 0
+	aggregate.ProbeLeaseUntil = time.Time{}
 	state.LastTouched = now
 	if result.Success {
 		state.Suspect = false
@@ -1063,16 +1455,24 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 		state.RateLimitSince = time.Time{}
 		state.LastSuccessAt = now
 		recordRouteHealthSuccessLocked(state, now)
+		currentAggregateHealthBucketLocked(aggregate, now).Successes++
+		aggregate.NoSuccessFailureAt = time.Time{}
+		aggregate.FailuresSinceSuccess = 0
+		aggregate.FailedRoutesSinceSuccess = make(map[string]struct{})
+		aggregate.LastSuccessAt = now
 		if target.wasOpen || !state.OpenUntil.IsZero() {
 			startRouteRecoveryLocked(state, now)
 		}
+		deletePersistentHealthState(target.identity.RouteKey)
 		shard.Unlock()
+		aggregateShard.Unlock()
 		markAggregateRouteHealthy(target.identity)
 		logger.LogInfo(context.Background(), fmt.Sprintf("adaptive channel probe succeeded: channel #%d model %s path %s", target.ChannelID, target.ModelName, target.RequestPath))
 		return
 	}
 	if !target.wasOpen && !state.Suspect {
 		shard.Unlock()
+		aggregateShard.Unlock()
 		return
 	}
 	if !target.wasOpen {
@@ -1088,7 +1488,10 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 	state.LastFailureReason = result.Reason
 	state.LastFailureStatusCode = result.StatusCode
 	state.LastFailureAt = now
+	state.ProbeType = ChannelHealthProbeTypeRecovery
+	persistRouteHealthStateLocked(target.identity, state, persistentChannelHealthOpen)
 	shard.Unlock()
+	aggregateShard.Unlock()
 	markAggregateRouteUnhealthy(target.identity, now)
 	logger.LogWarn(context.Background(), fmt.Sprintf("adaptive channel probe failed: channel #%d model %s path %s", target.ChannelID, target.ModelName, target.RequestPath))
 }
@@ -1097,24 +1500,41 @@ func ReleaseChannelHealthProbe(target ChannelHealthProbeTarget) {
 	if target.ChannelID <= 0 || target.identity.RouteKey == "" {
 		return
 	}
-	shard := channelHealthShardFor(target.identity.RouteKey)
-	released := false
-	shard.Lock()
-	if state := shard.Routes[target.identity.RouteKey]; state != nil && state.ChannelID == target.ChannelID &&
-		state.Fingerprint == target.identity.Fingerprint && state.ProbeInFlight && state.ProbeGeneration == target.generation {
-		state.ProbeInFlight = false
-		state.LastTouched = channelCircuitNow()
-		released = true
-	}
-	shard.Unlock()
-	if !released {
-		return
-	}
-
 	aggregateShard := channelAggregateHealthShardFor(target.identity.ChannelKey)
 	aggregateShard.Lock()
-	if state := aggregateShard.States[target.identity.ChannelKey]; state != nil {
-		state.ProbeInFlight = false
+	aggregate := aggregateShard.States[target.identity.ChannelKey]
+	if aggregate == nil || !aggregate.ProbeInFlight || aggregate.ProbeRevision != target.Revision ||
+		aggregate.ProbeID != target.ProbeID || aggregate.ProbeType != target.ProbeType || aggregate.ProbeScope != target.Scope {
+		aggregateShard.Unlock()
+		return
+	}
+	aggregate.ProbeInFlight = false
+	aggregate.ProbeID = 0
+	aggregate.ProbeLeaseUntil = time.Time{}
+	if target.Scope == ChannelHealthProbeScopeChannel {
+		persistentState := persistentChannelHealthSuspect
+		if !aggregate.OpenUntil.IsZero() || target.ProbeType == ChannelHealthProbeTypeRecovery {
+			persistentState = persistentChannelHealthOpen
+		}
+		persistAggregateHealthStateLocked(target.identity, aggregate, persistentState)
+	}
+	if target.Scope == ChannelHealthProbeScopeRoute {
+		shard := channelHealthShardFor(target.identity.RouteKey)
+		shard.Lock()
+		if state := shard.Routes[target.identity.RouteKey]; state != nil && state.ChannelID == target.ChannelID &&
+			state.Fingerprint == target.identity.Fingerprint && state.ProbeInFlight && state.ProbeGeneration == target.generation &&
+			state.ProbeID == target.ProbeID && state.ProbeType == target.ProbeType {
+			state.ProbeInFlight = false
+			state.ProbeID = 0
+			state.ProbeLeaseUntil = time.Time{}
+			state.LastTouched = channelCircuitNow()
+			persistentState := persistentChannelHealthSuspect
+			if !state.OpenUntil.IsZero() || target.ProbeType == ChannelHealthProbeTypeRecovery {
+				persistentState = persistentChannelHealthOpen
+			}
+			persistRouteHealthStateLocked(target.identity, state, persistentState)
+		}
+		shard.Unlock()
 	}
 	aggregateShard.Unlock()
 }
