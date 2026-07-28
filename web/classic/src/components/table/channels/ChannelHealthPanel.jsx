@@ -34,7 +34,6 @@ import {
   Activity,
   AlertTriangle,
   Gauge,
-  KeyRound,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
@@ -75,102 +74,56 @@ const routeLastChanged = (route) =>
   );
 
 const buildRows = (item, includeHealthy) => {
-  const rows = [];
+  let state;
+  let route;
+  let persistent = false;
   if (item.channel_status === 3) {
-    rows.push({
-      id: `${item.channel_id}:persistent-channel`,
-      item,
-      scope: 'channel',
-      state: 'auto_disabled',
-      reason: item.status_reason,
-      lastChanged: item.status_time,
-      persistent: true,
-    });
+    state = 'auto_disabled';
+    persistent = true;
   } else if (includeHealthy && item.channel_status === 2) {
-    rows.push({
-      id: `${item.channel_id}:manual-channel`,
-      item,
-      scope: 'channel',
-      state: 'manual_disabled',
-      reason: item.status_reason,
-      lastChanged: item.status_time,
-      persistent: true,
-    });
+    state = 'manual_disabled';
+    persistent = true;
+  } else {
+    const openRoutes = (item.adaptive?.routes || []).filter((candidate) =>
+      ['circuit_open', 'half_open'].includes(candidate.state),
+    );
+    const recoveringRoutes = (item.adaptive?.routes || []).filter(
+      (candidate) => candidate.state === 'recovering',
+    );
+    if (openRoutes.length > 0) {
+      route =
+        openRoutes.find((candidate) => candidate.state === 'half_open') ||
+        openRoutes[0];
+      state = route.state;
+    } else if (recoveringRoutes.length > 0) {
+      route = recoveringRoutes[0];
+      state = 'recovering';
+    } else if (includeHealthy) {
+      state = 'healthy';
+    }
   }
 
-  if (
-    item.adaptive?.channel_state &&
-    item.adaptive.channel_state !== 'healthy'
-  ) {
-    rows.push({
-      id: `${item.channel_id}:adaptive-channel`,
+  if (!state) return [];
+  return [
+    {
+      id: `${item.channel_id}:${state}`,
       item,
-      scope: 'channel',
-      state: item.adaptive.channel_state,
-      openUntil: item.adaptive.channel_open_until,
-    });
-  }
-
-  (item.adaptive?.routes || []).forEach((route) => {
-    rows.push({
-      id: `${item.channel_id}:route:${route.model_name}:${route.request_path}`,
-      item,
-      scope: 'route',
-      state: route.state,
-      modelName: route.model_name,
-      requestPath: route.request_path,
-      reason: route.last_failure_reason || route.last_failure_class,
-      statusCode: route.last_failure_status_code,
-      openUntil: route.open_until,
-      lastChanged: routeLastChanged(route),
-      successes: route.successes,
-      failures: route.failures,
-      poolFailures: route.pool_failures,
-      rateLimits: route.rate_limits,
-      inFlight: route.in_flight,
-      capacity: route.capacity,
-      initialCapacity: route.initial_capacity,
-    });
-  });
-
-  (item.adaptive?.keys || []).forEach((key) => {
-    rows.push({
-      id: `${item.channel_id}:adaptive-key:${key.key_index}:${key.scope}:${key.model_name || ''}`,
-      item,
-      scope: 'key',
-      state: key.state,
-      modelName: key.model_name,
-      requestPath: key.request_path,
-      keyIndex: key.key_index,
-      openUntil: key.open_until,
-      lastChanged: key.last_touched,
-      inFlight: key.in_flight,
-      capacity: key.capacity,
-    });
-  });
-
-  (item.persistent_keys || []).forEach((key) => {
-    rows.push({
-      id: `${item.channel_id}:persistent-key:${key.key_index}`,
-      item,
-      scope: 'key',
-      state: key.status === 3 ? 'key_auto_disabled' : 'key_manual_disabled',
-      keyIndex: key.key_index,
-      reason: key.reason,
-      lastChanged: key.disabled_time,
-      persistent: true,
-    });
-  });
-
-  if (includeHealthy && rows.length === 0) {
-    rows.push({
-      id: `${item.channel_id}:healthy`,
-      item,
-      scope: 'channel',
-      state: 'healthy',
-    });
-  }
-  return rows;
+      scope: route ? 'route' : 'channel',
+      state,
+      modelName: route?.model_name,
+      requestPath: route?.request_path,
+      reason:
+        route?.last_failure_reason ||
+        route?.last_failure_class ||
+        item.status_reason,
+      statusCode: route?.last_failure_status_code,
+      openUntil: route?.next_probe_at || route?.open_until,
+      lastChanged: route ? routeLastChanged(route) : item.status_time,
+      recoverySuccesses: route?.recovery_successes,
+      recoverySuccessTarget: route?.recovery_success_target,
+      persistent,
+    },
+  ];
 };
 
 const formatTime = (timestamp) => {
@@ -196,9 +149,6 @@ const recoveryPayload = (row) => {
       model_name: row.modelName,
       request_path: row.requestPath,
     };
-  }
-  if (row.scope === 'key') {
-    return { scope: 'key', key_index: row.keyIndex };
   }
   return { scope: 'channel' };
 };
@@ -245,7 +195,15 @@ const ChannelHealthPanel = () => {
     return (data?.items || [])
       .flatMap((item) => buildRows(item, includeHealthy))
       .filter((row) => {
-        if (stateFilter !== 'all' && row.state !== stateFilter) return false;
+        const matchesCircuitFilter =
+          stateFilter === 'circuit_open' && row.state === 'half_open';
+        if (
+          stateFilter !== 'all' &&
+          row.state !== stateFilter &&
+          !matchesCircuitFilter
+        ) {
+          return false;
+        }
         if (!keyword) return true;
         return [
           row.item.channel_id,
@@ -262,26 +220,10 @@ const ChannelHealthPanel = () => {
   const recover = async (row) => {
     setActionKey(row.id);
     try {
-      let response;
-      if (row.persistent && row.scope === 'key') {
-        const enableResponse = await API.post('/api/channel/multi_key/manage', {
-          channel_id: row.item.channel_id,
-          action: 'enable_key',
-          key_index: row.keyIndex,
-        });
-        if (!enableResponse.data?.success) {
-          throw new Error(enableResponse.data?.message || t('恢复失败'));
-        }
-        response = await API.post(
-          `/api/channel/${row.item.channel_id}/health/recover`,
-          recoveryPayload(row),
-        );
-      } else {
-        response = await API.post(
-          `/api/channel/${row.item.channel_id}/health/recover`,
-          recoveryPayload(row),
-        );
-      }
+      const response = await API.post(
+        `/api/channel/${row.item.channel_id}/health/recover`,
+        recoveryPayload(row),
+      );
       if (!response.data?.success) {
         throw new Error(response.data?.message || t('恢复失败'));
       }
@@ -353,7 +295,7 @@ const ChannelHealthPanel = () => {
   };
 
   const scopeContent = (row) => {
-    if (row.scope === 'route') {
+    if (row.modelName) {
       return (
         <div className='min-w-0'>
           <div className='truncate font-mono text-xs'>{row.modelName}</div>
@@ -361,15 +303,6 @@ const ChannelHealthPanel = () => {
             {row.requestPath}
           </div>
         </div>
-      );
-    }
-    if (row.scope === 'key') {
-      return (
-        <Space spacing={6}>
-          <KeyRound size={14} />
-          <span>{t('Key #{{index}}', { index: (row.keyIndex || 0) + 1 })}</span>
-          {row.modelName ? <code>{row.modelName}</code> : null}
-        </Space>
       );
     }
     return t('整条渠道');
@@ -419,27 +352,19 @@ const ChannelHealthPanel = () => {
       ),
     },
     {
-      title: t('2分钟窗口'),
-      width: 180,
-      render: (_, row) =>
-        row.successes === undefined
-          ? '—'
-          : `S ${row.successes} / F ${row.failures} / P ${row.poolFailures} / 429 ${row.rateLimits}`,
-    },
-    {
-      title: t('在途 / 容量'),
-      width: 130,
-      render: (_, row) =>
-        row.capacity === undefined
-          ? '—'
-          : `${row.inFlight || 0} / ${row.capacity}${row.initialCapacity ? ` (${row.initialCapacity})` : ''}`,
-    },
-    {
       title: t('自动恢复'),
       width: 110,
       render: (_, row) =>
         row.openUntil && row.openUntil > Date.now() / 1000
           ? formatDuration(Math.ceil(row.openUntil - Date.now() / 1000))
+          : '—',
+    },
+    {
+      title: t('进度'),
+      width: 110,
+      render: (_, row) =>
+        row.state === 'recovering'
+          ? `${row.recoverySuccesses || 0} / ${row.recoverySuccessTarget || 3}`
           : '—',
     },
     {
@@ -512,33 +437,15 @@ const ChannelHealthPanel = () => {
     },
     {
       label: '已熔断',
-      value: data?.summary?.circuit_open_routes || 0,
+      value: data?.summary?.circuit_open_channels || 0,
       state: 'circuit_open',
       icon: Activity,
     },
     {
-      label: '已降量',
-      value: data?.summary?.degraded_routes || 0,
-      state: 'degraded',
-      icon: Gauge,
-    },
-    {
       label: '恢复中',
-      value: data?.summary?.recovering_routes || 0,
+      value: data?.summary?.recovering_channels || 0,
       state: 'recovering',
       icon: ShieldCheck,
-    },
-    {
-      label: '已满载',
-      value: data?.summary?.saturated_routes || 0,
-      state: 'saturated',
-      icon: Gauge,
-    },
-    {
-      label: 'Key 隔离',
-      value: data?.summary?.isolated_keys || 0,
-      state: 'isolated',
-      icon: KeyRound,
     },
   ];
 
@@ -566,7 +473,7 @@ const ChannelHealthPanel = () => {
         </Space>
       </div>
 
-      <div className='grid grid-cols-2 border-b border-[var(--semi-color-border)] sm:grid-cols-3 lg:grid-cols-6'>
+      <div className='grid grid-cols-3 border-b border-[var(--semi-color-border)]'>
         {summaryItems.map((item) => {
           const Icon = item.icon;
           const active = stateFilter === item.state;
@@ -608,7 +515,7 @@ const ChannelHealthPanel = () => {
           dataSource={rows}
           rowKey='id'
           pagination={false}
-          scroll={{ x: 1320 }}
+          scroll={{ x: 980 }}
           size='small'
         />
       )}

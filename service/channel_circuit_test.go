@@ -59,10 +59,17 @@ func routeStateForTest(channelID int, modelName string, requestPath string) chan
 	return channelRouteHealthState{}
 }
 
-func TestWilsonLowerBoundMatchesHistoricalScenarios(t *testing.T) {
-	require.Less(t, wilsonLowerBound(5, 91), channelHealthWarningLowerBound)
-	require.Greater(t, wilsonLowerBound(4, 4), channelHealthOpenLowerBound)
-	require.Less(t, wilsonLowerBound(3, 3), channelHealthOpenLowerBound)
+func confirmLegacyRouteFailureForTest(t *testing.T, channelID int, modelName string, requestPath string, class ChannelFailureClass) {
+	t.Helper()
+	for i := 0; i < channelHealthSuspectMinimumFailures; i++ {
+		recordLegacyRouteOutcome(t, channelID, modelName, requestPath, class)
+	}
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelCircuitAttempt(ctx, channelID, modelName, requestPath))
+	ReleaseChannelCircuitProbe(ctx, channelID, modelName, requestPath)
+	targets := ClaimDueChannelHealthProbes(10)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: class, Reason: "confirmed failure", StatusCode: http.StatusServiceUnavailable})
 }
 
 func TestSparseTimeoutsDoNotOpenBusyRoute(t *testing.T) {
@@ -76,69 +83,205 @@ func TestSparseTimeoutsDoNotOpenBusyRoute(t *testing.T) {
 
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	require.True(t, AllowChannelCircuitAttempt(ctx, 29, "gpt-5.6-sol", "/v1/responses"))
-	require.False(t, routeHealthWarning(29, "gpt-5.6-sol", "/v1/responses"))
+	require.False(t, HasDueChannelHealthProbe())
 	ReleaseChannelCircuitProbe(ctx, 29, "gpt-5.6-sol", "/v1/responses")
 }
 
-func TestCompleteFailureOpensRouteAfterConfidenceIsSufficient(t *testing.T) {
+func TestCompleteFailureRequiresActiveProbeBeforeOpeningRoute(t *testing.T) {
 	setupChannelHealthTest(t)
-	for i := 0; i < 3; i++ {
-		recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
-	}
-	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-test", "/v1/responses"))
-	RecordChannelCircuitFailure(ctx, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
 	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 	require.True(t, AllowChannelCircuitAttempt(nil, 37, "other-model", "/v1/responses"))
 }
 
 func TestLateInflightFailureDoesNotExtendOpenWindow(t *testing.T) {
 	now := setupChannelHealthTest(t)
-	contexts := make([]*gin.Context, 5)
+	contexts := make([]*gin.Context, channelHealthSuspectMinimumFailures+1)
 	for i := range contexts {
 		contexts[i], _ = gin.CreateTestContext(httptest.NewRecorder())
 		require.True(t, AllowChannelCircuitAttempt(contexts[i], 37, "gpt-test", "/v1/responses"))
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < channelHealthSuspectMinimumFailures; i++ {
 		RecordChannelCircuitFailure(contexts[i], 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
 	}
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
 	openedUntil := routeStateForTest(37, "gpt-test", "/v1/responses").OpenUntil
 
 	*now = now.Add(30 * time.Second)
-	RecordChannelCircuitFailure(contexts[4], 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	RecordChannelCircuitFailure(contexts[len(contexts)-1], 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
 
 	require.Equal(t, openedUntil, routeStateForTest(37, "gpt-test", "/v1/responses").OpenUntil)
 }
 
-func TestHalfOpenProbeIsSingleAndRecoversGradually(t *testing.T) {
+func TestActiveProbeIsSingleAndRecoversAtHalfCapacity(t *testing.T) {
 	now := setupChannelHealthTest(t)
-	for i := 0; i < 4; i++ {
-		recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
-	}
+	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
 	*now = now.Add(channelHealthOpenFor + time.Millisecond)
-	probeCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	require.True(t, AllowChannelCircuitAttempt(probeCtx, 37, "gpt-test", "/v1/responses"))
+	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+	targets := ClaimDueChannelHealthProbes(10)
+	require.Len(t, targets, 1)
+	require.Empty(t, ClaimDueChannelHealthProbes(10))
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
+
+	state := routeStateForTest(37, "gpt-test", "/v1/responses")
+	require.Equal(t, channelHealthRecoveryMaxStartCapacity, state.Capacity)
+	require.Equal(t, channelHealthEstablishedCapacity, state.RecoveryTargetCapacity)
+	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+
+	for i := 0; i < channelHealthRecoverySuccessTarget; i++ {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-test", "/v1/responses"))
+		RecordChannelCircuitSuccess(ctx, 37, "gpt-test", "/v1/responses")
+	}
+	state = routeStateForTest(37, "gpt-test", "/v1/responses")
+	require.Equal(t, channelHealthEstablishedCapacity, state.Capacity)
+	require.Zero(t, state.RecoveryTargetCapacity)
+}
+
+func TestFailedActiveProbeReopensForTwoMinutes(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureUncertain)
+	*now = now.Add(channelHealthOpenFor + time.Millisecond)
+	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureUncertain})
 	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 
-	RecordChannelCircuitSuccess(probeCtx, 37, "gpt-test", "/v1/responses")
-	state := routeStateForTest(37, "gpt-test", "/v1/responses")
-	require.Equal(t, channelHealthRecoveryCapacity, state.Capacity)
+	*now = now.Add(channelHealthOpenFor + time.Millisecond)
+	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+	require.Len(t, ClaimDueChannelHealthProbes(1), 1)
+}
+
+func TestRealSuccessCancelsPendingProbe(t *testing.T) {
+	setupChannelHealthTest(t)
+	for i := 0; i < channelHealthSuspectMinimumFailures; i++ {
+		recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	}
+	require.True(t, HasDueChannelHealthProbe())
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-test", "/v1/responses"))
+	RecordChannelCircuitSuccess(ctx, 37, "gpt-test", "/v1/responses")
+
+	require.False(t, HasDueChannelHealthProbe())
+	require.Empty(t, ClaimDueChannelHealthProbes(1))
+	require.True(t, routeStateForTest(37, "gpt-test", "/v1/responses").OpenUntil.IsZero())
+}
+
+func TestReleasedProbeCanBeClaimedAgain(t *testing.T) {
+	setupChannelHealthTest(t)
+	for i := 0; i < channelHealthSuspectMinimumFailures; i++ {
+		recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	}
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	require.False(t, HasDueChannelHealthProbe())
+
+	ReleaseChannelHealthProbe(targets[0])
+	require.True(t, HasDueChannelHealthProbe())
+	nextTargets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, nextTargets, 1)
+	ReleaseChannelHealthProbe(targets[0])
+	require.True(t, routeStateForTest(37, "gpt-test", "/v1/responses").ProbeInFlight)
+	CompleteChannelHealthProbe(nextTargets[0], ChannelHealthProbeResult{Success: true})
+}
+
+func TestExpiredOpenRouteIsNotRemovedBeforeProbe(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	identity := buildChannelHealthIdentity(nil, 37, "gpt-test", "/v1/responses", *now)
+	shard := channelHealthShardFor(identity.RouteKey)
+
+	*now = now.Add(channelHealthStateTTL + time.Minute)
+	shard.Lock()
+	cleanupRouteHealthShardLocked(shard, *now)
+	_, exists := shard.Routes[identity.RouteKey]
+	shard.Unlock()
+
+	require.True(t, exists)
+	require.True(t, HasDueChannelHealthProbe())
+}
+
+func TestManualRecoveryInvalidatesOlderProbeResult(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	channel := &model.Channel{
+		Id:          37,
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "test-key",
+		Models:      "gpt-test",
+		CreatedTime: now.Add(-time.Hour).Unix(),
+	}
+	for i := 0; i < channelHealthSuspectMinimumFailures; i++ {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-test", "/v1/responses"))
+		RecordChannelCircuitFailure(ctx, channel.Id, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	}
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
+
+	*now = now.Add(channelHealthOpenFor + time.Millisecond)
+	staleTargets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, staleTargets, 1)
+	_, err := RecoverChannelHealth(channel, ChannelHealthRecoveryRequest{
+		Scope:       ChannelHealthRecoveryScopeRoute,
+		ModelName:   "gpt-test",
+		RequestPath: "/v1/responses",
+	})
+	require.NoError(t, err)
+	CompleteChannelHealthProbe(staleTargets[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
+
+	state := routeStateForTestWithChannel(channel, "gpt-test", "/v1/responses")
+	require.True(t, state.OpenUntil.IsZero())
+	require.False(t, state.ProbeInFlight)
+	require.Positive(t, state.RecoveryTargetCapacity)
+}
+
+func TestSustainedRateLimitRequiresTwoMinutesBeforeProbe(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	for i := 0; i < 21; i++ {
+		recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailureRateLimited)
+		if i < 20 {
+			*now = now.Add(6 * time.Second)
+		}
+	}
+
+	require.True(t, HasDueChannelHealthProbe())
 	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 }
 
-func TestFailedHalfOpenProbeReopensForTwoMinutes(t *testing.T) {
-	now := setupChannelHealthTest(t)
-	for i := 0; i < 4; i++ {
-		recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailureUncertain)
+func TestUnsupportedPathNeverSchedulesActiveProbe(t *testing.T) {
+	setupChannelHealthTest(t)
+	for i := 0; i < channelHealthSuspectMinimumFailures; i++ {
+		recordLegacyRouteOutcome(t, 37, "video-model", "/v1/videos", ChannelFailureTransient)
 	}
-	*now = now.Add(channelHealthOpenFor + time.Millisecond)
-	probeCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	require.True(t, AllowChannelCircuitAttempt(probeCtx, 37, "gpt-test", "/v1/responses"))
-	RecordChannelCircuitFailure(probeCtx, 37, "gpt-test", "/v1/responses", ChannelFailureUncertain)
-	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 
-	*now = now.Add(channelHealthOpenFor + time.Millisecond)
-	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+	require.False(t, HasDueChannelHealthProbe())
+	require.True(t, AllowChannelCircuitAttempt(nil, 37, "video-model", "/v1/videos"))
+}
+
+func TestRecoveryReopensAfterTwoInfrastructureFailures(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Empty(t, targets)
+
+	state := routeStateForTest(37, "gpt-test", "/v1/responses")
+	*now = state.OpenUntil.Add(time.Millisecond)
+	targets = ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
+
+	for i := 0; i < 2; i++ {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-test", "/v1/responses"))
+		RecordChannelCircuitFailure(ctx, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	}
+	require.False(t, routeStateForTest(37, "gpt-test", "/v1/responses").OpenUntil.IsZero())
+	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 }
 
 func TestChannelHealthSnapshotAndRouteRecovery(t *testing.T) {
@@ -151,7 +294,7 @@ func TestChannelHealthSnapshotAndRouteRecovery(t *testing.T) {
 		CreatedTime: channelCircuitNow().Add(-time.Hour).Unix(),
 	}
 
-	for i := 0; i < 4; i++ {
+	for i := 0; i < channelHealthSuspectMinimumFailures; i++ {
 		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 		require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-5.6-sol", "/v1/responses"))
 		RecordChannelCircuitFailureDecision(ctx, channel.Id, "gpt-5.6-sol", "/v1/responses", ChannelFailureDecision{
@@ -159,6 +302,13 @@ func TestChannelHealthSnapshotAndRouteRecovery(t *testing.T) {
 			Reason: "upstream_503",
 		}, http.StatusServiceUnavailable)
 	}
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{
+		Class:      ChannelFailureTransient,
+		Reason:     "upstream_503",
+		StatusCode: http.StatusServiceUnavailable,
+	})
 
 	snapshots := GetChannelAdaptiveHealthSnapshots(false)
 	require.Len(t, snapshots, 1)
@@ -179,7 +329,7 @@ func TestChannelHealthSnapshotAndRouteRecovery(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Positive(t, result.ChangedItems)
-	require.Equal(t, channelHealthRecoveryCapacity, result.Capacity)
+	require.Equal(t, channelHealthRecoveryMaxStartCapacity, result.Capacity)
 	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-5.6-sol", "/v1/responses"))
 
 	snapshots = GetChannelAdaptiveHealthSnapshots(false)
@@ -267,21 +417,18 @@ func TestChannelHealthSnapshotAndRecoveryAreSafeDuringRouteCompletion(t *testing
 	require.LessOrEqual(t, state.Capacity, channelHealthMaxCapacity)
 }
 
-func TestRateLimitHalfOpenProbeClearsHardOpenState(t *testing.T) {
+func TestRateLimitedActiveProbeKeepsRouteOpen(t *testing.T) {
 	now := setupChannelHealthTest(t)
-	for i := 0; i < 4; i++ {
-		recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
-	}
+	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
 	*now = now.Add(channelHealthOpenFor + time.Millisecond)
-	probeCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	require.True(t, AllowChannelCircuitAttempt(probeCtx, 37, "gpt-test", "/v1/responses"))
-	RecordChannelCircuitFailure(probeCtx, 37, "gpt-test", "/v1/responses", ChannelFailureRateLimited)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureRateLimited, StatusCode: http.StatusTooManyRequests})
 
 	state := routeStateForTest(37, "gpt-test", "/v1/responses")
-	require.True(t, state.OpenUntil.IsZero())
+	require.False(t, state.OpenUntil.IsZero())
 	require.False(t, state.ProbeInFlight)
-	require.Equal(t, channelHealthRecoveryCapacity, state.Capacity)
-	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 }
 
 func TestTwoIndependentUnhealthyRoutesOpenWholeChannel(t *testing.T) {
@@ -290,27 +437,23 @@ func TestTwoIndependentUnhealthyRoutesOpenWholeChannel(t *testing.T) {
 		model string
 		path  string
 	}{{"gpt-a", "/v1/responses"}, {"gpt-b", "/v1/chat/completions"}} {
-		for i := 0; i < 4; i++ {
-			recordLegacyRouteOutcome(t, 8, route.model, route.path, ChannelFailureUncertain)
-		}
+		confirmLegacyRouteFailureForTest(t, 8, route.model, route.path, ChannelFailureUncertain)
 	}
 	require.False(t, AllowChannelCircuitAttempt(nil, 8, "healthy-model", "/v1/embeddings"))
 	require.True(t, AllowChannelCircuitAttempt(nil, 9, "healthy-model", "/v1/embeddings"))
 }
 
-func TestPoolFailureAfterAggregateCooldownClearsWholeChannel(t *testing.T) {
+func TestOneRecoveredRouteReleasesAggregateChannelBlock(t *testing.T) {
 	now := setupChannelHealthTest(t)
 	for _, modelName := range []string{"gpt-a", "gpt-b"} {
-		for i := 0; i < 4; i++ {
-			recordLegacyRouteOutcome(t, 8, modelName, "/v1/responses", ChannelFailureTransient)
-		}
+		confirmLegacyRouteFailureForTest(t, 8, modelName, "/v1/responses", ChannelFailureTransient)
 	}
 	require.False(t, AllowChannelCircuitAttempt(nil, 8, "healthy-model", "/v1/embeddings"))
 
 	*now = now.Add(channelHealthOpenFor + time.Millisecond)
-	probeCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	require.True(t, AllowChannelCircuitAttempt(probeCtx, 8, "healthy-model", "/v1/embeddings"))
-	RecordChannelCircuitFailure(probeCtx, 8, "healthy-model", "/v1/embeddings", ChannelFailurePoolAccount)
+	targets := ClaimDueChannelHealthProbes(10)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
 
 	require.True(t, AllowChannelCircuitAttempt(nil, 8, "another-model", "/v1/chat/completions"))
 }
@@ -335,7 +478,7 @@ func TestSingleRateLimitDoesNotReducePooledKeyOrRouteCapacity(t *testing.T) {
 	require.Equal(t, 0, keyState.InFlight)
 }
 
-func TestSustainedRateLimitReducesRouteOnceWithoutOpening(t *testing.T) {
+func TestBurstRateLimitDoesNotReduceRouteCapacity(t *testing.T) {
 	setupChannelHealthTest(t)
 	channel := &model.Channel{Id: 29, Key: "key-a", CreatedTime: channelCircuitNow().Add(-time.Hour).Unix()}
 	for i := 0; i < 5; i++ {
@@ -346,8 +489,9 @@ func TestSustainedRateLimitReducesRouteOnceWithoutOpening(t *testing.T) {
 		RecordChannelCircuitFailure(ctx, channel.Id, "gpt-test", "/v1/responses", ChannelFailureRateLimited)
 	}
 	state := routeStateForTestWithChannel(channel, "gpt-test", "/v1/responses")
-	require.Equal(t, 102, state.Capacity)
+	require.Equal(t, channelHealthEstablishedCapacity, state.Capacity)
 	require.True(t, state.OpenUntil.IsZero())
+	require.False(t, HasDueChannelHealthProbe())
 	identity := buildChannelHealthIdentity(channel, 0, "gpt-test", "/v1/responses", channelCircuitNow())
 	memoryChannelHealth.Keys.RLock()
 	keyState := memoryChannelHealth.Keys.States[keyHealthRouteKey(identity, "key-a")]
@@ -468,7 +612,7 @@ func TestSingleSolPoolCapabilityFailureDoesNotIsolateKey(t *testing.T) {
 	require.Equal(t, channelHealthEstablishedCapacity, routeStateForTestWithChannel(channel, "gpt-5.6-sol", "/v1/responses").Capacity)
 }
 
-func TestSolPoolCapabilityUsesStatisticalRouteHealthOnly(t *testing.T) {
+func TestPoolCapabilityFailuresDoNotOpenRoute(t *testing.T) {
 	setupChannelHealthTest(t)
 	channel := &model.Channel{Id: 29, Key: "key-a", CreatedTime: channelCircuitNow().Add(-time.Hour).Unix()}
 	for i := 0; i < 97; i++ {
@@ -484,12 +628,13 @@ func TestSolPoolCapabilityUsesStatisticalRouteHealthOnly(t *testing.T) {
 	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-5.6-sol", "/v1/responses"))
 
 	setupChannelHealthTest(t)
-	for i := 0; i < 4; i++ {
+	for i := 0; i < channelHealthSuspectMinimumFailures; i++ {
 		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 		require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-5.6-sol", "/v1/responses"))
 		RecordChannelCircuitFailure(ctx, channel.Id, "gpt-5.6-sol", "/v1/responses", ChannelFailureKeyCapability)
 	}
-	require.False(t, AllowChannelHealthAttempt(nil, channel, "gpt-5.6-sol", "/v1/responses"))
+	require.False(t, HasDueChannelHealthProbe())
+	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-5.6-sol", "/v1/responses"))
 	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-5.6-terra", "/v1/responses"))
 }
 
@@ -588,11 +733,14 @@ func TestChannelSelectionSkipsOpenRoute(t *testing.T) {
 		require.NoError(t, db.Create(channel).Error)
 		require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "gpt-test", ChannelId: channel.Id, Enabled: true, Priority: channel.Priority, Weight: weight}).Error)
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < channelHealthSuspectMinimumFailures; i++ {
 		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 		require.True(t, AllowChannelHealthAttempt(ctx, high, "gpt-test", "/v1/responses"))
 		RecordChannelCircuitFailure(ctx, high.Id, "gpt-test", "/v1/responses", ChannelFailureTransient)
 	}
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
 
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	selected, _, err := CacheGetRandomSatisfiedChannel(&RetryParam{Ctx: ctx, TokenGroup: "default", ModelName: "gpt-test", RequestPath: "/v1/responses"})

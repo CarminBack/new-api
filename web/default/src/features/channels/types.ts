@@ -212,10 +212,14 @@ export interface ChannelRouteHealth {
   request_path: string
   state: ChannelHealthState
   open_until: number
+  next_probe_at: number
   probe_in_flight: boolean
   in_flight: number
   capacity: number
   initial_capacity: number
+  recovery_target_capacity?: number
+  recovery_successes?: number
+  recovery_success_target?: number
   successes: number
   failures: number
   pool_failures: number
@@ -275,6 +279,8 @@ export interface ChannelHealthResponse {
     state_scope: 'process'
     summary: {
       auto_disabled_channels: number
+      circuit_open_channels: number
+      recovering_channels: number
       circuit_open_routes: number
       degraded_routes: number
       recovering_routes: number

@@ -42,6 +42,31 @@ func TestValidateChannelHealthRecoveryPayload(t *testing.T) {
 	}
 }
 
+func TestChannelHealthSummaryCountsChannelsOnce(t *testing.T) {
+	summary := channelHealthSummary{}
+	updateChannelHealthSummary(&summary, channelHealthItem{
+		Adaptive: service.ChannelAdaptiveHealthSnapshot{
+			Routes: []service.ChannelRouteHealthSnapshot{
+				{State: service.ChannelHealthStateCircuitOpen},
+				{State: service.ChannelHealthStateHalfOpen},
+				{State: service.ChannelHealthStateRecovering},
+			},
+		},
+	})
+
+	require.Equal(t, 1, summary.CircuitOpenChannels)
+	require.Equal(t, 2, summary.CircuitOpenRoutes)
+	require.Zero(t, summary.RecoveringChannels)
+	require.Equal(t, 1, summary.RecoveringRoutes)
+
+	updateChannelHealthSummary(&summary, channelHealthItem{
+		Adaptive: service.ChannelAdaptiveHealthSnapshot{
+			Routes: []service.ChannelRouteHealthSnapshot{{State: service.ChannelHealthStateRecovering}},
+		},
+	})
+	require.Equal(t, 1, summary.RecoveringChannels)
+}
+
 func TestGetChannelHealthReturnsAutoDisabledMetadataWithoutKeys(t *testing.T) {
 	gatewayDB := model.DB
 	memoryCacheEnabled := common.MemoryCacheEnabled

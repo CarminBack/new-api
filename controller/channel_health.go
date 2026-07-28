@@ -35,6 +35,8 @@ type channelHealthItem struct {
 
 type channelHealthSummary struct {
 	AutoDisabledChannels int `json:"auto_disabled_channels"`
+	CircuitOpenChannels  int `json:"circuit_open_channels"`
+	RecoveringChannels   int `json:"recovering_channels"`
 	CircuitOpenRoutes    int `json:"circuit_open_routes"`
 	DegradedRoutes       int `json:"degraded_routes"`
 	RecoveringRoutes     int `json:"recovering_routes"`
@@ -104,17 +106,27 @@ func updateChannelHealthSummary(summary *channelHealthSummary, item channelHealt
 	if item.ChannelStatus == common.ChannelStatusAutoDisabled {
 		summary.AutoDisabledChannels++
 	}
+	channelOpen := item.Adaptive.ChannelState == service.ChannelHealthStateCircuitOpen ||
+		item.Adaptive.ChannelState == service.ChannelHealthStateHalfOpen
+	channelRecovering := false
 	for _, route := range item.Adaptive.Routes {
 		switch route.State {
-		case service.ChannelHealthStateCircuitOpen:
+		case service.ChannelHealthStateCircuitOpen, service.ChannelHealthStateHalfOpen:
 			summary.CircuitOpenRoutes++
+			channelOpen = true
 		case service.ChannelHealthStateDegraded:
 			summary.DegradedRoutes++
-		case service.ChannelHealthStateRecovering, service.ChannelHealthStateHalfOpen:
+		case service.ChannelHealthStateRecovering:
 			summary.RecoveringRoutes++
+			channelRecovering = true
 		case service.ChannelHealthStateSaturated:
 			summary.SaturatedRoutes++
 		}
+	}
+	if channelOpen {
+		summary.CircuitOpenChannels++
+	} else if channelRecovering {
+		summary.RecoveringChannels++
 	}
 	for _, key := range item.Adaptive.Keys {
 		if key.State == service.ChannelHealthStateIsolated {

@@ -26,26 +26,30 @@ const (
 )
 
 type ChannelRouteHealthSnapshot struct {
-	ModelName             string              `json:"model_name"`
-	RequestPath           string              `json:"request_path"`
-	State                 string              `json:"state"`
-	OpenUntil             int64               `json:"open_until"`
-	ProbeInFlight         bool                `json:"probe_in_flight"`
-	InFlight              int                 `json:"in_flight"`
-	Capacity              int                 `json:"capacity"`
-	InitialCapacity       int                 `json:"initial_capacity"`
-	Successes             int                 `json:"successes"`
-	Failures              int                 `json:"failures"`
-	PoolFailures          int                 `json:"pool_failures"`
-	RateLimits            int                 `json:"rate_limits"`
-	LastFailureClass      ChannelFailureClass `json:"last_failure_class,omitempty"`
-	LastFailureReason     string              `json:"last_failure_reason,omitempty"`
-	LastFailureStatusCode int                 `json:"last_failure_status_code,omitempty"`
-	LastFailureAt         int64               `json:"last_failure_at,omitempty"`
-	LastSuccessAt         int64               `json:"last_success_at,omitempty"`
-	LastRecoveryAt        int64               `json:"last_recovery_at,omitempty"`
-	LastTouched           int64               `json:"last_touched"`
-	fingerprint           string
+	ModelName              string              `json:"model_name"`
+	RequestPath            string              `json:"request_path"`
+	State                  string              `json:"state"`
+	OpenUntil              int64               `json:"open_until"`
+	NextProbeAt            int64               `json:"next_probe_at"`
+	ProbeInFlight          bool                `json:"probe_in_flight"`
+	InFlight               int                 `json:"in_flight"`
+	Capacity               int                 `json:"capacity"`
+	InitialCapacity        int                 `json:"initial_capacity"`
+	RecoveryTargetCapacity int                 `json:"recovery_target_capacity,omitempty"`
+	RecoverySuccesses      int                 `json:"recovery_successes,omitempty"`
+	RecoverySuccessTarget  int                 `json:"recovery_success_target,omitempty"`
+	Successes              int                 `json:"successes"`
+	Failures               int                 `json:"failures"`
+	PoolFailures           int                 `json:"pool_failures"`
+	RateLimits             int                 `json:"rate_limits"`
+	LastFailureClass       ChannelFailureClass `json:"last_failure_class,omitempty"`
+	LastFailureReason      string              `json:"last_failure_reason,omitempty"`
+	LastFailureStatusCode  int                 `json:"last_failure_status_code,omitempty"`
+	LastFailureAt          int64               `json:"last_failure_at,omitempty"`
+	LastSuccessAt          int64               `json:"last_success_at,omitempty"`
+	LastRecoveryAt         int64               `json:"last_recovery_at,omitempty"`
+	LastTouched            int64               `json:"last_touched"`
+	fingerprint            string
 }
 
 type ChannelKeyHealthSnapshot struct {
@@ -116,11 +120,11 @@ func unixTime(value time.Time) int64 {
 }
 
 func routeHealthStateName(state *channelRouteHealthState, now time.Time) string {
-	if now.Before(state.OpenUntil) {
+	if !state.OpenUntil.IsZero() {
+		if state.ProbeInFlight {
+			return ChannelHealthStateHalfOpen
+		}
 		return ChannelHealthStateCircuitOpen
-	}
-	if state.ProbeInFlight && !state.OpenUntil.IsZero() {
-		return ChannelHealthStateHalfOpen
 	}
 	if state.Capacity < state.InitialCapacity {
 		if !state.LastRecoveryAt.IsZero() || state.LastSuccessAt.After(state.LastFailureAt) {
@@ -168,26 +172,30 @@ func GetChannelAdaptiveHealthSnapshots(includeHealthy bool) []ChannelAdaptiveHea
 			successes, failures, poolFailures, rateLimits := summarizeRouteHealthLocked(state, now)
 			entry := channelHealthSnapshotEntry(byChannel, state.ChannelID, state.Fingerprint)
 			entry.Routes = append(entry.Routes, ChannelRouteHealthSnapshot{
-				ModelName:             modelName,
-				RequestPath:           requestPath,
-				State:                 stateName,
-				OpenUntil:             unixTime(state.OpenUntil),
-				ProbeInFlight:         state.ProbeInFlight,
-				InFlight:              state.InFlight,
-				Capacity:              state.Capacity,
-				InitialCapacity:       state.InitialCapacity,
-				Successes:             successes,
-				Failures:              failures,
-				PoolFailures:          poolFailures,
-				RateLimits:            rateLimits,
-				LastFailureClass:      state.LastFailureClass,
-				LastFailureReason:     state.LastFailureReason,
-				LastFailureStatusCode: state.LastFailureStatusCode,
-				LastFailureAt:         unixTime(state.LastFailureAt),
-				LastSuccessAt:         unixTime(state.LastSuccessAt),
-				LastRecoveryAt:        unixTime(state.LastRecoveryAt),
-				LastTouched:           unixTime(state.LastTouched),
-				fingerprint:           state.Fingerprint,
+				ModelName:              modelName,
+				RequestPath:            requestPath,
+				State:                  stateName,
+				OpenUntil:              unixTime(state.OpenUntil),
+				NextProbeAt:            unixTime(state.ProbeDue),
+				ProbeInFlight:          state.ProbeInFlight,
+				InFlight:               state.InFlight,
+				Capacity:               state.Capacity,
+				InitialCapacity:        state.InitialCapacity,
+				RecoveryTargetCapacity: state.RecoveryTargetCapacity,
+				RecoverySuccesses:      state.RecoverySuccesses,
+				RecoverySuccessTarget:  channelHealthRecoverySuccessTarget,
+				Successes:              successes,
+				Failures:               failures,
+				PoolFailures:           poolFailures,
+				RateLimits:             rateLimits,
+				LastFailureClass:       state.LastFailureClass,
+				LastFailureReason:      state.LastFailureReason,
+				LastFailureStatusCode:  state.LastFailureStatusCode,
+				LastFailureAt:          unixTime(state.LastFailureAt),
+				LastSuccessAt:          unixTime(state.LastSuccessAt),
+				LastRecoveryAt:         unixTime(state.LastRecoveryAt),
+				LastTouched:            unixTime(state.LastTouched),
+				fingerprint:            state.Fingerprint,
 			})
 		}
 		shard.Unlock()
@@ -221,10 +229,12 @@ func GetChannelAdaptiveHealthSnapshots(includeHealthy bool) []ChannelAdaptiveHea
 		shard.Lock()
 		for _, state := range shard.States {
 			stateName := ChannelHealthStateHealthy
-			if now.Before(state.OpenUntil) {
-				stateName = ChannelHealthStateCircuitOpen
-			} else if state.ProbeInFlight && !state.OpenUntil.IsZero() {
-				stateName = ChannelHealthStateHalfOpen
+			if !state.OpenUntil.IsZero() {
+				if state.ProbeInFlight {
+					stateName = ChannelHealthStateHalfOpen
+				} else {
+					stateName = ChannelHealthStateCircuitOpen
+				}
 			}
 			if !includeHealthy && stateName == ChannelHealthStateHealthy {
 				continue
@@ -267,20 +277,12 @@ func GetChannelAdaptiveHealthSnapshots(includeHealthy bool) []ChannelAdaptiveHea
 }
 
 func resetRouteHealthState(state *channelRouteHealthState, now time.Time) {
-	state.Buckets = [channelHealthBucketCount]channelHealthBucket{}
-	state.OpenUntil = time.Time{}
 	state.ProbeInFlight = false
-	state.SuccessesSinceIncrease = 0
-	state.LastDecreaseEpoch = 0
-	state.LastRecoveryAt = now
+	if state.CapacityBeforeOpen <= 0 {
+		state.CapacityBeforeOpen = state.Capacity
+	}
+	startRouteRecoveryLocked(state, now)
 	state.LastTouched = now
-	state.Capacity = channelHealthRecoveryCapacity
-	if state.InitialCapacity > 0 && state.Capacity > state.InitialCapacity {
-		state.Capacity = state.InitialCapacity
-	}
-	if state.Capacity < channelHealthMinCapacity {
-		state.Capacity = channelHealthMinCapacity
-	}
 }
 
 func RecoverChannelHealth(channel *model.Channel, request ChannelHealthRecoveryRequest) (ChannelHealthRecoveryResult, error) {

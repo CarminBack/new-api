@@ -19,9 +19,109 @@ import (
 // service.StartSystemTaskRunner.
 func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(channelTestHandler{})
+	service.RegisterSystemTaskHandler(channelHealthProbeHandler{})
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+}
+
+type channelHealthProbeHandler struct{}
+
+const channelHealthProbeTimeout = 2 * time.Minute
+
+func (channelHealthProbeHandler) Type() string { return model.SystemTaskTypeChannelHealthProbe }
+
+func (channelHealthProbeHandler) Enabled() bool { return service.HasDueChannelHealthProbe() }
+
+func (channelHealthProbeHandler) Interval() time.Duration { return 15 * time.Second }
+
+func (channelHealthProbeHandler) NewPayload() any { return nil }
+
+func channelHealthProbeEndpointType(requestPath string) string {
+	switch requestPath {
+	case "/v1/responses":
+		return string(constant.EndpointTypeOpenAIResponse)
+	case "/v1/responses/compact":
+		return string(constant.EndpointTypeOpenAIResponseCompact)
+	case "/v1/messages":
+		return string(constant.EndpointTypeAnthropic)
+	case "/v1/images/generations":
+		return string(constant.EndpointTypeImageGeneration)
+	case "/v1/embeddings":
+		return string(constant.EndpointTypeEmbeddings)
+	case "/v1/rerank", "/rerank":
+		return string(constant.EndpointTypeJinaRerank)
+	default:
+		return string(constant.EndpointTypeOpenAI)
+	}
+}
+
+func (channelHealthProbeHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	targets := service.ClaimDueChannelHealthProbes(20)
+	summary := channelTestSummary{}
+	for index, target := range targets {
+		if ctx.Err() != nil {
+			for _, pending := range targets[index:] {
+				service.ReleaseChannelHealthProbe(pending)
+			}
+			finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, ctx.Err())
+			return
+		}
+		channel, channelErr := model.CacheGetChannel(target.ChannelID)
+		if channelErr != nil || channel == nil {
+			if channelErr == nil {
+				channelErr = fmt.Errorf("channel #%d not found", target.ChannelID)
+			}
+			service.CompleteChannelHealthProbe(target, service.ChannelHealthProbeResult{
+				Class:  service.ChannelFailureTransient,
+				Reason: channelErr.Error(),
+			})
+			summary.Tested++
+			summary.Failed++
+			continue
+		}
+		probeCtx, cancelProbe := context.WithTimeout(ctx, channelHealthProbeTimeout)
+		result := testChannel(probeCtx, channel, testUserID, target.ModelName, channelHealthProbeEndpointType(target.RequestPath), false)
+		cancelProbe()
+		if ctx.Err() != nil {
+			service.ReleaseChannelHealthProbe(target)
+			for _, pending := range targets[index+1:] {
+				service.ReleaseChannelHealthProbe(pending)
+			}
+			finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, ctx.Err())
+			return
+		}
+		if result.localErr != nil && result.newAPIError == nil {
+			service.ReleaseChannelHealthProbe(target)
+			summary.Tested++
+			summary.Failed++
+			continue
+		}
+		probeResult := service.ChannelHealthProbeResult{Success: result.localErr == nil && result.newAPIError == nil}
+		if probeResult.Success {
+			summary.Succeeded++
+		} else {
+			summary.Failed++
+			probeResult.Class = service.ChannelFailureTransient
+			if result.localErr != nil {
+				probeResult.Reason = result.localErr.Error()
+			}
+			if result.newAPIError != nil {
+				decision := service.DecideChannelFailureForModel(result.context, result.newAPIError, target.ModelName, 1, true, false)
+				probeResult.Class = decision.Class
+				probeResult.Reason = decision.Reason
+				probeResult.StatusCode = result.newAPIError.StatusCode
+			}
+		}
+		service.CompleteChannelHealthProbe(target, probeResult)
+		summary.Tested++
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and

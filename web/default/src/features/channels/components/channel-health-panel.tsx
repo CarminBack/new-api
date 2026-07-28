@@ -3,7 +3,6 @@ import {
   Activity,
   AlertTriangle,
   Gauge,
-  KeyRound,
   Loader2,
   RefreshCw,
   RotateCcw,
@@ -40,7 +39,6 @@ import {
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
-  enableMultiKey,
   getChannelHealth,
   recoverChannelHealth,
   testChannel,
@@ -68,18 +66,12 @@ type HealthRow = {
   state: HealthDisplayState
   modelName?: string
   requestPath?: string
-  keyIndex?: number
   reason?: string
   statusCode?: number
   openUntil?: number
   lastChanged?: number
-  successes?: number
-  failures?: number
-  poolFailures?: number
-  rateLimits?: number
-  inFlight?: number
-  capacity?: number
-  initialCapacity?: number
+  recoverySuccesses?: number
+  recoverySuccessTarget?: number
   persistent?: boolean
 }
 
@@ -121,109 +113,64 @@ function routeLastChanged(
   )
 }
 
-function buildHealthRows(item: ChannelHealthItem, includeHealthy: boolean) {
-  const rows: HealthRow[] = []
+function buildHealthRows(
+  item: ChannelHealthItem,
+  includeHealthy: boolean
+): HealthRow[] {
+  let state: HealthDisplayState | undefined
+  let route: ChannelHealthItem['adaptive']['routes'][number] | undefined
+  let persistent = false
+
   if (item.channel_status === CHANNEL_STATUS.AUTO_DISABLED) {
-    rows.push({
-      id: `${item.channel_id}:persistent-channel`,
-      item,
-      scope: 'channel',
-      state: 'auto_disabled',
-      reason: item.status_reason,
-      lastChanged: item.status_time,
-      persistent: true,
-    })
+    state = 'auto_disabled'
+    persistent = true
   } else if (
     includeHealthy &&
     item.channel_status === CHANNEL_STATUS.MANUAL_DISABLED
   ) {
-    rows.push({
-      id: `${item.channel_id}:manual-channel`,
-      item,
-      scope: 'channel',
-      state: 'manual_disabled',
-      reason: item.status_reason,
-      lastChanged: item.status_time,
-      persistent: true,
-    })
+    state = 'manual_disabled'
+    persistent = true
+  } else {
+    const openRoutes = item.adaptive.routes.filter((candidate) =>
+      ['circuit_open', 'half_open'].includes(candidate.state)
+    )
+    const recoveringRoutes = item.adaptive.routes.filter(
+      (candidate) => candidate.state === 'recovering'
+    )
+    if (openRoutes.length > 0) {
+      route =
+        openRoutes.find((candidate) => candidate.state === 'half_open') ??
+        openRoutes[0]
+      state = route.state
+    } else if (recoveringRoutes.length > 0) {
+      route = recoveringRoutes[0]
+      state = 'recovering'
+    } else if (includeHealthy) {
+      state = 'healthy'
+    }
   }
 
-  if (
-    item.adaptive.channel_state &&
-    item.adaptive.channel_state !== 'healthy'
-  ) {
-    rows.push({
-      id: `${item.channel_id}:adaptive-channel`,
+  if (!state) return []
+  return [
+    {
+      id: `${item.channel_id}:${state}`,
       item,
-      scope: 'channel',
-      state: item.adaptive.channel_state,
-      openUntil: item.adaptive.channel_open_until,
-    })
-  }
-
-  for (const route of item.adaptive.routes ?? []) {
-    rows.push({
-      id: `${item.channel_id}:route:${route.model_name}:${route.request_path}`,
-      item,
-      scope: 'route',
-      state: route.state,
-      modelName: route.model_name,
-      requestPath: route.request_path,
-      reason: route.last_failure_reason || route.last_failure_class,
-      statusCode: route.last_failure_status_code,
-      openUntil: route.open_until,
-      lastChanged: routeLastChanged(route),
-      successes: route.successes,
-      failures: route.failures,
-      poolFailures: route.pool_failures,
-      rateLimits: route.rate_limits,
-      inFlight: route.in_flight,
-      capacity: route.capacity,
-      initialCapacity: route.initial_capacity,
-    })
-  }
-
-  for (const key of item.adaptive.keys ?? []) {
-    rows.push({
-      id: `${item.channel_id}:adaptive-key:${key.key_index}:${key.scope}:${key.model_name ?? ''}`,
-      item,
-      scope: 'key',
-      state: key.state,
-      modelName: key.model_name,
-      requestPath: key.request_path,
-      keyIndex: key.key_index,
-      openUntil: key.open_until,
-      lastChanged: key.last_touched,
-      inFlight: key.in_flight,
-      capacity: key.capacity,
-    })
-  }
-
-  for (const key of item.persistent_keys ?? []) {
-    rows.push({
-      id: `${item.channel_id}:persistent-key:${key.key_index}`,
-      item,
-      scope: 'key',
-      state:
-        key.status === CHANNEL_STATUS.AUTO_DISABLED
-          ? 'key_auto_disabled'
-          : 'key_manual_disabled',
-      keyIndex: key.key_index,
-      reason: key.reason,
-      lastChanged: key.disabled_time,
-      persistent: true,
-    })
-  }
-
-  if (includeHealthy && rows.length === 0) {
-    rows.push({
-      id: `${item.channel_id}:healthy`,
-      item,
-      scope: 'channel',
-      state: 'healthy',
-    })
-  }
-  return rows
+      scope: route ? 'route' : 'channel',
+      state,
+      modelName: route?.model_name,
+      requestPath: route?.request_path,
+      reason:
+        route?.last_failure_reason ||
+        route?.last_failure_class ||
+        item.status_reason,
+      statusCode: route?.last_failure_status_code,
+      openUntil: route?.next_probe_at || route?.open_until,
+      lastChanged: route ? routeLastChanged(route) : item.status_time,
+      recoverySuccesses: route?.recovery_successes,
+      recoverySuccessTarget: route?.recovery_success_target,
+      persistent,
+    },
+  ]
 }
 
 function formatDuration(seconds: number) {
@@ -242,16 +189,18 @@ function formatTime(timestamp?: number) {
   }).format(new Date(timestamp * 1000))
 }
 
-function recoveryPayload(row: HealthRow): ChannelHealthRecoverParams {
-  if (row.scope === 'route') {
+function formatRecoveryProgress(row: HealthRow) {
+  if (row.state !== 'recovering') return '—'
+  return `${row.recoverySuccesses ?? 0} / ${row.recoverySuccessTarget ?? 3}`
+}
+
+function recoveryPayload(_row: HealthRow): ChannelHealthRecoverParams {
+  if (_row.scope === 'route') {
     return {
       scope: 'route',
-      model_name: row.modelName,
-      request_path: row.requestPath,
+      model_name: _row.modelName,
+      request_path: _row.requestPath,
     }
-  }
-  if (row.scope === 'key') {
-    return { scope: 'key', key_index: row.keyIndex }
   }
   return { scope: 'channel' }
 }
@@ -271,26 +220,13 @@ function HealthStateBadge({ state }: { state: HealthDisplayState }) {
 
 function ScopeLabel({ row }: { row: HealthRow }) {
   const { t } = useTranslation()
-  if (row.scope === 'route') {
+  if (row.modelName) {
     return (
       <div className='min-w-0 space-y-0.5'>
         <div className='truncate font-mono text-xs'>{row.modelName}</div>
         <div className='text-muted-foreground truncate font-mono text-xs'>
           {row.requestPath}
         </div>
-      </div>
-    )
-  }
-  if (row.scope === 'key') {
-    return (
-      <div className='flex min-w-0 items-center gap-1.5'>
-        <KeyRound className='text-muted-foreground size-3.5' />
-        <span>{t('Key #{{index}}', { index: (row.keyIndex ?? 0) + 1 })}</span>
-        {row.modelName && (
-          <span className='text-muted-foreground truncate font-mono text-xs'>
-            {row.modelName}
-          </span>
-        )}
       </div>
     )
   }
@@ -412,7 +348,15 @@ export function ChannelHealthPanel() {
     return (data?.items ?? [])
       .map((item) => {
         const rows = buildHealthRows(item, includeHealthy).filter((row) => {
-          if (stateFilter !== 'all' && row.state !== stateFilter) return false
+          const matchesCircuitFilter =
+            stateFilter === 'circuit_open' && row.state === 'half_open'
+          if (
+            stateFilter !== 'all' &&
+            row.state !== stateFilter &&
+            !matchesCircuitFilter
+          ) {
+            return false
+          }
           if (!keyword) return true
           return [
             item.channel_id,
@@ -436,25 +380,10 @@ export function ChannelHealthPanel() {
   const performRecovery = async (row: HealthRow) => {
     setActionKey(row.id)
     try {
-      let response: { success: boolean; message?: string }
-      if (row.persistent && row.scope === 'key') {
-        const enableResponse = await enableMultiKey(
-          row.item.channel_id,
-          row.keyIndex ?? -1
-        )
-        if (!enableResponse.success) {
-          throw new Error(enableResponse.message || t('Recovery failed'))
-        }
-        response = await recoverChannelHealth(
-          row.item.channel_id,
-          recoveryPayload(row)
-        )
-      } else {
-        response = await recoverChannelHealth(
-          row.item.channel_id,
-          recoveryPayload(row)
-        )
-      }
+      const response = await recoverChannelHealth(
+        row.item.channel_id,
+        recoveryPayload(row)
+      )
       if (!response.success) {
         throw new Error(response.message || t('Recovery failed'))
       }
@@ -530,33 +459,15 @@ export function ChannelHealthPanel() {
     },
     {
       label: 'Circuit Open',
-      value: data?.summary.circuit_open_routes ?? 0,
+      value: data?.summary.circuit_open_channels ?? 0,
       state: 'circuit_open',
       icon: Activity,
     },
     {
-      label: 'Reduced Capacity',
-      value: data?.summary.degraded_routes ?? 0,
-      state: 'degraded',
-      icon: Gauge,
-    },
-    {
       label: 'Recovering',
-      value: data?.summary.recovering_routes ?? 0,
+      value: data?.summary.recovering_channels ?? 0,
       state: 'recovering',
       icon: ShieldCheck,
-    },
-    {
-      label: 'At Capacity',
-      value: data?.summary.saturated_routes ?? 0,
-      state: 'saturated',
-      icon: Gauge,
-    },
-    {
-      label: 'Isolated Keys',
-      value: data?.summary.isolated_keys ?? 0,
-      state: 'isolated',
-      icon: KeyRound,
     },
   ]
 
@@ -592,7 +503,7 @@ export function ChannelHealthPanel() {
         </Button>
       </div>
 
-      <div className='grid grid-cols-2 border-b sm:grid-cols-3 lg:grid-cols-6'>
+      <div className='grid grid-cols-3 border-b'>
         {summaryItems.map((item) => {
           const Icon = item.icon
           const active = stateFilter === item.state
@@ -641,9 +552,8 @@ export function ChannelHealthPanel() {
                     <TableHead>{t('Scope')}</TableHead>
                     <TableHead>{t('State')}</TableHead>
                     <TableHead>{t('Reason')}</TableHead>
-                    <TableHead>{t('2-minute Window')}</TableHead>
-                    <TableHead>{t('In-flight / Capacity')}</TableHead>
                     <TableHead>{t('Recovery')}</TableHead>
+                    <TableHead>{t('Progress')}</TableHead>
                     <TableHead className='text-right'>{t('Actions')}</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -679,22 +589,15 @@ export function ChannelHealthPanel() {
                             {formatTime(row.lastChanged)}
                           </div>
                         </TableCell>
-                        <TableCell className='font-mono text-xs'>
-                          {row.successes === undefined
-                            ? '—'
-                            : `S ${row.successes} / F ${row.failures} / P ${row.poolFailures} / 429 ${row.rateLimits}`}
-                        </TableCell>
-                        <TableCell className='font-mono text-xs'>
-                          {row.capacity === undefined
-                            ? '—'
-                            : `${row.inFlight ?? 0} / ${row.capacity}${row.initialCapacity ? ` (${row.initialCapacity})` : ''}`}
-                        </TableCell>
                         <TableCell>
                           {row.openUntil && row.openUntil > Date.now() / 1000
                             ? formatDuration(
                                 Math.ceil(row.openUntil - Date.now() / 1000)
                               )
                             : '—'}
+                        </TableCell>
+                        <TableCell className='font-mono text-xs'>
+                          {formatRecoveryProgress(row)}
                         </TableCell>
                         <TableCell>
                           <HealthRowActions
@@ -741,9 +644,11 @@ export function ChannelHealthPanel() {
                         <div className='text-muted-foreground grid grid-cols-2 gap-2 text-xs'>
                           <span>{formatTime(row.lastChanged)}</span>
                           <span className='text-right font-mono'>
-                            {row.capacity === undefined
-                              ? ''
-                              : `${row.inFlight ?? 0} / ${row.capacity}`}
+                            {row.openUntil && row.openUntil > Date.now() / 1000
+                              ? formatDuration(
+                                  Math.ceil(row.openUntil - Date.now() / 1000)
+                                )
+                              : ''}
                           </span>
                         </div>
                         <HealthRowActions

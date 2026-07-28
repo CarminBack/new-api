@@ -201,8 +201,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.LastError = nil
 	allowUncertainRetry := allowsUncertainCrossChannelRetry(relayInfo, request)
 	uncertainRetryUsed := false
-	generalRetryCount := 0
-	const maxGeneralRetries = 1
 	service.RecordChannelPrimaryRequestFor(c, relayInfo.OriginModelName, c.Request.URL.Path)
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
@@ -259,14 +257,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			specificChannel,
 			allowUncertainRetry && !uncertainRetryUsed,
 		)
-		if decision.Retry {
-			if generalRetryCount >= maxGeneralRetries {
-				decision.Retry = false
-				decision.Reason += ":general_retry_limit"
-			} else {
-				generalRetryCount++
-			}
-		}
 		if decision.Retry && !service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class, channel.Id) {
 			decision.Retry = false
 			decision.Reason += ":global_retry_budget"
