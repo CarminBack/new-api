@@ -497,7 +497,7 @@ func shouldScheduleChannelProbeLocked(state *channelRouteHealthState, now time.T
 func ChannelHealthProbeSupportsPath(requestPath string) bool {
 	switch requestPath {
 	case "/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/responses/compact",
-		"/v1/messages", "/v1/embeddings", "/v1/rerank", "/rerank", "/v1/images/generations":
+		"/v1/messages", "/v1/embeddings", "/v1/rerank", "/rerank", "/v1/images/generations", "/v1/images/edits":
 		return true
 	default:
 		return false
@@ -505,7 +505,7 @@ func ChannelHealthProbeSupportsPath(requestPath string) bool {
 }
 
 func channelHealthProbeLeaseForPath(requestPath string) time.Duration {
-	if requestPath == "/v1/images/generations" {
+	if requestPath == "/v1/images/generations" || requestPath == "/v1/images/edits" {
 		return channelHealthImageProbeLease
 	}
 	return channelHealthProbeLease

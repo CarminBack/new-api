@@ -32,6 +32,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const maxImageFallbacks = 1
+
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
 	switch info.RelayMode {
@@ -253,7 +255,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			c,
 			newAPIError,
 			relayInfo.OriginModelName,
-			common.RetryTimes-retryParam.GetRetry(),
+			relayRetriesRemaining(c.Request.URL.Path, retryParam.GetRetry(), common.RetryTimes),
 			specificChannel,
 			allowUncertainRetry && !uncertainRetryUsed,
 		)
@@ -297,6 +299,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func relayRetriesRemaining(path string, retryIndex int, configuredRetries int) int {
+	if strings.HasPrefix(path, "/v1/images/") && configuredRetries > maxImageFallbacks {
+		configuredRetries = maxImageFallbacks
+	}
+	remaining := configuredRetries - retryIndex
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 func shouldExcludeChannelForRetry(class service.ChannelFailureClass) bool {

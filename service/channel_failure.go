@@ -1,6 +1,8 @@
 package service
 
 import (
+	"errors"
+	"net"
 	"net/http"
 	"strings"
 
@@ -61,8 +63,12 @@ func DecideChannelFailureForModel(c *gin.Context, err *types.NewAPIError, modelN
 		decision.Class == ChannelFailureKeyCapability ||
 		(decision.Class == ChannelFailureUncertain && allowUncertainRetry)
 	if isPotentiallyNonIdempotentPath(path) {
-		decision.Retry = false
-		decision.Reason += ":non_idempotent_path"
+		if isImageGenerationPath(path) && isSafeImageFallback(err, decision) {
+			decision.Reason += ":safe_image_fallback"
+		} else {
+			decision.Retry = false
+			decision.Reason += ":non_idempotent_path"
+		}
 	}
 	if responseStarted {
 		decision.Retry = false
@@ -137,7 +143,7 @@ func classifyChannelFailure(err *types.NewAPIError, message string, path string,
 			Class:           ChannelFailurePoolAccount,
 			Reason:          "responses_account_failure",
 			EvictAffinity:   true,
-			CountForCircuit: false,
+			CountForCircuit: isImageGenerationPath(path),
 		}
 	}
 	if isResponsesRateLimitFailure(err) {
@@ -407,4 +413,34 @@ func isPotentiallyNonIdempotentPath(path string) bool {
 		strings.HasPrefix(path, "/mj/") ||
 		strings.HasPrefix(path, "/suno/") ||
 		strings.HasPrefix(path, "/jimeng")
+}
+
+func isImageGenerationPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/images/")
+}
+
+func isSafeImageFallback(err *types.NewAPIError, decision ChannelFailureDecision) bool {
+	switch decision.Class {
+	case ChannelFailureRateLimited, ChannelFailurePoolAccount, ChannelFailureChannelFatal, ChannelFailureKeyCapability:
+		return true
+	case ChannelFailureTransient:
+		if types.IsChannelError(err) {
+			return true
+		}
+		if err.GetErrorCode() == types.ErrorCodeDoRequestFailed {
+			var opErr *net.OpError
+			return errors.As(err, &opErr) && opErr.Op == "dial"
+		}
+		if err.StatusCode != http.StatusBadGateway && err.StatusCode != http.StatusServiceUnavailable {
+			return false
+		}
+		switch err.GetErrorCode() {
+		case types.ErrorCodeReadResponseBodyFailed, types.ErrorCodeBadResponseBody:
+			return false
+		default:
+			return err.Err != nil
+		}
+	default:
+		return false
+	}
 }

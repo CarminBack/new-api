@@ -43,7 +43,7 @@ type channelHealthProbeOutcome struct {
 }
 
 func channelHealthProbeTimeoutForPath(requestPath string) time.Duration {
-	if requestPath == "/v1/images/generations" {
+	if requestPath == "/v1/images/generations" || requestPath == "/v1/images/edits" {
 		return time.Minute
 	}
 	return channelHealthProbeTimeout
@@ -65,7 +65,7 @@ func channelHealthProbeEndpointType(requestPath string) string {
 		return string(constant.EndpointTypeOpenAIResponseCompact)
 	case "/v1/messages":
 		return string(constant.EndpointTypeAnthropic)
-	case "/v1/images/generations":
+	case "/v1/images/generations", "/v1/images/edits":
 		return string(constant.EndpointTypeImageGeneration)
 	case "/v1/embeddings":
 		return string(constant.EndpointTypeEmbeddings)

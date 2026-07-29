@@ -391,6 +391,11 @@ func TestImageProbeLeaseOutlivesImageProbeTimeout(t *testing.T) {
 	require.NotEqual(t, first[0].ProbeID, second[0].ProbeID)
 }
 
+func TestImageEditsSupportGenerationCapabilityProbe(t *testing.T) {
+	require.True(t, ChannelHealthProbeSupportsPath("/v1/images/edits"))
+	require.Equal(t, channelHealthImageProbeLease, channelHealthProbeLeaseForPath("/v1/images/edits"))
+}
+
 func TestSuccessfulRouteProbeResetsAggregateNoSuccessEvidence(t *testing.T) {
 	setupChannelHealthTest(t)
 	scheduleRouteProbeForTest(t, nil, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)

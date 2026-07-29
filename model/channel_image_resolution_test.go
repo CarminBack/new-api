@@ -69,6 +69,57 @@ func TestCachedChannelSelectionFiltersByImageResolutionTier(t *testing.T) {
 	assert.True(t, IsChannelEnabledForGroupModelWithImageResolution("Image", "gpt-image-2", "2k", 60))
 }
 
+func TestImageRetryExclusionsStayInResolutionTier(t *testing.T) {
+	oldMemoryCacheEnabled := common.MemoryCacheEnabled
+	oldGroupMap := group2model2channels
+	oldChannels := channelsIDM
+	oldSettings := channel2settings
+	defer func() {
+		common.MemoryCacheEnabled = oldMemoryCacheEnabled
+		group2model2channels = oldGroupMap
+		channelsIDM = oldChannels
+		channel2settings = oldSettings
+	}()
+
+	common.MemoryCacheEnabled = true
+	priority5 := int64(5)
+	priority4 := int64(4)
+	priority3 := int64(3)
+	priority0 := int64(0)
+	weight := uint(1)
+	channelsIDM = map[int]*Channel{
+		61: {Id: 61, Priority: &priority5, Weight: &weight},
+		62: {Id: 62, Priority: &priority4, Weight: &weight},
+		57: {Id: 57, Priority: &priority3, Weight: &weight},
+		60: {Id: 60, Priority: &priority0, Weight: &weight},
+	}
+	group2model2channels = map[string]map[string][]int{
+		"Image": {"gpt-image-2": {61, 62, 57, 60}},
+	}
+	channel2settings = map[int]dto.ChannelSettings{
+		61: {ImageResolutionTiers: map[string][]string{"gpt-image-2": {"1k", "2k", "4k"}}},
+		62: {ImageResolutionTiers: map[string][]string{"gpt-image-2": {"1k"}}},
+		57: {ImageResolutionTiers: map[string][]string{"gpt-image-2": {"4k"}}},
+		60: {ImageResolutionTiers: map[string][]string{"gpt-image-2": {"2k", "4k"}}},
+	}
+
+	channel, err := GetRandomSatisfiedChannelWithExclusions(
+		"Image", "gpt-image-2", 0, "/v1/images/edits", "4k",
+		ChannelKeyExclusions{61: {0: {}}},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, 57, channel.Id)
+
+	channel, err = GetRandomSatisfiedChannelWithExclusions(
+		"Image", "gpt-image-2", 0, "/v1/images/edits", "4k",
+		ChannelKeyExclusions{61: {0: {}}, 57: {0: {}}},
+	)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, 60, channel.Id)
+}
+
 func TestCachedChannelSelectionPreservesLegacyGroupsWithoutDeclarations(t *testing.T) {
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
 	oldGroupMap := group2model2channels
