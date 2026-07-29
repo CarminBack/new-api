@@ -3,9 +3,11 @@ package controller
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -15,6 +17,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAutomaticChannelTestPromptsAreJSONSafe(t *testing.T) {
+	channel := &model.Channel{}
+	for _, endpointType := range []constant.EndpointType{
+		constant.EndpointTypeOpenAI,
+		constant.EndpointTypeOpenAIResponse,
+		constant.EndpointTypeOpenAIResponseCompact,
+		constant.EndpointTypeAnthropic,
+	} {
+		request := buildTestRequest("gpt-test", string(endpointType), channel, false)
+		body, err := common.Marshal(request)
+		require.NoError(t, err)
+		require.Contains(t, strings.ToLower(string(body)), "json")
+	}
+}
 
 func TestSettleTestQuotaUsesTieredBilling(t *testing.T) {
 	info := &relaycommon.RelayInfo{

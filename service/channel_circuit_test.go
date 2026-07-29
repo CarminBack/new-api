@@ -178,6 +178,55 @@ func TestMultiRouteNoSuccessSchedulesChannelProbe(t *testing.T) {
 	require.Equal(t, ChannelHealthProbeTypeInitial, targets[0].ProbeType)
 }
 
+func TestPoolAccountFailuresRequireSlowWindowBeforeRouteProbe(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailurePoolAccount)
+	for i := 0; i < channelHealthSlowSingleRouteFailures-2; i++ {
+		recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailurePoolAccount)
+	}
+	require.False(t, HasDueChannelHealthProbe())
+
+	*now = now.Add(channelHealthWindow)
+	recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailurePoolAccount)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	require.Equal(t, ChannelHealthProbeScopeRoute, targets[0].Scope)
+
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{
+		Class:      ChannelFailurePoolAccount,
+		Reason:     "insufficient account balance",
+		StatusCode: http.StatusForbidden,
+	})
+	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+}
+
+func TestPoolAccountFailuresAcrossRoutesScheduleChannelProbe(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	recordLegacyRouteOutcome(t, 29, "gpt-a", "/v1/responses", ChannelFailurePoolAccount)
+	recordLegacyRouteOutcome(t, 29, "gpt-b", "/v1/chat/completions", ChannelFailurePoolAccount)
+	*now = now.Add(channelHealthWindow)
+	recordLegacyRouteOutcome(t, 29, "gpt-a", "/v1/responses", ChannelFailurePoolAccount)
+
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	require.Equal(t, ChannelHealthProbeScopeChannel, targets[0].Scope)
+}
+
+func TestPoolAccountVolumeDoesNotBypassSlowWindow(t *testing.T) {
+	setupChannelHealthTest(t)
+	for i := 0; i < channelHealthAggregateMinimumSamples; i++ {
+		modelName := "gpt-a"
+		requestPath := "/v1/responses"
+		if i%2 == 1 {
+			modelName = "gpt-b"
+			requestPath = "/v1/chat/completions"
+		}
+		recordLegacyRouteOutcome(t, 29, modelName, requestPath, ChannelFailurePoolAccount)
+	}
+	recordLegacyRouteOutcome(t, 29, "gpt-c", "/v1/responses", ChannelFailureTransient)
+	require.False(t, HasDueChannelHealthProbe())
+}
+
 func TestFiveFailuresDoNotOpenHighTrafficSingleRouteWithSuccesses(t *testing.T) {
 	setupChannelHealthTest(t)
 	for i := 0; i < 1000; i++ {
@@ -505,6 +554,130 @@ func TestCompleteFailureRequiresActiveProbeBeforeOpeningRoute(t *testing.T) {
 	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
 	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 	require.True(t, AllowChannelCircuitAttempt(nil, 37, "other-model", "/v1/responses"))
+}
+
+func TestDeterministicInitialProbeFailureDoesNotOpenRoute(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	scheduleRouteProbeForTest(t, nil, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{
+		Class:      ChannelFailureTerminal,
+		Reason:     "deterministic_request",
+		StatusCode: http.StatusBadRequest,
+	})
+
+	state := routeStateForTest(37, "gpt-test", "/v1/responses")
+	require.True(t, state.OpenUntil.IsZero())
+	require.True(t, state.Suspect)
+	require.Equal(t, now.Add(channelHealthOpenFor), state.ProbeDue)
+	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+	require.False(t, HasDueChannelHealthProbe())
+}
+
+func TestRateLimitedInitialProbeFailureDoesNotOpenRoute(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	scheduleRouteProbeForTest(t, nil, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{
+		Class:      ChannelFailureRateLimited,
+		Reason:     "upstream_rate_limited",
+		StatusCode: http.StatusTooManyRequests,
+	})
+
+	state := routeStateForTest(37, "gpt-test", "/v1/responses")
+	require.True(t, state.OpenUntil.IsZero())
+	require.True(t, state.Suspect)
+	require.Equal(t, now.Add(channelHealthOpenFor), state.ProbeDue)
+	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+}
+
+func TestPoolAccountProbeNeedsPoolAccountTrigger(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	scheduleRouteProbeForTest(t, nil, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{
+		Class:      ChannelFailurePoolAccount,
+		Reason:     "insufficient account balance",
+		StatusCode: http.StatusForbidden,
+	})
+
+	state := routeStateForTest(37, "gpt-test", "/v1/responses")
+	require.True(t, state.OpenUntil.IsZero())
+	require.True(t, state.Suspect)
+	require.Equal(t, now.Add(channelHealthOpenFor), state.ProbeDue)
+}
+
+func TestInconclusiveRecoveryProbeKeepsRouteOpen(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	*now = now.Add(channelHealthOpenFor + time.Millisecond)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	require.Equal(t, ChannelHealthProbeTypeRecovery, targets[0].ProbeType)
+
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{
+		Class:      ChannelFailureTerminal,
+		Reason:     "deterministic_request",
+		StatusCode: http.StatusBadRequest,
+	})
+
+	state := routeStateForTest(37, "gpt-test", "/v1/responses")
+	require.Equal(t, now.Add(channelHealthOpenFor), state.OpenUntil)
+	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+}
+
+func TestDeterministicInitialProbeFailureDoesNotOpenChannel(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	recordLegacyRouteOutcome(t, 29, "gpt-a", "/v1/responses", ChannelFailureTransient)
+	recordLegacyRouteOutcome(t, 29, "gpt-b", "/v1/chat/completions", ChannelFailureTransient)
+	*now = now.Add(channelHealthWindow)
+	recordLegacyRouteOutcome(t, 29, "gpt-a", "/v1/responses", ChannelFailureTransient)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	require.Equal(t, ChannelHealthProbeScopeChannel, targets[0].Scope)
+
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{
+		Class:      ChannelFailureTerminal,
+		Reason:     "deterministic_request",
+		StatusCode: http.StatusBadRequest,
+	})
+
+	state := aggregateStateForTest(29)
+	require.True(t, state.OpenUntil.IsZero())
+	require.True(t, state.Suspect)
+	require.Equal(t, now.Add(channelHealthOpenFor), state.ProbeDue)
+	require.True(t, AllowChannelCircuitAttempt(nil, 29, "gpt-test", "/v1/responses"))
+}
+
+func TestInconclusiveRecoveryProbeKeepsChannelOpen(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	recordLegacyRouteOutcome(t, 29, "gpt-a", "/v1/responses", ChannelFailureTransient)
+	recordLegacyRouteOutcome(t, 29, "gpt-b", "/v1/chat/completions", ChannelFailureTransient)
+	*now = now.Add(channelHealthWindow)
+	recordLegacyRouteOutcome(t, 29, "gpt-a", "/v1/responses", ChannelFailureTransient)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
+
+	*now = now.Add(channelHealthOpenFor + time.Millisecond)
+	targets = ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	require.Equal(t, ChannelHealthProbeTypeRecovery, targets[0].ProbeType)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{
+		Class:      ChannelFailureTerminal,
+		Reason:     "deterministic_request",
+		StatusCode: http.StatusBadRequest,
+	})
+
+	state := aggregateStateForTest(29)
+	require.Equal(t, now.Add(channelHealthOpenFor), state.OpenUntil)
+	require.False(t, AllowChannelCircuitAttempt(nil, 29, "gpt-test", "/v1/responses"))
 }
 
 func TestLateInflightFailureDoesNotExtendOpenWindow(t *testing.T) {
@@ -1067,6 +1240,42 @@ func TestChangedChannelKeepsSlowStartCapacity(t *testing.T) {
 	changedIdentity := buildChannelHealthIdentity(channel, 0, "gpt-test", "/v1/responses", channelCircuitNow())
 	require.Equal(t, channelHealthNewCapacity, changedIdentity.InitialCapacity)
 	require.Equal(t, channelHealthNewCapacity, buildChannelHealthIdentity(channel, 0, "gpt-test", "/v1/responses", channelCircuitNow()).InitialCapacity)
+}
+
+func TestUpstreamAffectingSettingsChangeChannelFingerprint(t *testing.T) {
+	setupChannelHealthTest(t)
+	baseURL := "https://first.example.com"
+	base := model.Channel{
+		Id:          29,
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "key-a",
+		BaseURL:     &baseURL,
+		Models:      "gpt-test",
+		CreatedTime: channelCircuitNow().Add(-time.Hour).Unix(),
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*model.Channel)
+	}{
+		{"organization", func(channel *model.Channel) { channel.OpenAIOrganization = common.GetPointer("org-b") }},
+		{"test model", func(channel *model.Channel) { channel.TestModel = common.GetPointer("gpt-probe") }},
+		{"provider other", func(channel *model.Channel) { channel.Other = `{"default":"us-east-1"}` }},
+		{"setting", func(channel *model.Channel) { channel.Setting = common.GetPointer(`{"force_format":true}`) }},
+		{"parameter override", func(channel *model.Channel) { channel.ParamOverride = common.GetPointer(`{"temperature":0}`) }},
+		{"header override", func(channel *model.Channel) { channel.HeaderOverride = common.GetPointer(`{"X-Test":"changed"}`) }},
+		{"other settings", func(channel *model.Channel) { channel.OtherSettings = `{"api_version":"v2"}` }},
+		{"status mapping", func(channel *model.Channel) { channel.StatusCodeMapping = common.GetPointer(`{"503":502}`) }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			channel := base
+			before := channelConfigFingerprint(&channel)
+			tt.mutate(&channel)
+			require.NotEqual(t, before, channelConfigFingerprint(&channel))
+		})
+	}
 }
 
 func TestObservedChannelConfigsExpireAfterInactivity(t *testing.T) {

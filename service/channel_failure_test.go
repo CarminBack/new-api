@@ -349,7 +349,7 @@ func TestNormalizeDeterministicRequestStatus(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, err.StatusCode)
 }
 
-func TestDecideChannelFailureForModelSolKeyCapability(t *testing.T) {
+func TestDecideChannelFailureForPooledModelCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
 		name             string
@@ -373,6 +373,26 @@ func TestDecideChannelFailureForModelSolKeyCapability(t *testing.T) {
 			wantCountCircuit: true,
 		},
 		{
+			name:             "terra account capability retries another channel",
+			model:            "gpt-5.6-terra",
+			path:             "/v1/responses",
+			message:          "This ChatGPT account does not support model gpt-5.6-terra",
+			wantClass:        ChannelFailureKeyCapability,
+			wantRetry:        true,
+			wantEvict:        true,
+			wantCountCircuit: true,
+		},
+		{
+			name:             "subscription model access retries another channel",
+			model:            "gpt-5.6-luna",
+			path:             "/v1/chat/completions",
+			message:          "Your subscription does not include access to model gpt-5.6-luna",
+			wantClass:        ChannelFailureKeyCapability,
+			wantRetry:        true,
+			wantEvict:        true,
+			wantCountCircuit: true,
+		},
+		{
 			name:      "ordinary JSON 400 stays terminal",
 			model:     "gpt-5.6-sol",
 			path:      "/v1/chat/completions",
@@ -380,10 +400,10 @@ func TestDecideChannelFailureForModelSolKeyCapability(t *testing.T) {
 			wantClass: ChannelFailureTerminal,
 		},
 		{
-			name:      "different model stays terminal",
+			name:      "generic invalid model stays terminal",
 			model:     "gpt-5.5",
 			path:      "/v1/chat/completions",
-			message:   "This ChatGPT account is not supported for Codex model",
+			message:   "invalid model name gpt-5.5-typo",
 			wantClass: ChannelFailureTerminal,
 		},
 		{

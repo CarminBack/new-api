@@ -2,7 +2,11 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -27,7 +31,16 @@ func RegisterScheduledSystemTasks() {
 
 type channelHealthProbeHandler struct{}
 
-const channelHealthProbeTimeout = 15 * time.Second
+const (
+	channelHealthProbeTimeout     = 15 * time.Second
+	channelHealthProbeConcurrency = 4
+	channelHealthProbeRunLimit    = 20
+)
+
+type channelHealthProbeOutcome struct {
+	tested    bool
+	succeeded bool
+}
 
 func channelHealthProbeTimeoutForPath(requestPath string) time.Duration {
 	if requestPath == "/v1/images/generations" {
@@ -69,70 +82,103 @@ func (channelHealthProbeHandler) Run(ctx context.Context, task *model.SystemTask
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
 		return
 	}
-	targets := service.ClaimDueChannelHealthProbes(20)
+	var claimCount atomic.Int32
+	results := make(chan channelHealthProbeOutcome, channelHealthProbeConcurrency)
+	var workers sync.WaitGroup
+	for range channelHealthProbeConcurrency {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for ctx.Err() == nil && claimCount.Add(1) <= channelHealthProbeRunLimit {
+				targets := service.ClaimDueChannelHealthProbes(1)
+				if len(targets) == 0 {
+					return
+				}
+				results <- runChannelHealthProbe(ctx, testUserID, targets[0])
+			}
+		}()
+	}
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
+
 	summary := channelTestSummary{}
-	for index, target := range targets {
-		if ctx.Err() != nil {
-			for _, pending := range targets[index:] {
-				service.ReleaseChannelHealthProbe(pending)
-			}
-			finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, ctx.Err())
-			return
-		}
-		channel, channelErr := model.CacheGetChannel(target.ChannelID)
-		if channelErr != nil || channel == nil {
-			if channelErr == nil {
-				channelErr = fmt.Errorf("channel #%d not found", target.ChannelID)
-			}
-			service.CompleteChannelHealthProbe(target, service.ChannelHealthProbeResult{
-				Class:  service.ChannelFailureTransient,
-				Reason: channelErr.Error(),
-			})
-			summary.Tested++
-			summary.Failed++
+	for result := range results {
+		if !result.tested {
 			continue
 		}
-		if channel.Status != common.ChannelStatusEnabled {
-			service.SuspendChannelHealth(channel)
-			continue
-		}
-		probeCtx, cancelProbe := context.WithTimeout(ctx, channelHealthProbeTimeoutForPath(target.RequestPath))
-		result := testChannel(probeCtx, channel, testUserID, target.ModelName, channelHealthProbeEndpointType(target.RequestPath), false)
-		cancelProbe()
-		if ctx.Err() != nil {
-			service.ReleaseChannelHealthProbe(target)
-			for _, pending := range targets[index+1:] {
-				service.ReleaseChannelHealthProbe(pending)
-			}
-			finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, ctx.Err())
-			return
-		}
-		if result.localErr != nil && result.newAPIError == nil {
-			service.ReleaseChannelHealthProbe(target)
-			summary.Tested++
-			summary.Failed++
-			continue
-		}
-		probeResult := service.ChannelHealthProbeResult{Success: result.localErr == nil && result.newAPIError == nil}
-		if probeResult.Success {
+		summary.Tested++
+		if result.succeeded {
 			summary.Succeeded++
 		} else {
 			summary.Failed++
-			probeResult.Class = service.ChannelFailureTransient
-			if result.localErr != nil {
-				probeResult.Reason = result.localErr.Error()
-			}
-			if result.newAPIError != nil {
-				decision := service.DecideChannelFailureForModel(result.context, result.newAPIError, target.ModelName, 1, true, false)
-				probeResult.Class = decision.Class
-				probeResult.Reason = decision.Reason
-				probeResult.StatusCode = result.newAPIError.StatusCode
-			}
 		}
-		service.CompleteChannelHealthProbe(target, probeResult)
-		summary.Tested++
+	}
+	if ctx.Err() != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, summary, ctx.Err())
+		return
 	}
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+}
+
+func runChannelHealthProbe(ctx context.Context, testUserID int, target service.ChannelHealthProbeTarget) channelHealthProbeOutcome {
+	if ctx.Err() != nil {
+		service.ReleaseChannelHealthProbe(target)
+		return channelHealthProbeOutcome{}
+	}
+	channel, err := model.CacheGetChannel(target.ChannelID)
+	if err != nil || channel == nil {
+		if err == nil {
+			err = fmt.Errorf("channel #%d not found", target.ChannelID)
+		}
+		service.CompleteChannelHealthProbe(target, service.ChannelHealthProbeResult{
+			Class:  service.ChannelFailureTransient,
+			Reason: err.Error(),
+		})
+		return channelHealthProbeOutcome{tested: true}
+	}
+	if channel.Status != common.ChannelStatusEnabled {
+		service.SuspendChannelHealth(channel)
+		return channelHealthProbeOutcome{}
+	}
+
+	probeCtx, cancelProbe := context.WithTimeout(ctx, channelHealthProbeTimeoutForPath(target.RequestPath))
+	result := testChannel(probeCtx, channel, testUserID, target.ModelName, channelHealthProbeEndpointType(target.RequestPath), false)
+	probeTimedOut := errors.Is(probeCtx.Err(), context.DeadlineExceeded)
+	cancelProbe()
+	if ctx.Err() != nil {
+		service.ReleaseChannelHealthProbe(target)
+		return channelHealthProbeOutcome{}
+	}
+	if result.localErr != nil && result.newAPIError == nil {
+		if probeTimedOut {
+			service.CompleteChannelHealthProbe(target, service.ChannelHealthProbeResult{
+				Class:      service.ChannelFailureUncertain,
+				Reason:     "active_probe_timeout",
+				StatusCode: http.StatusGatewayTimeout,
+			})
+		} else {
+			service.ReleaseChannelHealthProbe(target)
+		}
+		return channelHealthProbeOutcome{tested: true}
+	}
+
+	probeResult := service.ChannelHealthProbeResult{Success: result.localErr == nil && result.newAPIError == nil}
+	if !probeResult.Success {
+		probeResult.Class = service.ChannelFailureTransient
+		if result.localErr != nil {
+			probeResult.Reason = result.localErr.Error()
+		}
+		if result.newAPIError != nil {
+			decision := service.DecideChannelFailureForModel(result.context, result.newAPIError, target.ModelName, 1, true, false)
+			probeResult.Class = decision.Class
+			probeResult.Reason = decision.Reason
+			probeResult.StatusCode = result.newAPIError.StatusCode
+		}
+	}
+	service.CompleteChannelHealthProbe(target, probeResult)
+	return channelHealthProbeOutcome{tested: true, succeeded: probeResult.Success}
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and

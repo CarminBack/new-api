@@ -18,8 +18,8 @@ const (
 	ChannelFailureUncertain    ChannelFailureClass = "uncertain"
 	ChannelFailureRateLimited  ChannelFailureClass = "rate_limited"
 	ChannelFailurePoolAccount  ChannelFailureClass = "pool_account"
-	// ChannelFailureKeyCapability is retained as a stable log value for Sol
-	// capability misses. The failure belongs to a pooled account, not the key.
+	// ChannelFailureKeyCapability is retained as a stable log value for pooled
+	// account model capability misses. The failure is not channel-wide.
 	ChannelFailureKeyCapability ChannelFailureClass = "key_capability"
 )
 
@@ -101,10 +101,10 @@ func classifyChannelFailure(err *types.NewAPIError, message string, path string,
 			CountForCircuit: true,
 		}
 	}
-	if isSolKeyCapabilityFailure(err, message, path, modelName) {
+	if isPooledModelCapabilityFailure(err, message, path, modelName) {
 		return ChannelFailureDecision{
 			Class:           ChannelFailureKeyCapability,
-			Reason:          "sol_key_capability",
+			Reason:          "pooled_model_capability",
 			EvictAffinity:   true,
 			CountForCircuit: true,
 		}
@@ -295,22 +295,27 @@ func NormalizeDeterministicRequestStatus(err *types.NewAPIError, decision Channe
 	err.StatusCode = http.StatusBadRequest
 }
 
-func isSolKeyCapabilityFailure(err *types.NewAPIError, message string, path string, modelName string) bool {
-	if err == nil || err.StatusCode != http.StatusBadRequest || !strings.EqualFold(strings.TrimSpace(modelName), "gpt-5.6-sol") {
+func isPooledModelCapabilityFailure(err *types.NewAPIError, message string, path string, modelName string) bool {
+	if err == nil || err.StatusCode != http.StatusBadRequest || strings.TrimSpace(modelName) == "" {
 		return false
 	}
-	if !isSolCapabilityRetryPath(path) {
+	if !isModelCapabilityRetryPath(path) {
 		return false
 	}
-	unsupported := strings.Contains(message, "not supported") ||
+	accountScoped := strings.Contains(message, "account") || strings.Contains(message, "subscription")
+	modelScoped := strings.Contains(message, "model") || strings.Contains(message, "codex")
+	capabilityMiss := strings.Contains(message, "not supported") ||
 		strings.Contains(message, "unsupported") ||
 		strings.Contains(message, "does not support") ||
-		strings.Contains(message, "doesn't support")
-	accountOrCodex := strings.Contains(message, "chatgpt account") || strings.Contains(message, "codex")
-	return unsupported && accountOrCodex
+		strings.Contains(message, "doesn't support") ||
+		strings.Contains(message, "not available") ||
+		strings.Contains(message, "not enabled") ||
+		strings.Contains(message, "does not include") ||
+		(strings.Contains(message, "insufficient") && strings.Contains(message, "access"))
+	return accountScoped && modelScoped && capabilityMiss
 }
 
-func isSolCapabilityRetryPath(path string) bool {
+func isModelCapabilityRetryPath(path string) bool {
 	path = strings.TrimSuffix(path, "/")
 	switch path {
 	case "/v1/chat/completions", "/v1/completions", "/v1/responses":
