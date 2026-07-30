@@ -158,6 +158,15 @@ func GetChannelHealth(c *gin.Context) {
 		if !includeHealthy && !isAbnormal {
 			continue
 		}
+		if persistentKeys == nil {
+			persistentKeys = make([]channelPersistentKeyHealth, 0)
+		}
+		if adaptive.Routes == nil {
+			adaptive.Routes = make([]service.ChannelRouteHealthSnapshot, 0)
+		}
+		if adaptive.Keys == nil {
+			adaptive.Keys = make([]service.ChannelKeyHealthSnapshot, 0)
+		}
 		statusReason, statusTime := channelStatusMetadata(channel)
 		testModel := ""
 		if channel.TestModel != nil {

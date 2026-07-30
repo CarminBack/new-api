@@ -120,4 +120,19 @@ func TestGetChannelHealthReturnsAutoDisabledMetadataWithoutKeys(t *testing.T) {
 	require.Len(t, response.Data.Items, 1)
 	require.Equal(t, autoDisabled.Id, response.Data.Items[0].ChannelID)
 	require.Equal(t, "credential rejected", response.Data.Items[0].StatusReason)
+
+	var rawResponse map[string]interface{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &rawResponse))
+	data, ok := rawResponse["data"].(map[string]interface{})
+	require.True(t, ok)
+	items, ok := data["items"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, items, 1)
+	item, ok := items[0].(map[string]interface{})
+	require.True(t, ok)
+	require.IsType(t, []interface{}{}, item["persistent_keys"])
+	adaptive, ok := item["adaptive"].(map[string]interface{})
+	require.True(t, ok)
+	require.IsType(t, []interface{}{}, adaptive["routes"])
+	require.IsType(t, []interface{}{}, adaptive["keys"])
 }

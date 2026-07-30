@@ -131,10 +131,11 @@ function buildHealthRows(
     state = 'manual_disabled'
     persistent = true
   } else {
-    const openRoutes = item.adaptive.routes.filter((candidate) =>
+    const adaptiveRoutes = item.adaptive?.routes ?? []
+    const openRoutes = adaptiveRoutes.filter((candidate) =>
       ['circuit_open', 'half_open'].includes(candidate.state)
     )
-    const recoveringRoutes = item.adaptive.routes.filter(
+    const recoveringRoutes = adaptiveRoutes.filter(
       (candidate) => candidate.state === 'recovering'
     )
     if (openRoutes.length > 0) {
