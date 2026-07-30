@@ -128,6 +128,10 @@ func RestorePersistentChannelHealth() error {
 	}
 	now := channelCircuitNow()
 	for _, record := range records {
+		if !ChannelHealthProbeSupportsPath(record.RequestPath) {
+			_ = model.DeleteChannelHealthState(record.ScopeKey)
+			continue
+		}
 		channel, channelErr := model.CacheGetChannel(record.ChannelID)
 		if channelErr != nil || channel == nil {
 			continue
@@ -145,6 +149,9 @@ func RestorePersistentChannelHealth() error {
 }
 
 func restorePersistentChannelHealthRecord(record model.ChannelHealthState, channel *model.Channel, now time.Time) {
+	if !ChannelHealthProbeSupportsPath(record.RequestPath) {
+		return
+	}
 	identity := buildChannelHealthIdentity(channel, 0, record.ModelName, record.RequestPath, now)
 	due := restoredProbeDue(record, now)
 	probeType := ChannelHealthProbeType(record.ProbeType)
@@ -207,6 +214,10 @@ func RestorePersistentChannelHealthForChannel(channel *model.Channel) error {
 	fingerprint := channelConfigFingerprint(channel)
 	for _, record := range records {
 		if record.ChannelID != channel.Id {
+			continue
+		}
+		if !ChannelHealthProbeSupportsPath(record.RequestPath) {
+			_ = model.DeleteChannelHealthState(record.ScopeKey)
 			continue
 		}
 		if record.Fingerprint != fingerprint {

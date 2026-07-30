@@ -342,6 +342,9 @@ func RecoverChannelHealth(channel *model.Channel, request ChannelHealthRecoveryR
 		if strings.TrimSpace(request.ModelName) == "" || strings.TrimSpace(request.RequestPath) == "" {
 			return result, errors.New("model_name and request_path are required for route recovery")
 		}
+		if !ChannelHealthProbeSupportsPath(request.RequestPath) {
+			return result, errors.New("route does not support health probing")
+		}
 		identity := buildChannelHealthIdentity(channel, 0, request.ModelName, request.RequestPath, now)
 		shard := channelHealthShardFor(identity.RouteKey)
 		shard.Lock()

@@ -48,7 +48,6 @@ const (
 	channelHealthRateLimitConfirmFor     = 2 * time.Minute
 	channelHealthRecoverySuccessTarget   = 0
 	channelHealthProbeLease              = 20 * time.Second
-	channelHealthImageProbeLease         = 75 * time.Second
 
 	ginKeyChannelHealthReservation = "channel_health_reservation"
 )
@@ -497,17 +496,14 @@ func shouldScheduleChannelProbeLocked(state *channelRouteHealthState, now time.T
 func ChannelHealthProbeSupportsPath(requestPath string) bool {
 	switch requestPath {
 	case "/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/responses/compact",
-		"/v1/messages", "/v1/embeddings", "/v1/rerank", "/rerank", "/v1/images/generations", "/v1/images/edits":
+		"/v1/messages", "/v1/embeddings", "/v1/rerank", "/rerank":
 		return true
 	default:
 		return false
 	}
 }
 
-func channelHealthProbeLeaseForPath(requestPath string) time.Duration {
-	if requestPath == "/v1/images/generations" || requestPath == "/v1/images/edits" {
-		return channelHealthImageProbeLease
-	}
+func channelHealthProbeLeaseForPath(_ string) time.Duration {
 	return channelHealthProbeLease
 }
 
@@ -958,6 +954,9 @@ func allowChannelHealthAttempt(c *gin.Context, channel *model.Channel, channelID
 	if channelID <= 0 && channel == nil {
 		return true
 	}
+	if isImageGenerationPath(requestPath) {
+		return true
+	}
 	now := channelCircuitNow()
 	identity := buildChannelHealthIdentity(channel, channelID, modelName, requestPath, now)
 	if !hasHealthyChannelKey(channel, identity, now) {
@@ -1026,7 +1025,7 @@ func releaseRouteReservation(reservation channelHealthReservation) {
 }
 
 func recordChannelCircuitFailure(c *gin.Context, channelID int, modelName string, requestPath string, class ChannelFailureClass, reason string, statusCode int) {
-	if channelID <= 0 {
+	if channelID <= 0 || isImageGenerationPath(requestPath) {
 		return
 	}
 	now := channelCircuitNow()
@@ -1116,7 +1115,7 @@ func RecordChannelCircuitFailureDecision(c *gin.Context, channelID int, modelNam
 }
 
 func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string, requestPath string) {
-	if channelID <= 0 {
+	if channelID <= 0 || isImageGenerationPath(requestPath) {
 		return
 	}
 	now := channelCircuitNow()
@@ -1169,7 +1168,7 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 // ReleaseChannelCircuitProbe releases reserved capacity when setup fails before
 // an upstream attempt. Active health probes are managed separately.
 func ReleaseChannelCircuitProbe(c *gin.Context, channelID int, modelName string, requestPath string) {
-	if channelID <= 0 {
+	if channelID <= 0 || isImageGenerationPath(requestPath) {
 		return
 	}
 	reservation := currentHealthReservation(c, channelID, modelName, requestPath)
@@ -1194,7 +1193,7 @@ func ReleaseCurrentChannelHealthReservation(c *gin.Context) {
 }
 
 func ChannelHealthKeyExclusions(channel *model.Channel, modelName string, requestPath string, existing map[int]struct{}) map[int]struct{} {
-	if channel == nil {
+	if channel == nil || isImageGenerationPath(requestPath) {
 		return existing
 	}
 	identity := buildChannelHealthIdentity(channel, 0, modelName, requestPath, channelCircuitNow())
@@ -1241,6 +1240,10 @@ func HasDueChannelHealthProbe() bool {
 		shard := &memoryChannelHealth.ChannelShards[index]
 		shard.Lock()
 		for _, state := range shard.States {
+			_, requestPath := splitChannelRouteLabel(state.ProbeRouteLabel)
+			if !ChannelHealthProbeSupportsPath(requestPath) {
+				continue
+			}
 			dueAt := state.ProbeDue
 			if !state.OpenUntil.IsZero() {
 				dueAt = state.OpenUntil
@@ -1261,6 +1264,10 @@ func HasDueChannelHealthProbe() bool {
 		shard.Lock()
 		for _, state := range shard.Routes {
 			if _, blocked := blockedChannels[state.ChannelID]; blocked {
+				continue
+			}
+			_, requestPath := splitChannelRouteLabel(state.RouteLabel)
+			if !ChannelHealthProbeSupportsPath(requestPath) {
 				continue
 			}
 			due := (state.Suspect && !state.ProbeDue.After(now)) || (!state.OpenUntil.IsZero() && !state.OpenUntil.After(now))
@@ -1358,6 +1365,9 @@ func ClaimDueChannelHealthProbes(limit int) []ChannelHealthProbeTarget {
 				continue
 			}
 			modelName, requestPath := splitChannelRouteLabel(state.RouteLabel)
+			if !ChannelHealthProbeSupportsPath(requestPath) {
+				continue
+			}
 			identity := channelHealthIdentity{
 				ChannelID:       state.ChannelID,
 				Fingerprint:     state.Fingerprint,

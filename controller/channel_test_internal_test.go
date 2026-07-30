@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -32,11 +31,6 @@ func TestAutomaticChannelTestPromptsAreJSONSafe(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, strings.ToLower(string(body)), "json")
 	}
-}
-
-func TestImageEditHealthProbeUsesGenerationEndpoint(t *testing.T) {
-	require.Equal(t, time.Minute, channelHealthProbeTimeoutForPath("/v1/images/edits"))
-	require.Equal(t, string(constant.EndpointTypeImageGeneration), channelHealthProbeEndpointType("/v1/images/edits"))
 }
 
 func TestSettleTestQuotaUsesTieredBilling(t *testing.T) {
