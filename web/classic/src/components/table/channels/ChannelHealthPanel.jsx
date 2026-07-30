@@ -83,6 +83,11 @@ const buildRows = (item, includeHealthy) => {
   } else if (includeHealthy && item.channel_status === 2) {
     state = 'manual_disabled';
     persistent = true;
+  } else if (
+    item.adaptive?.channel_state === 'circuit_open' ||
+    item.adaptive?.channel_state === 'half_open'
+  ) {
+    state = item.adaptive.channel_state;
   } else {
     const openRoutes = (item.adaptive?.routes || []).filter((candidate) =>
       ['circuit_open', 'half_open'].includes(candidate.state),
@@ -104,6 +109,21 @@ const buildRows = (item, includeHealthy) => {
   }
 
   if (!state) return [];
+
+  let reason = item.status_reason;
+  let openUntil;
+  if (route) {
+    reason =
+      route.last_failure_reason ||
+      route.last_failure_class ||
+      item.status_reason;
+    openUntil = route.next_probe_at || route.open_until;
+  } else if (!persistent) {
+    reason = item.adaptive?.channel_failure_reason || item.status_reason;
+    openUntil =
+      item.adaptive?.channel_next_probe_at || item.adaptive?.channel_open_until;
+  }
+
   return [
     {
       id: `${item.channel_id}:${state}`,
@@ -112,12 +132,9 @@ const buildRows = (item, includeHealthy) => {
       state,
       modelName: route?.model_name,
       requestPath: route?.request_path,
-      reason:
-        route?.last_failure_reason ||
-        route?.last_failure_class ||
-        item.status_reason,
+      reason,
       statusCode: route?.last_failure_status_code,
-      openUntil: route?.next_probe_at || route?.open_until,
+      openUntil,
       lastChanged: route ? routeLastChanged(route) : item.status_time,
       recoverySuccesses: route?.recovery_successes,
       recoverySuccessTarget: route?.recovery_success_target,

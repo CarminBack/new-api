@@ -45,35 +45,15 @@ import {
   updateChannelStatus,
 } from '../api'
 import { CHANNEL_STATUS } from '../constants'
+import {
+  buildHealthRows,
+  type HealthDisplayState,
+  type HealthRow,
+} from '../lib/channel-health-rows'
 import type {
-  ChannelHealthItem,
   ChannelHealthRecoverParams,
   ChannelHealthResponse,
-  ChannelHealthState,
 } from '../types'
-
-type HealthDisplayState =
-  | ChannelHealthState
-  | 'auto_disabled'
-  | 'manual_disabled'
-  | 'key_auto_disabled'
-  | 'key_manual_disabled'
-
-type HealthRow = {
-  id: string
-  item: ChannelHealthItem
-  scope: 'channel' | 'route' | 'key'
-  state: HealthDisplayState
-  modelName?: string
-  requestPath?: string
-  reason?: string
-  statusCode?: number
-  openUntil?: number
-  lastChanged?: number
-  recoverySuccesses?: number
-  recoverySuccessTarget?: number
-  persistent?: boolean
-}
 
 const stateConfig: Record<
   HealthDisplayState,
@@ -100,78 +80,6 @@ const endpointTypeByPath: Record<string, string> = {
   '/v1/embeddings': 'embeddings',
   '/v1/rerank': 'jina-rerank',
   '/v1/images/generations': 'image-generation',
-}
-
-function routeLastChanged(
-  route: ChannelHealthItem['adaptive']['routes'][number]
-) {
-  return Math.max(
-    route.last_failure_at ?? 0,
-    route.last_success_at ?? 0,
-    route.last_recovery_at ?? 0,
-    route.last_touched ?? 0
-  )
-}
-
-function buildHealthRows(
-  item: ChannelHealthItem,
-  includeHealthy: boolean
-): HealthRow[] {
-  let state: HealthDisplayState | undefined
-  let route: ChannelHealthItem['adaptive']['routes'][number] | undefined
-  let persistent = false
-
-  if (item.channel_status === CHANNEL_STATUS.AUTO_DISABLED) {
-    state = 'auto_disabled'
-    persistent = true
-  } else if (
-    includeHealthy &&
-    item.channel_status === CHANNEL_STATUS.MANUAL_DISABLED
-  ) {
-    state = 'manual_disabled'
-    persistent = true
-  } else {
-    const adaptiveRoutes = item.adaptive?.routes ?? []
-    const openRoutes = adaptiveRoutes.filter((candidate) =>
-      ['circuit_open', 'half_open'].includes(candidate.state)
-    )
-    const recoveringRoutes = adaptiveRoutes.filter(
-      (candidate) => candidate.state === 'recovering'
-    )
-    if (openRoutes.length > 0) {
-      route =
-        openRoutes.find((candidate) => candidate.state === 'half_open') ??
-        openRoutes[0]
-      state = route.state
-    } else if (recoveringRoutes.length > 0) {
-      route = recoveringRoutes[0]
-      state = 'recovering'
-    } else if (includeHealthy) {
-      state = 'healthy'
-    }
-  }
-
-  if (!state) return []
-  return [
-    {
-      id: `${item.channel_id}:${state}`,
-      item,
-      scope: route ? 'route' : 'channel',
-      state,
-      modelName: route?.model_name,
-      requestPath: route?.request_path,
-      reason:
-        route?.last_failure_reason ||
-        route?.last_failure_class ||
-        item.status_reason,
-      statusCode: route?.last_failure_status_code,
-      openUntil: route?.next_probe_at || route?.open_until,
-      lastChanged: route ? routeLastChanged(route) : item.status_time,
-      recoverySuccesses: route?.recovery_successes,
-      recoverySuccessTarget: route?.recovery_success_target,
-      persistent,
-    },
-  ]
 }
 
 function formatDuration(seconds: number) {

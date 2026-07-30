@@ -265,7 +265,9 @@ export interface ChannelHealthItem {
     channel_id: number
     channel_state?: ChannelHealthState
     channel_open_until: number
+    channel_next_probe_at: number
     channel_probe_in_flight: boolean
+    channel_failure_reason?: string
     routes: ChannelRouteHealth[]
     keys: ChannelKeyHealth[]
   }
