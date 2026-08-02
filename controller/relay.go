@@ -259,7 +259,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			specificChannel,
 			allowUncertainRetry && !uncertainRetryUsed,
 		)
-		if decision.Retry && !service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class, channel.Id) {
+		if decision.Retry && shouldEnforceChannelRetryBudget(c.Request.URL.Path, retryParam.GetRetry()) &&
+			!service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class, channel.Id) {
 			decision.Retry = false
 			decision.Reason += ":global_retry_budget"
 		}
@@ -310,6 +311,15 @@ func relayRetriesRemaining(path string, retryIndex int, configuredRetries int) i
 		return 0
 	}
 	return remaining
+}
+
+func shouldEnforceChannelRetryBudget(requestPath string, retryIndex int) bool {
+	if service.IsImageGenerationPath(requestPath) {
+		return false
+	}
+	// Preserve one safe cross-channel fallback for each request. Additional
+	// retries remain protected by the shared budget.
+	return retryIndex > 0
 }
 
 func shouldExcludeChannelForRetry(class service.ChannelFailureClass) bool {
@@ -672,7 +682,8 @@ func RelayTask(c *gin.Context) {
 			if taskRetryCount >= 1 {
 				decision.Retry = false
 				decision.Reason += ":general_retry_limit"
-			} else if !service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class, channel.Id) {
+			} else if shouldEnforceChannelRetryBudget(c.Request.URL.Path, retryParam.GetRetry()) &&
+				!service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, decision.Class, channel.Id) {
 				decision.Retry = false
 				decision.Reason += ":global_retry_budget"
 			} else {

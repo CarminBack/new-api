@@ -78,6 +78,14 @@ func TestRelayRetriesRemainingCapsImageFallback(t *testing.T) {
 	require.Equal(t, 0, relayRetriesRemaining("/v1/images/edits", 0, 0))
 }
 
+func TestChannelRetryBudgetPreservesFirstFallbackAndImageFallback(t *testing.T) {
+	require.False(t, shouldEnforceChannelRetryBudget("/v1/chat/completions", 0))
+	require.True(t, shouldEnforceChannelRetryBudget("/v1/chat/completions", 1))
+	require.False(t, shouldEnforceChannelRetryBudget("/v1/images/generations", 0))
+	require.False(t, shouldEnforceChannelRetryBudget("/v1/images/generations", 1))
+	require.False(t, shouldEnforceChannelRetryBudget("/v1/images/edits", 1))
+}
+
 func TestPoolFailuresRetryOnAnotherChannel(t *testing.T) {
 	for _, class := range []service.ChannelFailureClass{
 		service.ChannelFailureTransient,

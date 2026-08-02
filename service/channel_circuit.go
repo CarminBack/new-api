@@ -1211,6 +1211,13 @@ func ChannelHealthKeyExclusions(channel *model.Channel, modelName string, reques
 	return merged
 }
 
+// IsImageGenerationPath reports whether a request targets an image generation
+// endpoint. Image fallback has its own strict safety gate and must not be
+// blocked by the shared text-channel retry budget.
+func IsImageGenerationPath(requestPath string) bool {
+	return isImageGenerationPath(requestPath)
+}
+
 type ChannelHealthProbeTarget struct {
 	ChannelID    int
 	ModelName    string
