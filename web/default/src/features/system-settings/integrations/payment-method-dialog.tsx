@@ -43,6 +43,7 @@ const createPaymentMethodDialogSchema = (t: (key: string) => string) =>
     type: z.string().min(1, t('Payment type key is required')),
     icon: z.string().optional(),
     min_topup: z.string().optional(),
+    quota_ratio: z.string().optional(),
   })
 
 type PaymentMethodDialogFormValues = z.infer<
@@ -56,6 +57,7 @@ export type PaymentMethodData = {
   type: string
   icon?: string
   min_topup?: string
+  quota_ratio?: string
   color?: string
 }
 
@@ -71,6 +73,7 @@ const PAYMENT_TYPE_ICON_NAMES: Record<string, string> = {
   stripe: 'SiStripe',
   waffo_pancake: 'LuCreditCard',
   wxpay: 'SiWechat',
+  usdt: 'LuCoins',
 }
 
 const getDefaultIconName = (type: string) => PAYMENT_TYPE_ICON_NAMES[type] ?? ''
@@ -109,6 +112,12 @@ export function PaymentMethodDialog({
       name: 'Waffo Pancake',
       value: 'waffo_pancake',
     },
+    {
+      iconName: 'LuCoins',
+      label: 'USDT (usdt)',
+      name: 'USDT',
+      value: 'usdt',
+    },
   ]
   const getPaymentTypeOption = (value: string) =>
     paymentTypeOptions.find((option) => option.value === value)
@@ -120,6 +129,7 @@ export function PaymentMethodDialog({
       type: '',
       icon: '',
       min_topup: '',
+      quota_ratio: '',
     },
   })
 
@@ -132,6 +142,7 @@ export function PaymentMethodDialog({
         type: editData.type,
         icon: editData.icon ?? getDefaultIconName(editData.type),
         min_topup: editData.min_topup ?? '',
+        quota_ratio: editData.quota_ratio ?? '',
       })
     } else {
       form.reset({
@@ -139,6 +150,7 @@ export function PaymentMethodDialog({
         type: '',
         icon: '',
         min_topup: '',
+        quota_ratio: '',
       })
     }
   }, [editData, form, open])
@@ -153,6 +165,9 @@ export function PaymentMethodDialog({
     }
     if (values.min_topup && values.min_topup.trim() !== '') {
       data.min_topup = values.min_topup
+    }
+    if (values.quota_ratio && values.quota_ratio.trim() !== '') {
+      data.quota_ratio = values.quota_ratio
     }
     onSave(data)
     form.reset()
@@ -305,6 +320,31 @@ export function PaymentMethodDialog({
                 </FormControl>
                 <FormDescription>
                   {t('Optional minimum recharge amount for this method.')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='quota_ratio'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Quota ratio (USD per unit)')}</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    step='0.0001'
+                    min={0}
+                    placeholder={t('e.g., 6.77 for USDT')}
+                    {...field}
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t(
+                    'Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.'
+                  )}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

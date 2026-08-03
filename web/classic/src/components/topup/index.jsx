@@ -152,16 +152,7 @@ const TopUp = () => {
   };
 
   const requestAmountByPayment = async (payment, value) => {
-    if (payment === 'stripe') {
-      return getStripeAmount(value);
-    }
-    if (payment === 'waffo_pancake') {
-      return getWaffoPancakeAmount(value);
-    }
-    if (typeof payment === 'string' && payment.startsWith('waffo:')) {
-      return getWaffoAmount(value);
-    }
-    return getAmount(value);
+    return getAmount(value, payment);
   };
 
   const topUp = async () => {
@@ -276,12 +267,12 @@ const TopUp = () => {
     if (payWay === 'stripe') {
       // Stripe 支付处理
       if (amount === 0) {
-        await getStripeAmount();
+        await getAmount(undefined, payWay);
       }
     } else {
       // 普通支付处理
       if (amount === 0) {
-        await getAmount();
+        await getAmount(undefined, payWay);
       }
     }
 
@@ -301,7 +292,7 @@ const TopUp = () => {
       } else {
         // 普通支付请求
         res = await API.post('/api/user/pay', {
-          amount: parseInt(topUpCount),
+          amount: parseFloat(topUpCount),
           payment_method: payWay,
         });
       }
@@ -703,7 +694,7 @@ const TopUp = () => {
           }
 
           // 初始化显示实付金额
-          getAmount(minTopUpValue);
+          getAmount(minTopUpValue, payMethods[0]?.type || '');
         } catch (e) {
           setPayMethods([]);
         }
@@ -804,14 +795,24 @@ const TopUp = () => {
     return amount + ' ' + t('元');
   };
 
-  const getAmount = async (value) => {
+  const getAmount = async (value, payment = payWay) => {
     if (value === undefined) {
       value = topUpCount;
+    }
+    if (payment === 'stripe') {
+      return getStripeAmount(value);
+    }
+    if (payment === 'waffo_pancake') {
+      return getWaffoPancakeAmount(value);
+    }
+    if (typeof payment === 'string' && payment.startsWith('waffo:')) {
+      return getWaffoAmount(value);
     }
     setAmountLoading(true);
     try {
       const res = await API.post('/api/user/amount', {
         amount: parseFloat(value),
+        payment_method: payment,
       });
       if (res !== undefined) {
         const { message, data } = res.data;

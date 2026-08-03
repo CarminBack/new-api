@@ -6,6 +6,8 @@ This file is the old version of the payment settings file. If you need to add ne
 package operation_setting
 
 import (
+	"strconv"
+
 	"github.com/QuantumNous/new-api/common"
 )
 
@@ -56,4 +58,26 @@ func ContainsPayMethod(method string) bool {
 		}
 	}
 	return false
+}
+
+// GetPayMethodQuotaRatio returns the amount of USD quota granted for one unit
+// of the selected payment method. Legacy methods fall back to the inverse of
+// Price, which preserves the existing "payment currency per USD" setting.
+func GetPayMethodQuotaRatio(method string) float64 {
+	legacyPrice := Price
+	if legacyPrice <= 0 {
+		legacyPrice = 1
+	}
+	legacyRatio := 1 / legacyPrice
+	for _, payMethod := range PayMethods {
+		if payMethod["type"] != method {
+			continue
+		}
+		ratio, err := strconv.ParseFloat(payMethod["quota_ratio"], 64)
+		if err == nil && ratio > 0 {
+			return ratio
+		}
+		break
+	}
+	return legacyRatio
 }

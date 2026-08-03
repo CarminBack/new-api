@@ -15,6 +15,7 @@ type TopUp struct {
 	Id              int     `json:"id"`
 	UserId          int     `json:"user_id" gorm:"index"`
 	Amount          int64   `json:"amount"`
+	QuotaAmount     float64 `json:"quota_amount,omitempty"`
 	Money           float64 `json:"money"`
 	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
@@ -355,7 +356,10 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 			quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(dQuotaPerUnit).IntPart())
 		} else {
-			dAmount := decimal.NewFromInt(topUp.Amount)
+			dAmount := decimal.NewFromFloat(topUp.QuotaAmount)
+			if topUp.QuotaAmount <= 0 {
+				dAmount = decimal.NewFromInt(topUp.Amount)
+			}
 			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 			quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
 		}

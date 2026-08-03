@@ -261,26 +261,28 @@ const RechargeCard = ({
                       value={topUpCount}
                       min={minTopUp}
                       max={999999999}
-                      step={1}
-                      precision={0}
+                      step={0.01}
+                      precision={2}
                       onChange={async (value) => {
-                        if (value && value >= 1) {
+                        if (
+                          value !== undefined &&
+                          value !== null &&
+                          value >= 0
+                        ) {
                           setTopUpCount(value);
                           setSelectedPreset(null);
                           await getAmount(value);
                         }
                       }}
                       onBlur={(e) => {
-                        const value = parseInt(e.target.value);
-                        if (!value || value < 1) {
-                          setTopUpCount(1);
-                          getAmount(1);
+                        const value = parseFloat(e.target.value);
+                        if (!Number.isFinite(value) || value < minTopUp) {
+                          setTopUpCount(minTopUp);
+                          getAmount(minTopUp);
                         }
                       }}
                       formatter={(value) => (value ? `${value}` : '')}
-                      parser={(value) =>
-                        value ? parseInt(value.replace(/[^\d]/g, '')) : 0
-                      }
+                      parser={(value) => (value ? parseFloat(value) : 0)}
                       extraText={
                         <Skeleton
                           loading={showAmountSkeleton}

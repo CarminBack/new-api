@@ -198,7 +198,7 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           return (
             <span className='flex items-center gap-1'>
               <Coins size={16} />
-              <Text>{amount}</Text>
+              <Text>{record.quota_amount ?? amount}</Text>
             </span>
           );
         },
@@ -227,14 +227,14 @@ const TopupHistoryModal = ({ visible, onCancel, t }) => {
           if (record.status === 'pending') {
             actions.push(
               <Button
-                key="complete"
+                key='complete'
                 size='small'
                 type='primary'
                 theme='outline'
                 onClick={() => confirmAdminComplete(record.trade_no)}
               >
                 {t('补单')}
-              </Button>
+              </Button>,
             );
           }
           return actions.length > 0 ? <>{actions}</> : null;

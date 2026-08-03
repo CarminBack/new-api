@@ -66,6 +66,47 @@ func insertTopUpForPaymentGuardTest(t *testing.T, tradeNo string, userID int, pa
 	require.NoError(t, topUp.Insert())
 }
 
+func TestManualCompleteTopUpUsesExactQuotaAmount(t *testing.T) {
+	truncateTables(t)
+
+	insertUserForPaymentGuardTest(t, 201, 0)
+	topUp := &TopUp{
+		UserId:          201,
+		Amount:          7,
+		QuotaAmount:     6.77,
+		Money:           1,
+		TradeNo:         "quota-amount-exact",
+		PaymentMethod:   "usdt",
+		PaymentProvider: PaymentProviderEpay,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      time.Now().Unix(),
+	}
+	require.NoError(t, topUp.Insert())
+
+	require.NoError(t, ManualCompleteTopUp(topUp.TradeNo, "127.0.0.1"))
+	assert.Equal(t, int(6.77*float64(common.QuotaPerUnit)), getUserQuotaForPaymentGuardTest(t, 201))
+}
+
+func TestManualCompleteTopUpFallsBackToLegacyAmount(t *testing.T) {
+	truncateTables(t)
+
+	insertUserForPaymentGuardTest(t, 202, 0)
+	topUp := &TopUp{
+		UserId:          202,
+		Amount:          7,
+		Money:           7,
+		TradeNo:         "quota-amount-legacy",
+		PaymentMethod:   "alipay",
+		PaymentProvider: PaymentProviderEpay,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      time.Now().Unix(),
+	}
+	require.NoError(t, topUp.Insert())
+
+	require.NoError(t, ManualCompleteTopUp(topUp.TradeNo, "127.0.0.1"))
+	assert.Equal(t, 7*int(common.QuotaPerUnit), getUserQuotaForPaymentGuardTest(t, 202))
+}
+
 func getTopUpStatusForPaymentGuardTest(t *testing.T, tradeNo string) string {
 	t.Helper()
 	topUp := GetTopUpByTradeNo(tradeNo)

@@ -48,6 +48,7 @@ const PAYMENT_TYPE_ICON_NAMES: Record<string, string> = {
   stripe: 'SiStripe',
   waffo_pancake: 'LuCreditCard',
   wxpay: 'SiWechat',
+  usdt: 'LuCoins',
 }
 
 function getDefaultIconName(type: string) {
@@ -98,6 +99,15 @@ export function PaymentMethodsVisualEditor({
       },
     },
     {
+      name: 'USDT',
+      template: {
+        icon: getDefaultIconName('usdt'),
+        name: 'USDT',
+        quota_ratio: '6.77',
+        type: 'usdt',
+      },
+    },
+    {
       name: t('Custom Epay method'),
       template: {
         icon: 'LuCreditCard',
@@ -129,6 +139,7 @@ export function PaymentMethodsVisualEditor({
         typeof item.type === 'string' &&
         (!('icon' in item) || typeof item.icon === 'string') &&
         (!('min_topup' in item) || typeof item.min_topup === 'string') &&
+        (!('quota_ratio' in item) || typeof item.quota_ratio === 'string') &&
         (!('color' in item) || typeof item.color === 'string')
     )
   }, [value])
@@ -360,6 +371,18 @@ export function PaymentMethodsVisualEditor({
                   ),
               },
               {
+                id: 'quota-ratio',
+                header: t('USD per unit'),
+                cell: (method) =>
+                  method.quota_ratio ? (
+                    <span className='font-mono text-sm'>
+                      {method.quota_ratio}
+                    </span>
+                  ) : (
+                    <span className='text-muted-foreground text-sm'>—</span>
+                  ),
+              },
+              {
                 id: 'actions',
                 header: t('Actions'),
                 className: 'text-right',
@@ -386,6 +409,7 @@ export function PaymentMethodsVisualEditor({
                 method.name,
                 method.icon,
                 method.min_topup,
+                method.quota_ratio,
                 method.color,
               ]
                 .filter(Boolean)
@@ -453,6 +477,14 @@ export function PaymentMethodsVisualEditor({
                           {t('Min Top-up:')}
                         </span>
                         <span className='font-mono'>{method.min_topup}</span>
+                      </div>
+                    )}
+                    {method.quota_ratio && (
+                      <div className='flex items-center gap-2'>
+                        <span className='text-muted-foreground min-w-20'>
+                          {t('USD per unit:')}
+                        </span>
+                        <span className='font-mono'>{method.quota_ratio}</span>
                       </div>
                     )}
                   </div>

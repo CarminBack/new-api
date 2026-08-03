@@ -121,7 +121,7 @@ export function RechargeFormCard({
 
   const handleAmountChange = (value: string) => {
     setLocalAmount(value)
-    const numValue = Number.parseInt(value) || 0
+    const numValue = Number.parseFloat(value) || 0
     if (numValue >= 0) {
       onTopupAmountChange(numValue)
     }
