@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -38,22 +40,24 @@ var (
 	channelAffinityUsageCacheStatsCache *cachex.HybridCache[ChannelAffinityUsageCacheCounters]
 
 	channelAffinityRegexCache sync.Map // map[string]*regexp.Regexp
+	channelAffinityWriteLocks [64]sync.Mutex
 )
 
 type channelAffinityMeta struct {
-	CacheKey       string
-	TTLSeconds     int
-	RuleName       string
-	SkipRetry      bool
-	ParamTemplate  map[string]interface{}
-	KeySourceType  string
-	KeySourceKey   string
-	KeySourcePath  string
-	KeyHint        string
-	KeyFingerprint string
-	UsingGroup     string
-	ModelName      string
-	RequestPath    string
+	CacheKey          string
+	TTLSeconds        int
+	RuleName          string
+	SkipRetry         bool
+	ParamTemplate     map[string]interface{}
+	KeySourceType     string
+	KeySourceKey      string
+	KeySourcePath     string
+	KeyHint           string
+	KeyFingerprint    string
+	UsingGroup        string
+	ModelName         string
+	RequestPath       string
+	OriginalChannelID int
 }
 
 type ChannelAffinityStatsContext struct {
@@ -616,6 +620,9 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			return 0, false
 		}
 		if found {
+			meta, _ := getChannelAffinityMeta(c)
+			meta.OriginalChannelID = channelID
+			setChannelAffinityContext(c, meta)
 			return channelID, true
 		}
 		return 0, false
@@ -723,6 +730,10 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 			channelID = successChannelID
 		}
 	}
+	meta, ok := getChannelAffinityMeta(c)
+	if !ok || !IsChannelPriorityAffinityReadyForID(channelID, meta.ModelName, meta.RequestPath) {
+		return
+	}
 	cacheKey, ttlSeconds, ok := getChannelAffinityContext(c)
 	if !ok {
 		return
@@ -734,9 +745,49 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 		ttlSeconds = 3600
 	}
 	cache := getChannelAffinityCache()
-	if err := cache.SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
-		common.SysError(fmt.Sprintf("channel affinity cache set failed: key=%s, err=%v", cacheKey, err))
+	lock := &channelAffinityWriteLocks[affinityWriteLockIndex(cacheKey)]
+	lock.Lock()
+	defer lock.Unlock()
+
+	effectiveGroup := meta.UsingGroup
+	if effectiveGroup == "auto" && c != nil {
+		effectiveGroup = common.GetContextKeyString(c, constant.ContextKeyAutoGroup)
 	}
+	incoming, incomingErr := model.CacheGetChannel(channelID)
+	if incomingErr != nil || incoming == nil {
+		return
+	}
+	for attempt := 0; attempt < 4; attempt++ {
+		current, found, err := cache.Get(cacheKey)
+		if err != nil {
+			common.SysError(fmt.Sprintf("channel affinity cache get before set failed: key=%s, err=%v", cacheKey, err))
+			return
+		}
+		if found && current != channelID {
+			currentChannel, currentErr := model.CacheGetChannel(current)
+			if currentErr == nil && currentChannel != nil && effectiveGroup != "" &&
+				model.IsChannelEnabledForGroupModelWithImageResolution(effectiveGroup, meta.ModelName, "", current) &&
+				currentChannel.GetPriority() > incoming.GetPriority() &&
+				IsChannelHealthCircuitClosed(currentChannel, meta.ModelName, meta.RequestPath) &&
+				meta.OriginalChannelID != current {
+				return
+			}
+		}
+		updated, err := cache.SetIfUnchangedWithTTL(cacheKey, current, found, channelID, time.Duration(ttlSeconds)*time.Second)
+		if err != nil {
+			common.SysError(fmt.Sprintf("channel affinity cache conditional set failed: key=%s, err=%v", cacheKey, err))
+			return
+		}
+		if updated {
+			return
+		}
+	}
+}
+
+func affinityWriteLockIndex(key string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return int(h.Sum32() % uint32(len(channelAffinityWriteLocks)))
 }
 
 type ChannelAffinityUsageCacheStats struct {

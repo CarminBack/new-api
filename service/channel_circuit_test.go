@@ -753,7 +753,7 @@ func TestLateInflightFailureDoesNotExtendOpenWindow(t *testing.T) {
 	require.Equal(t, openedUntil, routeStateForTest(37, "gpt-test", "/v1/responses").OpenUntil)
 }
 
-func TestActiveProbeIsSingleAndRecoversAtFullCapacity(t *testing.T) {
+func TestActiveProbeIsSingleAndStartsStagedRecovery(t *testing.T) {
 	now := setupChannelHealthTest(t)
 	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
 	*now = now.Add(channelHealthOpenFor + time.Millisecond)
@@ -764,8 +764,9 @@ func TestActiveProbeIsSingleAndRecoversAtFullCapacity(t *testing.T) {
 	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
 
 	state := routeStateForTest(37, "gpt-test", "/v1/responses")
-	require.Equal(t, channelHealthEstablishedCapacity, state.Capacity)
-	require.Zero(t, state.RecoveryTargetCapacity)
+	require.Equal(t, channelHealthMinCapacity, state.Capacity)
+	require.Equal(t, channelHealthEstablishedCapacity, state.RecoveryTargetCapacity)
+	require.Zero(t, state.RecoverySuccesses)
 	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 }
 
@@ -887,7 +888,7 @@ func TestUnsupportedPathNeverSchedulesActiveProbe(t *testing.T) {
 	require.True(t, AllowChannelCircuitAttempt(nil, 37, "video-model", "/v1/videos"))
 }
 
-func TestRecoveryUsesNormalBreakerThresholds(t *testing.T) {
+func TestRecoveryRequiresConsecutiveCanarySuccesses(t *testing.T) {
 	now := setupChannelHealthTest(t)
 	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
 	targets := ClaimDueChannelHealthProbes(1)
@@ -899,14 +900,40 @@ func TestRecoveryUsesNormalBreakerThresholds(t *testing.T) {
 	require.Len(t, targets, 1)
 	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < channelHealthRecoverySuccessTarget; i++ {
 		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 		require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-test", "/v1/responses"))
-		RecordChannelCircuitFailure(ctx, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+		RecordChannelCircuitSuccess(ctx, 37, "gpt-test", "/v1/responses")
 	}
 	require.True(t, routeStateForTest(37, "gpt-test", "/v1/responses").OpenUntil.IsZero())
 	require.False(t, HasDueChannelHealthProbe())
-	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
+	state = routeStateForTest(37, "gpt-test", "/v1/responses")
+	require.Equal(t, channelHealthRecoverySuccessTarget, state.RecoverySuccesses)
+	require.Equal(t, 2, state.Capacity)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-test", "/v1/responses"))
+	RecordChannelCircuitSuccess(ctx, 37, "gpt-test", "/v1/responses")
+	require.Equal(t, 4, routeStateForTest(37, "gpt-test", "/v1/responses").Capacity)
+}
+
+func TestRecoveryCanaryFailureReopensImmediately(t *testing.T) {
+	setupChannelHealthTest(t)
+	confirmLegacyRouteFailureForTest(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	now := channelCircuitNow()
+	now = now.Add(channelHealthOpenFor + time.Millisecond)
+	channelCircuitNow = func() time.Time { return now }
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-test", "/v1/responses"))
+	RecordChannelCircuitFailure(ctx, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
+
+	state := routeStateForTest(37, "gpt-test", "/v1/responses")
+	require.True(t, state.OpenUntil.After(now))
+	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-test", "/v1/responses"))
 }
 
 func TestChannelHealthSnapshotAndRouteRecovery(t *testing.T) {
@@ -959,7 +986,8 @@ func TestChannelHealthSnapshotAndRouteRecovery(t *testing.T) {
 	require.Equal(t, ChannelHealthProbeTypeRecovery, targets[0].ProbeType)
 	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
 	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-5.6-sol", "/v1/responses"))
-	require.Equal(t, channelHealthEstablishedCapacity, routeStateForTestWithChannel(channel, "gpt-5.6-sol", "/v1/responses").Capacity)
+	require.Equal(t, channelHealthMinCapacity, routeStateForTestWithChannel(channel, "gpt-5.6-sol", "/v1/responses").Capacity)
+	require.Equal(t, channelHealthEstablishedCapacity, routeStateForTestWithChannel(channel, "gpt-5.6-sol", "/v1/responses").RecoveryTargetCapacity)
 }
 
 func TestChannelHealthSnapshotAndKeyRecoveryDoNotExposeKey(t *testing.T) {

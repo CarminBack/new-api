@@ -153,3 +153,40 @@ func getRandomSatisfiedChannelWithCircuit(param *RetryParam, group string) (*mod
 		param.ExcludeChannel(channel)
 	}
 }
+
+// HighestRoutableChannelPriority returns the highest currently admissible
+// priority in one resolved group without reserving route capacity.
+func HighestRoutableChannelPriority(group string, param *RetryParam) (int64, bool, error) {
+	if param == nil {
+		return 0, false, nil
+	}
+	probe := &RetryParam{
+		Ctx:                 param.Ctx,
+		ModelName:           param.ModelName,
+		RequestPath:         param.RequestPath,
+		ImageResolutionTier: param.ImageResolutionTier,
+	}
+	for {
+		channel, err := model.GetRandomSatisfiedChannelWithExclusions(group, probe.ModelName, 0, probe.RequestPath, probe.ImageResolutionTier, probe.Attempted)
+		if err != nil || channel == nil {
+			return 0, false, err
+		}
+		if IsChannelHealthAvailable(channel, probe.ModelName, probe.RequestPath) {
+			return channel.GetPriority(), true, nil
+		}
+		probe.ExcludeChannel(channel)
+	}
+}
+
+func FirstRoutableChannelGroup(groups []string, param *RetryParam) (string, bool, error) {
+	for _, group := range groups {
+		_, found, err := HighestRoutableChannelPriority(group, param)
+		if err != nil {
+			return group, false, err
+		}
+		if found {
+			return group, true, nil
+		}
+	}
+	return "", false, nil
+}

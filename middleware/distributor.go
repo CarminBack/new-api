@@ -121,38 +121,41 @@ func Distribute() func(c *gin.Context) {
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					affinityUsable := false
 					affinityCircuitOpen := false
+					affinitySuperseded := false
+					affinityGroup := usingGroup
+					if usingGroup == "auto" {
+						userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+						if group, routable, _ := service.FirstRoutableChannelGroup(service.GetUserAutoGroup(userGroup), &service.RetryParam{
+							Ctx: c, ModelName: modelRequest.Model, RequestPath: c.Request.URL.Path,
+							ImageResolutionTier: modelRequest.ImageResolutionTier,
+						}); routable {
+							affinityGroup = group
+						}
+					}
 					preferred, err := model.CacheGetChannel(preferredChannelID)
-					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
+					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled && affinityGroup != "" &&
+						model.IsChannelEnabledForGroupModelWithImageResolution(affinityGroup, modelRequest.Model, modelRequest.ImageResolutionTier, preferred.Id) &&
 						channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
-						if usingGroup == "auto" {
-							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-							autoGroups := service.GetUserAutoGroup(userGroup)
-							for _, g := range autoGroups {
-								if model.IsChannelEnabledForGroupModelWithImageResolution(g, modelRequest.Model, modelRequest.ImageResolutionTier, preferred.Id) {
-									if !service.AllowChannelHealthAttempt(c, preferred, modelRequest.Model, c.Request.URL.Path) {
-										affinityCircuitOpen = true
-										break
-									}
-									selectGroup = g
-									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
-									channel = preferred
-									affinityUsable = true
-									service.MarkChannelAffinityUsed(c, g, preferred.Id)
-									break
-								}
-							}
-						} else if model.IsChannelEnabledForGroupModelWithImageResolution(usingGroup, modelRequest.Model, modelRequest.ImageResolutionTier, preferred.Id) {
+						highestPriority, routable, _ := service.HighestRoutableChannelPriority(affinityGroup, &service.RetryParam{
+							Ctx: c, ModelName: modelRequest.Model, RequestPath: c.Request.URL.Path,
+							ImageResolutionTier: modelRequest.ImageResolutionTier,
+						})
+						affinitySuperseded = routable && preferred.GetPriority() < highestPriority
+						if routable && preferred.GetPriority() >= highestPriority {
 							if service.AllowChannelHealthAttempt(c, preferred, modelRequest.Model, c.Request.URL.Path) {
 								channel = preferred
-								selectGroup = usingGroup
+								selectGroup = affinityGroup
+								if usingGroup == "auto" {
+									common.SetContextKey(c, constant.ContextKeyAutoGroup, affinityGroup)
+								}
 								affinityUsable = true
-								service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+								service.MarkChannelAffinityUsed(c, affinityGroup, preferred.Id)
 							} else {
 								affinityCircuitOpen = true
 							}
 						}
 					}
-					if !affinityUsable && (affinityCircuitOpen || !service.ShouldKeepChannelAffinityOnChannelDisabled()) {
+					if !affinityUsable && !affinitySuperseded && (affinityCircuitOpen || !service.ShouldKeepChannelAffinityOnChannelDisabled()) {
 						service.ClearCurrentChannelAffinityCache(c)
 					}
 				}

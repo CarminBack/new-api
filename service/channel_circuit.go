@@ -46,7 +46,7 @@ const (
 	channelHealthLatencyTimeoutRate      = 0.50
 	channelHealthLatencyMaxSuccessRate   = 0.30
 	channelHealthRateLimitConfirmFor     = 2 * time.Minute
-	channelHealthRecoverySuccessTarget   = 0
+	channelHealthRecoverySuccessTarget   = 3
 	channelHealthProbeLease              = 20 * time.Second
 
 	ginKeyChannelHealthReservation = "channel_health_reservation"
@@ -529,12 +529,73 @@ func startRouteRecoveryLocked(state *channelRouteHealthState, now time.Time) {
 	state.NoSuccessFailureAt = time.Time{}
 	state.FailuresSinceSuccess = 0
 	state.CapacityBeforeOpen = target
-	state.RecoveryTargetCapacity = 0
-	state.Capacity = target
+	state.RecoveryTargetCapacity = target
+	state.Capacity = channelHealthMinCapacity
 	state.RecoverySuccesses = 0
 	state.RecoveryFailures = 0
 	state.SuccessesSinceIncrease = 0
 	state.LastRecoveryAt = now
+}
+
+// IsChannelHealthAvailable performs a read-only admission check. Callers that
+// are selecting a candidate must still reserve capacity with
+// AllowChannelHealthAttempt before sending a request.
+func IsChannelHealthAvailable(channel *model.Channel, modelName string, requestPath string) bool {
+	if channel == nil || isImageGenerationPath(requestPath) {
+		return true
+	}
+	now := channelCircuitNow()
+	identity := buildChannelHealthIdentity(channel, 0, modelName, requestPath, now)
+	if !hasHealthyChannelKey(channel, identity, now) || !allowAggregateChannel(identity, now) {
+		return false
+	}
+	shard := channelHealthShardFor(identity.RouteKey)
+	shard.Lock()
+	defer shard.Unlock()
+	state := getRouteHealthStateLocked(shard, identity, now)
+	return state.OpenUntil.IsZero() && (state.Capacity <= 0 || state.InFlight < state.Capacity)
+}
+
+// IsChannelHealthCircuitClosed ignores transient capacity saturation and only
+// reports whether the channel remains eligible for affinity ownership.
+func IsChannelHealthCircuitClosed(channel *model.Channel, modelName string, requestPath string) bool {
+	if channel == nil || isImageGenerationPath(requestPath) {
+		return true
+	}
+	now := channelCircuitNow()
+	identity := buildChannelHealthIdentity(channel, 0, modelName, requestPath, now)
+	if !hasNonOpenChannelKey(channel, identity, now) || !allowAggregateChannel(identity, now) {
+		return false
+	}
+	shard := channelHealthShardFor(identity.RouteKey)
+	shard.Lock()
+	defer shard.Unlock()
+	state := getRouteHealthStateLocked(shard, identity, now)
+	return state.OpenUntil.IsZero()
+}
+
+// IsChannelPriorityAffinityReady reports whether a channel may be written into
+// long-lived affinity. A recovering route can serve bounded canaries but must
+// not claim all affinity keys until recovery is confirmed.
+func IsChannelPriorityAffinityReady(channel *model.Channel, modelName string, requestPath string) bool {
+	if !IsChannelHealthAvailable(channel, modelName, requestPath) {
+		return false
+	}
+	if channel == nil || isImageGenerationPath(requestPath) {
+		return true
+	}
+	now := channelCircuitNow()
+	identity := buildChannelHealthIdentity(channel, 0, modelName, requestPath, now)
+	shard := channelHealthShardFor(identity.RouteKey)
+	shard.Lock()
+	defer shard.Unlock()
+	state := getRouteHealthStateLocked(shard, identity, now)
+	return state.RecoveryTargetCapacity == 0 || state.RecoverySuccesses >= channelHealthRecoverySuccessTarget
+}
+
+func IsChannelPriorityAffinityReadyForID(channelID int, modelName string, requestPath string) bool {
+	channel, err := model.CacheGetChannel(channelID)
+	return err == nil && channel != nil && IsChannelPriorityAffinityReady(channel, modelName, requestPath)
 }
 
 func increaseRouteCapacityLocked(state *channelRouteHealthState) {
@@ -607,6 +668,31 @@ func hasHealthyChannelKey(channel *model.Channel, identity channelHealthIdentity
 			continue
 		}
 		if _, unhealthy := excluded[index]; !unhealthy {
+			return true
+		}
+	}
+	return false
+}
+
+func hasNonOpenChannelKey(channel *model.Channel, identity channelHealthIdentity, now time.Time) bool {
+	if channel == nil {
+		return true
+	}
+	memoryChannelHealth.Keys.RLock()
+	defer memoryChannelHealth.Keys.RUnlock()
+	for index, key := range identity.Keys {
+		status := common.ChannelStatusEnabled
+		if channel.ChannelInfo.IsMultiKey && channel.ChannelInfo.MultiKeyStatusList != nil {
+			if configured, ok := channel.ChannelInfo.MultiKeyStatusList[index]; ok {
+				status = configured
+			}
+		}
+		if status != common.ChannelStatusEnabled {
+			continue
+		}
+		global, globalFound := memoryChannelHealth.Keys.States[keyHealthGlobalKey(identity, key)]
+		route, routeFound := memoryChannelHealth.Keys.States[keyHealthRouteKey(identity, key)]
+		if (!globalFound || !now.Before(global.OpenUntil)) && (!routeFound || !now.Before(route.OpenUntil)) {
 			return true
 		}
 	}
@@ -1079,6 +1165,18 @@ func recordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 		}
 		state.FailuresSinceSuccess++
 	}
+	if state.RecoveryTargetCapacity > 0 && aggregateEligible {
+		state.CapacityBeforeOpen = state.RecoveryTargetCapacity
+		state.Suspect = false
+		state.OpenUntil = now.Add(channelHealthOpenFor)
+		state.ProbeDue = state.OpenUntil
+		state.ProbeType = ChannelHealthProbeTypeRecovery
+		state.RecoveryTargetCapacity = 0
+		state.RecoverySuccesses = 0
+		state.RecoveryFailures++
+		persistRouteHealthStateLocked(identity, state, persistentChannelHealthOpen)
+		opened = true
+	}
 	if !opened && (class != ChannelFailureChannelFatal || selectedKey == "") && shouldScheduleChannelProbeLocked(state, now, class) {
 		state.Suspect = true
 		state.ProbeDue = now
@@ -1150,7 +1248,24 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 		state.Suspect = false
 		state.ProbeDue = time.Time{}
 	}
-	if !recovered {
+	if state.RecoveryTargetCapacity > 0 && !recovered {
+		state.RecoverySuccesses++
+		state.RecoveryFailures = 0
+		if state.RecoverySuccesses >= channelHealthRecoverySuccessTarget && state.Capacity < state.RecoveryTargetCapacity {
+			nextCapacity := state.Capacity * 2
+			if nextCapacity < 2 {
+				nextCapacity = 2
+			}
+			if nextCapacity > state.RecoveryTargetCapacity {
+				nextCapacity = state.RecoveryTargetCapacity
+			}
+			state.Capacity = nextCapacity
+		}
+		if state.Capacity >= state.RecoveryTargetCapacity {
+			state.RecoveryTargetCapacity = 0
+			state.RecoverySuccesses = 0
+		}
+	} else if !recovered {
 		increaseRouteCapacityLocked(state)
 	}
 	state.LastTouched = now
