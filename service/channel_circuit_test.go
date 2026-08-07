@@ -572,6 +572,129 @@ func TestPersistentRouteProbeAndOpenStateSurviveRestart(t *testing.T) {
 	require.Equal(t, ChannelHealthProbeTypeRecovery, manualRecovery[0].ProbeType)
 }
 
+func TestRecoveryProgressSurvivesRestart(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	originalDB := model.DB
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	originalDatabaseType := common.MainDatabaseType()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelHealthState{}))
+	model.DB = db
+	common.MemoryCacheEnabled = false
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	channelHealthPersistenceEnabled = true
+	t.Cleanup(func() {
+		model.DB = originalDB
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+		common.SetMainDatabaseType(originalDatabaseType)
+	})
+
+	channel := &model.Channel{
+		Id: 38, Name: "recovery-progress-test", Type: constant.ChannelTypeOpenAI, Key: "test-key",
+		Models: "gpt-test", Status: common.ChannelStatusEnabled, CreatedTime: now.Add(-time.Hour).Unix(),
+	}
+	require.NoError(t, db.Create(channel).Error)
+	identity := buildChannelHealthIdentity(channel, 0, "gpt-test", "/v1/responses", *now)
+
+	scheduleRouteProbeForTest(t, channel, 0, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureTransient, Reason: "upstream 503"})
+	*now = now.Add(channelHealthOpenFor + time.Millisecond)
+	targets = ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	require.Equal(t, ChannelHealthProbeTypeRecovery, targets[0].ProbeType)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
+
+	var record model.ChannelHealthState
+	require.NoError(t, db.First(&record, "scope_key = ?", identity.RouteKey).Error)
+	require.Equal(t, persistentChannelHealthRecoveryPending, record.State)
+	require.Equal(t, channelHealthEstablishedCapacity, record.RecoveryTargetCapacity)
+	require.Equal(t, channelHealthMinCapacity, record.RecoveryCapacity)
+	require.Zero(t, record.RecoverySuccesses)
+	require.Equal(t, now.Unix(), record.RecoveryStartedAt)
+
+	resetMemoryChannelHealth()
+	require.NoError(t, RestorePersistentChannelHealth())
+	state := routeStateForTestWithChannel(channel, "gpt-test", "/v1/responses")
+	require.True(t, state.OpenUntil.IsZero())
+	require.False(t, state.Suspect)
+	require.Equal(t, channelHealthEstablishedCapacity, state.RecoveryTargetCapacity)
+	require.Equal(t, channelHealthMinCapacity, state.Capacity)
+	require.False(t, IsChannelPriorityAffinityReady(channel, "gpt-test", "/v1/responses"))
+
+	for range channelHealthRecoverySuccessTarget {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-test", "/v1/responses"))
+		RecordChannelCircuitSuccess(ctx, channel.Id, "gpt-test", "/v1/responses")
+	}
+	require.NoError(t, db.First(&record, "scope_key = ?", identity.RouteKey).Error)
+	require.Equal(t, 2, record.RecoveryCapacity)
+	require.Equal(t, channelHealthRecoverySuccessTarget, record.RecoverySuccesses)
+
+	resetMemoryChannelHealth()
+	require.NoError(t, RestorePersistentChannelHealth())
+	state = routeStateForTestWithChannel(channel, "gpt-test", "/v1/responses")
+	require.Equal(t, 2, state.Capacity)
+	require.Equal(t, channelHealthRecoverySuccessTarget, state.RecoverySuccesses)
+	require.True(t, IsChannelPriorityAffinityReady(channel, "gpt-test", "/v1/responses"))
+
+	shard := channelHealthShardFor(identity.RouteKey)
+	shard.Lock()
+	statePtr := shard.Routes[identity.RouteKey]
+	statePtr.RecoveryTargetCapacity = 4
+	statePtr.CapacityBeforeOpen = 4
+	shard.Unlock()
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-test", "/v1/responses"))
+	RecordChannelCircuitSuccess(ctx, channel.Id, "gpt-test", "/v1/responses")
+	require.ErrorIs(t, db.First(&record, "scope_key = ?", identity.RouteKey).Error, gorm.ErrRecordNotFound)
+}
+
+func TestRecoveryFailureReplacesPersistentProgressWithOpenState(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	originalDB := model.DB
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	originalDatabaseType := common.MainDatabaseType()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelHealthState{}))
+	model.DB = db
+	common.MemoryCacheEnabled = false
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	channelHealthPersistenceEnabled = true
+	t.Cleanup(func() {
+		model.DB = originalDB
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+		common.SetMainDatabaseType(originalDatabaseType)
+	})
+
+	channel := &model.Channel{
+		Id: 39, Name: "recovery-failure-test", Type: constant.ChannelTypeOpenAI, Key: "test-key",
+		Models: "gpt-test", Status: common.ChannelStatusEnabled, CreatedTime: now.Add(-time.Hour).Unix(),
+	}
+	require.NoError(t, db.Create(channel).Error)
+	identity := buildChannelHealthIdentity(channel, 0, "gpt-test", "/v1/responses", *now)
+	require.NoError(t, model.SaveChannelHealthState(&model.ChannelHealthState{
+		ScopeKey: identity.RouteKey, ChannelID: channel.Id, Fingerprint: identity.Fingerprint,
+		Scope: string(ChannelHealthProbeScopeRoute), ModelName: "gpt-test", RequestPath: "/v1/responses",
+		State: persistentChannelHealthRecoveryPending, RecoveryTargetCapacity: channelHealthEstablishedCapacity,
+		RecoveryCapacity: 2, RecoverySuccesses: channelHealthRecoverySuccessTarget, RecoveryStartedAt: now.Unix(),
+	}))
+	require.NoError(t, RestorePersistentChannelHealth())
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelHealthAttempt(ctx, channel, "gpt-test", "/v1/responses"))
+	RecordChannelCircuitFailure(ctx, channel.Id, "gpt-test", "/v1/responses", ChannelFailureTransient)
+
+	var record model.ChannelHealthState
+	require.NoError(t, db.First(&record, "scope_key = ?", identity.RouteKey).Error)
+	require.Equal(t, persistentChannelHealthOpen, record.State)
+	require.Zero(t, record.RecoveryTargetCapacity)
+	require.Greater(t, record.NextProbeAt, now.Unix())
+}
+
 func TestManualRecoveryWithoutObservedTrafficUsesConfiguredModel(t *testing.T) {
 	setupChannelHealthTest(t)
 	testModel := "gpt-5.6-terra"

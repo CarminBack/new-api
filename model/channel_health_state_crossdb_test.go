@@ -31,17 +31,21 @@ func TestChannelHealthStateCrossDatabase(t *testing.T) {
 			require.NoError(t, db.AutoMigrate(&ChannelHealthState{}))
 
 			state := &ChannelHealthState{
-				ScopeKey:    "cross-database-health-state",
-				ChannelID:   29,
-				Fingerprint: "cross-database-fingerprint",
-				Scope:       "route",
-				ModelName:   "gpt-test",
-				RequestPath: "/v1/responses",
-				State:       "probing",
-				NextProbeAt: 100,
-				Revision:    2,
-				ProbeID:     7,
-				ProbeType:   "initial",
+				ScopeKey:               "cross-database-health-state",
+				ChannelID:              29,
+				Fingerprint:            "cross-database-fingerprint",
+				Scope:                  "route",
+				ModelName:              "gpt-test",
+				RequestPath:            "/v1/responses",
+				State:                  "probing",
+				NextProbeAt:            100,
+				Revision:               2,
+				ProbeID:                7,
+				ProbeType:              "initial",
+				RecoveryTargetCapacity: 128,
+				RecoveryCapacity:       2,
+				RecoverySuccesses:      3,
+				RecoveryStartedAt:      90,
 			}
 			require.NoError(t, db.Save(state).Error)
 			require.NoError(t, db.Model(&ChannelHealthState{}).
@@ -53,6 +57,10 @@ func TestChannelHealthStateCrossDatabase(t *testing.T) {
 			require.Equal(t, "open", saved.State)
 			require.Equal(t, int64(200), saved.NextProbeAt)
 			require.Equal(t, uint64(3), saved.Revision)
+			require.Equal(t, 128, saved.RecoveryTargetCapacity)
+			require.Equal(t, 2, saved.RecoveryCapacity)
+			require.Equal(t, 3, saved.RecoverySuccesses)
+			require.Equal(t, int64(90), saved.RecoveryStartedAt)
 			require.NoError(t, db.Where("scope_key = ?", state.ScopeKey).Delete(&ChannelHealthState{}).Error)
 		})
 	}

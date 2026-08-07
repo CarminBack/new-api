@@ -36,20 +36,24 @@ func persistRouteHealthStateLocked(identity channelHealthIdentity, state *channe
 	}
 	modelName, requestPath := splitChannelRouteLabel(state.RouteLabel)
 	record := &model.ChannelHealthState{
-		ScopeKey:      identity.RouteKey,
-		ChannelID:     state.ChannelID,
-		Fingerprint:   state.Fingerprint,
-		Scope:         string(ChannelHealthProbeScopeRoute),
-		ModelName:     modelName,
-		RequestPath:   requestPath,
-		State:         persistentState,
-		Reason:        state.LastFailureReason,
-		OpenedAt:      persistentTime(state.LastFailureAt),
-		NextProbeAt:   persistentTime(nextProbeAt),
-		Revision:      state.ProbeGeneration,
-		ProbeID:       state.ProbeID,
-		ProbeType:     string(state.ProbeType),
-		ProbeLeaseEnd: persistentTime(state.ProbeLeaseUntil),
+		ScopeKey:               identity.RouteKey,
+		ChannelID:              state.ChannelID,
+		Fingerprint:            state.Fingerprint,
+		Scope:                  string(ChannelHealthProbeScopeRoute),
+		ModelName:              modelName,
+		RequestPath:            requestPath,
+		State:                  persistentState,
+		Reason:                 state.LastFailureReason,
+		OpenedAt:               persistentTime(state.LastFailureAt),
+		NextProbeAt:            persistentTime(nextProbeAt),
+		Revision:               state.ProbeGeneration,
+		ProbeID:                state.ProbeID,
+		ProbeType:              string(state.ProbeType),
+		ProbeLeaseEnd:          persistentTime(state.ProbeLeaseUntil),
+		RecoveryTargetCapacity: state.RecoveryTargetCapacity,
+		RecoveryCapacity:       state.Capacity,
+		RecoverySuccesses:      state.RecoverySuccesses,
+		RecoveryStartedAt:      persistentTime(state.LastRecoveryAt),
 	}
 	if err := model.SaveChannelHealthState(record); err != nil {
 		logger.LogError(nil, fmt.Sprintf("persist route health state failed: channel #%d: %v", state.ChannelID, err))
@@ -153,12 +157,12 @@ func restorePersistentChannelHealthRecord(record model.ChannelHealthState, chann
 		return
 	}
 	identity := buildChannelHealthIdentity(channel, 0, record.ModelName, record.RequestPath, now)
-	due := restoredProbeDue(record, now)
 	probeType := ChannelHealthProbeType(record.ProbeType)
 	if probeType == "" {
 		probeType = ChannelHealthProbeTypeInitial
 	}
 	if record.Scope == string(ChannelHealthProbeScopeChannel) {
+		due := restoredProbeDue(record, now)
 		shard := channelAggregateHealthShardFor(identity.ChannelKey)
 		shard.Lock()
 		state := getAggregateHealthStateLocked(shard, identity, now)
@@ -185,6 +189,52 @@ func restorePersistentChannelHealthRecord(record model.ChannelHealthState, chann
 	shard := channelHealthShardFor(identity.RouteKey)
 	shard.Lock()
 	state := getRouteHealthStateLocked(shard, identity, now)
+	if record.State == persistentChannelHealthRecoveryPending && record.NextProbeAt <= 0 {
+		target := record.RecoveryTargetCapacity
+		if target < channelHealthMinCapacity {
+			target = identity.InitialCapacity
+		}
+		if target > channelHealthMaxCapacity {
+			target = channelHealthMaxCapacity
+		}
+		capacity := record.RecoveryCapacity
+		if capacity < channelHealthMinCapacity {
+			capacity = channelHealthMinCapacity
+		}
+		if capacity > target {
+			capacity = target
+		}
+		recoverySuccesses := record.RecoverySuccesses
+		if recoverySuccesses < 0 {
+			recoverySuccesses = 0
+		}
+		lastRecoveryAt := now
+		if record.RecoveryStartedAt > 0 {
+			lastRecoveryAt = time.Unix(record.RecoveryStartedAt, 0)
+		}
+		state.OpenUntil = time.Time{}
+		state.Suspect = false
+		state.ProbeDue = time.Time{}
+		state.ProbeInFlight = false
+		state.ProbeID = 0
+		state.ProbeType = ""
+		state.ProbeLeaseUntil = time.Time{}
+		state.ProbeGeneration = record.Revision
+		state.CapacityBeforeOpen = target
+		state.RecoveryTargetCapacity = target
+		state.Capacity = capacity
+		state.RecoverySuccesses = recoverySuccesses
+		state.RecoveryFailures = 0
+		state.LastRecoveryAt = lastRecoveryAt
+		state.LastFailureReason = record.Reason
+		if record.OpenedAt > 0 {
+			state.LastFailureAt = time.Unix(record.OpenedAt, 0)
+		}
+		state.LastTouched = now
+		shard.Unlock()
+		return
+	}
+	due := restoredProbeDue(record, now)
 	state.ProbeGeneration = record.Revision
 	state.ProbeType = probeType
 	state.LastFailureReason = record.Reason

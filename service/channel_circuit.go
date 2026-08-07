@@ -967,13 +967,22 @@ func recoverChannelRoutesAfterProbe(channelID int, fingerprint string, now time.
 	for index := range memoryChannelHealth.RouteShards {
 		shard := &memoryChannelHealth.RouteShards[index]
 		shard.Lock()
-		for _, state := range shard.Routes {
+		for routeKey, state := range shard.Routes {
 			if state.ChannelID != channelID || state.Fingerprint != fingerprint {
 				continue
 			}
 			if !state.OpenUntil.IsZero() || state.Suspect || state.ProbeInFlight {
 				state.ProbeGeneration++
 				startRouteRecoveryLocked(state, now)
+				identity := channelHealthIdentity{
+					ChannelID:       state.ChannelID,
+					Fingerprint:     state.Fingerprint,
+					ChannelKey:      fmt.Sprintf("%d:%s:all", state.ChannelID, state.Fingerprint),
+					RouteKey:        routeKey,
+					RouteLabel:      state.RouteLabel,
+					InitialCapacity: state.InitialCapacity,
+				}
+				persistRouteHealthStateLocked(identity, state, persistentChannelHealthRecoveryPending)
 			}
 		}
 		shard.Unlock()
@@ -1226,6 +1235,7 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 	shard.Lock()
 	state := getRouteHealthStateLocked(shard, identity, now)
 	hadPersistentState := state.Suspect || state.ProbeInFlight || !state.OpenUntil.IsZero()
+	wasRecovering := state.RecoveryTargetCapacity > 0
 	if state.InFlight > 0 {
 		state.InFlight--
 	}
@@ -1269,7 +1279,9 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 		increaseRouteCapacityLocked(state)
 	}
 	state.LastTouched = now
-	if hadPersistentState {
+	if state.RecoveryTargetCapacity > 0 {
+		persistRouteHealthStateLocked(identity, state, persistentChannelHealthRecoveryPending)
+	} else if hadPersistentState || wasRecovering {
 		deletePersistentHealthState(identity.RouteKey)
 	}
 	shard.Unlock()
@@ -1602,7 +1614,7 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 			aggregate.ProbeTriggerClass = ""
 			aggregate.LastSuccessAt = now
 			recoverChannelRoutesAfterProbe(target.ChannelID, target.identity.Fingerprint, now)
-			deletePersistentChannelHealthStates(target.ChannelID)
+			deletePersistentHealthState(target.identity.ChannelKey)
 			aggregateShard.Unlock()
 			logger.LogInfo(context.Background(), fmt.Sprintf("adaptive channel probe succeeded: channel #%d model %s path %s", target.ChannelID, target.ModelName, target.RequestPath))
 			return
@@ -1675,7 +1687,11 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 		if target.wasOpen || !state.OpenUntil.IsZero() {
 			startRouteRecoveryLocked(state, now)
 		}
-		deletePersistentHealthState(target.identity.RouteKey)
+		if state.RecoveryTargetCapacity > 0 {
+			persistRouteHealthStateLocked(target.identity, state, persistentChannelHealthRecoveryPending)
+		} else {
+			deletePersistentHealthState(target.identity.RouteKey)
+		}
 		shard.Unlock()
 		aggregateShard.Unlock()
 		markAggregateRouteHealthy(target.identity)
