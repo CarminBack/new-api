@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -89,6 +91,25 @@ func AddRedemption(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 		return
 	}
+	redemption.CodeType = strings.TrimSpace(redemption.CodeType)
+	if redemption.CodeType == "" {
+		redemption.CodeType = model.RedemptionTypeTopup
+	}
+	if redemption.CodeType != model.RedemptionTypeTopup && redemption.CodeType != model.RedemptionTypeInvitation {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	if redemption.CodeType == model.RedemptionTypeInvitation {
+		redemption.Group = strings.TrimSpace(redemption.Group)
+		if redemption.Group == "" || !ratio_setting.ContainsGroupRatio(redemption.Group) {
+			common.ApiErrorI18n(c, i18n.MsgRedemptionInvitationGroupInvalid)
+			return
+		}
+		redemption.Quota = 0
+	} else {
+		redemption.Group = ""
+		redemption.MultiUse = false
+	}
 	var keys []string
 	for i := 0; i < redemption.Count; i++ {
 		key := common.GetUUID()
@@ -99,6 +120,9 @@ func AddRedemption(c *gin.Context) {
 			CreatedTime: common.GetTimestamp(),
 			Quota:       redemption.Quota,
 			ExpiredTime: redemption.ExpiredTime,
+			CodeType:    redemption.CodeType,
+			Group:       redemption.Group,
+			MultiUse:    redemption.MultiUse,
 		}
 		err = cleanRedemption.Insert()
 		if err != nil {
@@ -116,6 +140,8 @@ func AddRedemption(c *gin.Context) {
 		"name":  redemption.Name,
 		"count": redemption.Count,
 		"quota": logger.LogQuota(redemption.Quota),
+		"type":  redemption.CodeType,
+		"group": redemption.Group,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

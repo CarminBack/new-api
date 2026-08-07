@@ -5277,6 +5277,27 @@
     "In-flight / Capacity": "En cours / Capacité",
     "Isolated Keys": "Clés isolées",
     "Confirm Recovery": "Confirmer le rétablissement",
-    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "Cela efface uniquement l’état de santé local sélectionné et reprend avec une capacité de démarrage progressif. Les restrictions du compte en amont ne sont pas supprimées."
+    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "Cela efface uniquement l’état de santé local sélectionné et reprend avec une capacité de démarrage progressif. Les restrictions du compte en amont ne sont pas supprimées.",
+    "Code Type": "Type de code",
+    "Top-up code": "Code de recharge",
+    "Invitation code": "Code d'invitation",
+    "Invitation": "Invitation",
+    "Target Group": "Groupe cible",
+    "Please select a target group": "Veuillez sélectionner un groupe cible",
+    "Select a target group": "Sélectionner un groupe cible",
+    "Single user": "Utilisateur unique",
+    "Multiple users": "Plusieurs utilisateurs",
+    "Usage Mode": "Mode d'utilisation",
+    "Invitation codes assign the selected group during registration.": "Les codes d'invitation attribuent le groupe sélectionné lors de l'inscription.",
+    "New users registered with this code join this group.": "Les nouveaux utilisateurs inscrits avec ce code rejoignent ce groupe.",
+    "The code becomes unavailable after one successful registration.": "Le code devient indisponible après une inscription réussie.",
+    "The link remains available until disabled, deleted, or expired.": "Le lien reste disponible jusqu'à sa désactivation, sa suppression ou son expiration.",
+    "Registration Link": "Lien d'inscription",
+    "Copy registration link": "Copier le lien d'inscription",
+    "Type / Group": "Type / Groupe",
+    "Optional invitation code": "Code d'invitation facultatif",
+    "Registrations": "Inscriptions",
+    "{{count}} · {{mode}}": "{{count}} · {{mode}}",
+    "{{mode}} · {{count}} registered": "{{mode}} · {{count}} inscription(s)"
   }
 }

@@ -5277,6 +5277,27 @@
     "In-flight / Capacity": "Đang xử lý / Công suất",
     "Isolated Keys": "Key bị cô lập",
     "Confirm Recovery": "Xác nhận phục hồi",
-    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "Thao tác này chỉ xóa trạng thái sức khỏe cục bộ đã chọn và khôi phục với công suất khởi động chậm. Các hạn chế của tài khoản thượng nguồn không bị gỡ bỏ."
+    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "Thao tác này chỉ xóa trạng thái sức khỏe cục bộ đã chọn và khôi phục với công suất khởi động chậm. Các hạn chế của tài khoản thượng nguồn không bị gỡ bỏ.",
+    "Code Type": "Loại mã",
+    "Top-up code": "Mã nạp tiền",
+    "Invitation code": "Mã mời",
+    "Invitation": "Lời mời",
+    "Target Group": "Nhóm đích",
+    "Please select a target group": "Vui lòng chọn nhóm đích",
+    "Select a target group": "Chọn nhóm đích",
+    "Single user": "Một người dùng",
+    "Multiple users": "Nhiều người dùng",
+    "Usage Mode": "Chế độ sử dụng",
+    "Invitation codes assign the selected group during registration.": "Mã mời gán nhóm đã chọn khi đăng ký.",
+    "New users registered with this code join this group.": "Người dùng mới đăng ký bằng mã này sẽ tham gia nhóm này.",
+    "The code becomes unavailable after one successful registration.": "Mã sẽ không còn khả dụng sau một lần đăng ký thành công.",
+    "The link remains available until disabled, deleted, or expired.": "Liên kết vẫn khả dụng cho đến khi bị tắt, xóa hoặc hết hạn.",
+    "Registration Link": "Liên kết đăng ký",
+    "Copy registration link": "Sao chép liên kết đăng ký",
+    "Type / Group": "Loại / Nhóm",
+    "Optional invitation code": "Mã mời không bắt buộc",
+    "Registrations": "Lượt đăng ký",
+    "{{count}} · {{mode}}": "{{count}} · {{mode}}",
+    "{{mode}} · {{count}} registered": "{{mode}} · đã đăng ký {{count}}"
   }
 }

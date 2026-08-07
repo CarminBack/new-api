@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useQuery } from '@tanstack/react-query'
 import { type FormEvent, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -42,6 +43,14 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Sheet,
   SheetClose,
   SheetContent,
@@ -50,6 +59,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { getGroups } from '@/features/users/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
 import { addTimeToDate } from '@/lib/time'
@@ -58,12 +69,12 @@ import { createRedemption, updateRedemption, getRedemption } from '../api'
 import { SUCCESS_MESSAGES } from '../constants'
 import {
   getRedemptionFormSchema,
-  type RedemptionFormValues,
   REDEMPTION_FORM_DEFAULT_VALUES,
   transformFormDataToPayload,
   transformRedemptionToFormDefaults,
+  type RedemptionFormValues,
 } from '../lib'
-import { type Redemption } from '../types'
+import type { Redemption } from '../types'
 import { useRedemptions } from './redemptions-provider'
 
 type RedemptionsMutateDrawerProps = {
@@ -86,16 +97,25 @@ export function RedemptionsMutateDrawer({
     resolver: zodResolver(getRedemptionFormSchema(t)),
     defaultValues: REDEMPTION_FORM_DEFAULT_VALUES,
   })
+  const groupsQuery = useQuery({
+    queryKey: ['redemption-code-groups'],
+    queryFn: getGroups,
+    enabled: open,
+  })
+  const groupOptions = groupsQuery.data?.data || []
+  const codeType = form.watch('code_type')
 
   // Load existing data when updating
   useEffect(() => {
     if (open && isUpdate && currentRow) {
       // For update, fetch fresh data
-      getRedemption(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformRedemptionToFormDefaults(result.data))
-        }
-      })
+      void getRedemption(currentRow.id)
+        .then((result) => {
+          if (result.success && result.data) {
+            form.reset(transformRedemptionToFormDefaults(result.data))
+          }
+        })
+        .catch(() => undefined)
     } else if (open && !isUpdate) {
       // For create, reset to defaults
       form.reset(REDEMPTION_FORM_DEFAULT_VALUES)
@@ -142,8 +162,14 @@ export function RedemptionsMutateDrawer({
     if (!isUpdate) {
       const name = form.getValues('name')
       if (!name?.trim()) {
-        const quota = parseQuotaFromDollars(form.getValues('quota_dollars'))
-        form.setValue('name', formatQuota(quota), { shouldValidate: true })
+        if (form.getValues('code_type') === 'invitation') {
+          form.setValue('name', t('Invitation code'), {
+            shouldValidate: true,
+          })
+        } else {
+          const quota = parseQuotaFromDollars(form.getValues('quota_dollars'))
+          form.setValue('name', formatQuota(quota), { shouldValidate: true })
+        }
       }
     }
 
@@ -198,6 +224,47 @@ export function RedemptionsMutateDrawer({
             <SideDrawerSection>
               <FormField
                 control={form.control}
+                name='code_type'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Code Type')}</FormLabel>
+                    <Select
+                      items={[
+                        { value: 'topup', label: t('Top-up code') },
+                        { value: 'invitation', label: t('Invitation code') },
+                      ]}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      disabled={isUpdate}
+                    >
+                      <FormControl>
+                        <SelectTrigger className='w-full'>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          <SelectItem value='topup'>
+                            {t('Top-up code')}
+                          </SelectItem>
+                          <SelectItem value='invitation'>
+                            {t('Invitation code')}
+                          </SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      {t(
+                        'Invitation codes assign the selected group during registration.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
                 name='name'
                 render={({ field }) => (
                   <FormItem>
@@ -213,34 +280,126 @@ export function RedemptionsMutateDrawer({
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name='quota_dollars'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{quotaLabel}</FormLabel>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        type='number'
-                        step={tokensOnly ? 1 : 0.01}
-                        placeholder={quotaPlaceholder}
-                        onChange={(e) =>
-                          field.onChange(parseFloat(e.target.value) || 0)
-                        }
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {tokensOnly
-                        ? t('Enter the quota amount in tokens')
-                        : t('Enter the quota amount in {{currency}}', {
-                            currency: currencyLabel,
-                          })}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {codeType === 'topup' ? (
+                <FormField
+                  control={form.control}
+                  name='quota_dollars'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{quotaLabel}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='number'
+                          step={tokensOnly ? 1 : 0.01}
+                          placeholder={quotaPlaceholder}
+                          onChange={(e) =>
+                            field.onChange(
+                              Number.parseFloat(e.target.value) || 0
+                            )
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {tokensOnly
+                          ? t('Enter the quota amount in tokens')
+                          : t('Enter the quota amount in {{currency}}', {
+                              currency: currencyLabel,
+                            })}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : (
+                <>
+                  <FormField
+                    control={form.control}
+                    name='group'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Target Group')}</FormLabel>
+                        <Select
+                          items={groupOptions.map((group) => ({
+                            value: group,
+                            label: group,
+                          }))}
+                          value={field.value || ''}
+                          onValueChange={field.onChange}
+                          disabled={isUpdate || groupsQuery.isLoading}
+                        >
+                          <FormControl>
+                            <SelectTrigger className='w-full'>
+                              <SelectValue
+                                placeholder={t('Select a target group')}
+                              />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent alignItemWithTrigger={false}>
+                            <SelectGroup>
+                              {groupOptions.map((group) => (
+                                <SelectItem key={group} value={group}>
+                                  {group}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>
+                          {t(
+                            'New users registered with this code join this group.'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='multi_use'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Usage Mode')}</FormLabel>
+                        <FormControl>
+                          <ToggleGroup
+                            value={[field.value ? 'multi' : 'single']}
+                            onValueChange={(values) => {
+                              const next = values.find(
+                                (value) =>
+                                  value !== (field.value ? 'multi' : 'single')
+                              )
+                              if (next) field.onChange(next === 'multi')
+                            }}
+                            variant='outline'
+                            spacing={2}
+                            disabled={isUpdate}
+                            className='grid w-full grid-cols-2 gap-2'
+                            aria-label={t('Usage Mode')}
+                          >
+                            <ToggleGroupItem value='single' className='w-full'>
+                              {t('Single user')}
+                            </ToggleGroupItem>
+                            <ToggleGroupItem value='multi' className='w-full'>
+                              {t('Multiple users')}
+                            </ToggleGroupItem>
+                          </ToggleGroup>
+                        </FormControl>
+                        <FormDescription>
+                          {field.value
+                            ? t(
+                                'The link remains available until disabled, deleted, or expired.'
+                              )
+                            : t(
+                                'The code becomes unavailable after one successful registration.'
+                              )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
 
               <FormField
                 control={form.control}
@@ -314,7 +473,9 @@ export function RedemptionsMutateDrawer({
                           max='100'
                           placeholder={t('Number of codes to create')}
                           onChange={(e) =>
-                            field.onChange(parseInt(e.target.value, 10) || 1)
+                            field.onChange(
+                              Number.parseInt(e.target.value, 10) || 1
+                            )
                           }
                         />
                       </FormControl>

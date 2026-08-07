@@ -1,14 +1,57 @@
 package model
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+type legacyRedemptionForMigration struct {
+	Id           int `gorm:"primaryKey"`
+	UserId       int
+	Key          string `gorm:"type:char(32);uniqueIndex"`
+	Status       int    `gorm:"default:1"`
+	Name         string `gorm:"index"`
+	Quota        int    `gorm:"default:100"`
+	CreatedTime  int64  `gorm:"bigint"`
+	RedeemedTime int64  `gorm:"bigint"`
+	UsedUserId   int
+	ExpiredTime  int64          `gorm:"bigint"`
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
+}
+
+func (legacyRedemptionForMigration) TableName() string {
+	return "redemptions"
+}
+
+func TestRedemptionAutoMigratePreservesLegacyRows(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:redemption-migrate?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&legacyRedemptionForMigration{}))
+	require.NoError(t, db.Create(&legacyRedemptionForMigration{
+		Id:          1,
+		UserId:      1,
+		Key:         "00000000000000000000000000000001",
+		Status:      common.RedemptionCodeStatusEnabled,
+		Name:        "legacy",
+		Quota:       100,
+		CreatedTime: 1,
+	}).Error)
+
+	require.NoError(t, db.AutoMigrate(&Redemption{}))
+	var redemption Redemption
+	require.NoError(t, db.First(&redemption, 1).Error)
+	assert.Equal(t, "legacy", redemption.Name)
+	assert.Empty(t, redemption.CodeType)
+	assert.False(t, redemption.MultiUse)
+	assert.Zero(t, redemption.UseCount)
+}
 
 func TestSearchRedemptionsFiltersAndPaginates(t *testing.T) {
 	require.NoError(t, DB.AutoMigrate(&Redemption{}))
@@ -178,4 +221,110 @@ func TestRedeemConcurrentSingleSuccess(t *testing.T) {
 	var user User
 	require.NoError(t, DB.First(&user, "id = ?", userId).Error)
 	assert.Equal(t, 300, user.Quota, "quota must be credited exactly once")
+}
+
+func setupInvitationFixture(t *testing.T, multiUse bool, expiredTime int64) string {
+	t.Helper()
+	require.NoError(t, DB.AutoMigrate(&User{}, &Redemption{}, &Log{}))
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&User{}).Error)
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Log{}).Error)
+	t.Cleanup(func() {
+		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
+		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&User{}).Error)
+		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Log{}).Error)
+	})
+
+	key := "20000000000000000000000000000001"
+	invitation := &Redemption{
+		Name:        "invitation-test",
+		Key:         key,
+		Status:      common.RedemptionCodeStatusEnabled,
+		CreatedTime: common.GetTimestamp(),
+		ExpiredTime: expiredTime,
+		CodeType:    RedemptionTypeInvitation,
+		Group:       "vip",
+		MultiUse:    multiUse,
+	}
+	require.NoError(t, DB.Create(invitation).Error)
+	return key
+}
+
+func TestMultiUseInvitationAssignsGroupAndTracksRegistrations(t *testing.T) {
+	key := setupInvitationFixture(t, true, 0)
+
+	for i := 0; i < 2; i++ {
+		user := &User{
+			Username: fmt.Sprintf("multi-invite-%d", i),
+			Password: "password",
+			Role:     common.RoleCommonUser,
+			Status:   common.UserStatusEnabled,
+		}
+		require.NoError(t, user.InsertWithInvitation(0, key))
+		assert.Equal(t, "vip", user.Group)
+	}
+
+	var invitation Redemption
+	require.NoError(t, DB.First(&invitation, "key = ?", key).Error)
+	assert.Equal(t, common.RedemptionCodeStatusEnabled, invitation.Status)
+	assert.Equal(t, 2, invitation.UseCount)
+	assert.Zero(t, invitation.UsedUserId)
+}
+
+func TestExpiredInvitationRollsBackRegistration(t *testing.T) {
+	key := setupInvitationFixture(t, true, common.GetTimestamp()-1)
+	user := &User{
+		Username: "expired-invite",
+		Password: "password",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+	}
+
+	err := user.InsertWithInvitation(0, key)
+	require.ErrorIs(t, err, ErrInvitationUnavailable)
+
+	var count int64
+	require.NoError(t, DB.Model(&User{}).Where("username = ?", user.Username).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestSingleUseInvitationConcurrentRegistration(t *testing.T) {
+	key := setupInvitationFixture(t, false, 0)
+
+	const goroutines = 5
+	results := make(chan error, goroutines)
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			user := &User{
+				Username: fmt.Sprintf("single-invite-%d", index),
+				Password: "password",
+				Role:     common.RoleCommonUser,
+				Status:   common.UserStatusEnabled,
+			}
+			results <- user.InsertWithInvitation(0, key)
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+
+	successes := 0
+	for err := range results {
+		if err == nil {
+			successes++
+		}
+	}
+	assert.Equal(t, 1, successes)
+
+	var invitation Redemption
+	require.NoError(t, DB.First(&invitation, "key = ?", key).Error)
+	assert.Equal(t, common.RedemptionCodeStatusUsed, invitation.Status)
+	assert.Equal(t, 1, invitation.UseCount)
+	assert.NotZero(t, invitation.UsedUserId)
+
+	var userCount int64
+	require.NoError(t, DB.Model(&User{}).Where("username LIKE ?", "single-invite-%").Count(&userCount).Error)
+	assert.Equal(t, int64(1), userCount)
 }

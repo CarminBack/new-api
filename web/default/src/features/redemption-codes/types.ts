@@ -33,6 +33,10 @@ export const redemptionSchema = z.object({
   redeemed_time: z.number(),
   expired_time: z.number(), // 0 for never expires
   used_user_id: z.number(),
+  code_type: z.enum(['topup', 'invitation']).or(z.literal('')),
+  group: z.string(),
+  multi_use: z.boolean(),
+  use_count: z.number(),
 })
 
 export type Redemption = z.infer<typeof redemptionSchema>
@@ -75,6 +79,9 @@ export interface RedemptionFormData {
   name: string
   quota: number
   expired_time: number
+  code_type: 'topup' | 'invitation'
+  group?: string
+  multi_use?: boolean
   count?: number // Only for create
   status?: number // Only for status update
 }

@@ -5277,6 +5277,27 @@
     "In-flight / Capacity": "In-flight / Capacity",
     "Isolated Keys": "Isolated Keys",
     "Confirm Recovery": "Confirm Recovery",
-    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed."
+    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.",
+    "Code Type": "Code Type",
+    "Top-up code": "Top-up code",
+    "Invitation code": "Invitation code",
+    "Invitation": "Invitation",
+    "Target Group": "Target Group",
+    "Please select a target group": "Please select a target group",
+    "Select a target group": "Select a target group",
+    "Single user": "Single user",
+    "Multiple users": "Multiple users",
+    "Usage Mode": "Usage Mode",
+    "Invitation codes assign the selected group during registration.": "Invitation codes assign the selected group during registration.",
+    "New users registered with this code join this group.": "New users registered with this code join this group.",
+    "The code becomes unavailable after one successful registration.": "The code becomes unavailable after one successful registration.",
+    "The link remains available until disabled, deleted, or expired.": "The link remains available until disabled, deleted, or expired.",
+    "Registration Link": "Registration Link",
+    "Copy registration link": "Copy registration link",
+    "Type / Group": "Type / Group",
+    "Optional invitation code": "Optional invitation code",
+    "Registrations": "Registrations",
+    "{{count}} · {{mode}}": "{{count}} · {{mode}}",
+    "{{mode}} · {{count}} registered": "{{mode}} · {{count}} registered"
   }
 }

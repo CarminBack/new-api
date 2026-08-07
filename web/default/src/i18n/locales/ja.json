@@ -5277,6 +5277,27 @@
     "In-flight / Capacity": "処理中 / 容量",
     "Isolated Keys": "隔離中の Key",
     "Confirm Recovery": "回復の確認",
-    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "選択したローカル健全性状態のみを解除し、スロースタート容量で再開します。上流アカウントの制限は解除されません。"
+    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "選択したローカル健全性状態のみを解除し、スロースタート容量で再開します。上流アカウントの制限は解除されません。",
+    "Code Type": "コード種別",
+    "Top-up code": "チャージコード",
+    "Invitation code": "招待コード",
+    "Invitation": "招待",
+    "Target Group": "対象グループ",
+    "Please select a target group": "対象グループを選択してください",
+    "Select a target group": "対象グループを選択",
+    "Single user": "1ユーザー",
+    "Multiple users": "複数ユーザー",
+    "Usage Mode": "利用モード",
+    "Invitation codes assign the selected group during registration.": "招待コードは登録時に選択したグループを割り当てます。",
+    "New users registered with this code join this group.": "このコードで登録した新規ユーザーはこのグループに参加します。",
+    "The code becomes unavailable after one successful registration.": "1人の登録が成功するとコードは利用できなくなります。",
+    "The link remains available until disabled, deleted, or expired.": "リンクは無効化、削除、または有効期限切れまで利用できます。",
+    "Registration Link": "登録リンク",
+    "Copy registration link": "登録リンクをコピー",
+    "Type / Group": "種別 / グループ",
+    "Optional invitation code": "招待コード（任意）",
+    "Registrations": "登録数",
+    "{{count}} · {{mode}}": "{{count}} · {{mode}}",
+    "{{mode}} · {{count}} registered": "{{mode}} · {{count}}人登録済み"
   }
 }

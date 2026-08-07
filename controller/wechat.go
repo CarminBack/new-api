@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-contrib/sessions"
@@ -96,7 +97,17 @@ func WeChatAuth(c *gin.Context) {
 			user.Role = common.RoleCommonUser
 			user.Status = common.UserStatusEnabled
 
-			if err := user.Insert(0); err != nil {
+			invitationCode := c.Query("invite")
+			if invitationCode != "" {
+				err = user.InsertWithInvitation(0, invitationCode)
+			} else {
+				err = user.Insert(0)
+			}
+			if err != nil {
+				if errors.Is(err, model.ErrInvitationUnavailable) {
+					common.ApiErrorI18n(c, i18n.MsgUserInvitationUnavailable)
+					return
+				}
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
 					"message": err.Error(),

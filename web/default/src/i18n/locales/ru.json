@@ -5277,6 +5277,27 @@
     "In-flight / Capacity": "В работе / Мощность",
     "Isolated Keys": "Изолированные ключи",
     "Confirm Recovery": "Подтвердить восстановление",
-    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "Будет очищено только выбранное локальное состояние, после чего работа возобновится с плавным ростом мощности. Ограничения вышестоящего аккаунта не снимаются."
+    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "Будет очищено только выбранное локальное состояние, после чего работа возобновится с плавным ростом мощности. Ограничения вышестоящего аккаунта не снимаются.",
+    "Code Type": "Тип кода",
+    "Top-up code": "Код пополнения",
+    "Invitation code": "Код приглашения",
+    "Invitation": "Приглашение",
+    "Target Group": "Целевая группа",
+    "Please select a target group": "Выберите целевую группу",
+    "Select a target group": "Выбрать целевую группу",
+    "Single user": "Один пользователь",
+    "Multiple users": "Несколько пользователей",
+    "Usage Mode": "Режим использования",
+    "Invitation codes assign the selected group during registration.": "Код приглашения назначает выбранную группу при регистрации.",
+    "New users registered with this code join this group.": "Новые пользователи с этим кодом входят в эту группу.",
+    "The code becomes unavailable after one successful registration.": "Код становится недоступен после одной успешной регистрации.",
+    "The link remains available until disabled, deleted, or expired.": "Ссылка доступна до отключения, удаления или истечения срока.",
+    "Registration Link": "Ссылка для регистрации",
+    "Copy registration link": "Скопировать ссылку",
+    "Type / Group": "Тип / Группа",
+    "Optional invitation code": "Код приглашения (необязательно)",
+    "Registrations": "Регистрации",
+    "{{count}} · {{mode}}": "{{count}} · {{mode}}",
+    "{{mode}} · {{count}} registered": "{{mode}} · зарегистрировано: {{count}}"
   }
 }

@@ -47,7 +47,10 @@ import { useEmailVerification } from '@/features/auth/hooks/use-email-verificati
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
   getAffiliateCode,
+  getInvitationCode,
+  removeInvitationCode,
   saveAffiliateCode,
+  saveInvitationCode,
 } from '@/features/auth/lib/storage'
 import { useStatus } from '@/hooks/use-status'
 import { cn } from '@/lib/utils'
@@ -91,6 +94,7 @@ export function SignUpForm({
       email: '',
       password: '',
       confirmPassword: '',
+      invitation_code: '',
     },
   })
 
@@ -135,6 +139,18 @@ export function SignUpForm({
     }
   }, [])
 
+  useEffect(() => {
+    const invitationCode = new URLSearchParams(window.location.search)
+      .get('invite')
+      ?.trim()
+    if (invitationCode) {
+      saveInvitationCode(invitationCode)
+      form.setValue('invitation_code', invitationCode)
+      return
+    }
+    form.setValue('invitation_code', getInvitationCode())
+  }, [form])
+
   async function onSubmit(data: z.infer<typeof registerFormSchema>) {
     if (requiresLegalConsent && !agreedToLegal) {
       toast.error(legalConsentErrorMessage)
@@ -163,16 +179,18 @@ export function SignUpForm({
         email: data.email || undefined,
         verification_code: verificationCode || undefined,
         aff_code: getAffiliateCode(),
+        invitation_code: data.invitation_code?.trim() || undefined,
         turnstile: turnstileToken,
       })
 
       if (res?.success) {
+        removeInvitationCode()
         toast.success(t('Account created! Please sign in'))
         redirectToLogin()
       } else {
         toast.error(res?.message || t('Failed to create account'))
       }
-    } catch (_error) {
+    } catch {
       // Errors are handled by global interceptor
     } finally {
       setIsLoading(false)
@@ -208,7 +226,10 @@ export function SignUpForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      const res = await wechatLoginByCode(
+        wechatCode,
+        form.getValues('invitation_code')?.trim() || undefined
+      )
       if (res?.success) {
         await handleLoginSuccess(res.data as { id?: number } | null)
         toast.success(t('Signed in via WeChat'))
@@ -216,11 +237,20 @@ export function SignUpForm({
       } else {
         toast.error(res?.message || t('Login failed'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t('Login failed'))
     } finally {
       setIsWeChatSubmitting(false)
     }
+  }
+
+  let verificationButtonContent = <>{t('Send code')}</>
+  if (isActive) {
+    verificationButtonContent = (
+      <>{t('Resend ({{seconds}}s)', { seconds: secondsLeft })}</>
+    )
+  } else if (isSendingCode) {
+    verificationButtonContent = <Loader2 className='h-4 w-4 animate-spin' />
   }
 
   return (
@@ -239,6 +269,25 @@ export function SignUpForm({
               <FormLabel>{t('Username')}</FormLabel>
               <FormControl>
                 <Input placeholder={t('Enter your username')} {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {/* Invitation Code Field */}
+        <FormField
+          control={form.control}
+          name='invitation_code'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Invitation code')}</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder={t('Optional invitation code')}
+                  autoComplete='off'
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -323,13 +372,7 @@ export function SignUpForm({
                 }
                 onClick={handleSendVerificationCode}
               >
-                {isActive ? (
-                  t('Resend ({{seconds}}s)', { seconds: secondsLeft })
-                ) : isSendingCode ? (
-                  <Loader2 className='h-4 w-4 animate-spin' />
-                ) : (
-                  t('Send code')
-                )}
+                {verificationButtonContent}
               </Button>
             </div>
           </>

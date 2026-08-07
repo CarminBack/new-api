@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
 import { MaskedValueDisplay } from '@/components/masked-value-display'
@@ -32,7 +32,7 @@ import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import { REDEMPTION_FILTER_EXPIRED, REDEMPTION_STATUSES } from '../constants'
 import { isRedemptionExpired, isTimestampExpired } from '../lib'
-import { type Redemption } from '../types'
+import type { Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
@@ -133,6 +133,32 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       size: 120,
     },
     {
+      accessorKey: 'code_type',
+      header: t('Type / Group'),
+      meta: { mobileHidden: true },
+      cell: ({ row }) => {
+        const redemption = row.original
+        const isInvitation = redemption.code_type === 'invitation'
+        return (
+          <div className='flex min-w-[140px] flex-wrap gap-1'>
+            <StatusBadge
+              label={t(isInvitation ? 'Invitation' : 'Top-up')}
+              variant={isInvitation ? 'info' : 'neutral'}
+              copyable={false}
+            />
+            {isInvitation && redemption.group && (
+              <StatusBadge
+                label={redemption.group}
+                variant='neutral'
+                copyable={false}
+              />
+            )}
+          </div>
+        )
+      },
+      size: 180,
+    },
+    {
       id: 'code',
       accessorKey: 'key',
       header: t('Code'),
@@ -140,14 +166,22 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
         const redemption = row.original
         const key = redemption.key
         const maskedKey = `${key.slice(0, 8)}${'*'.repeat(16)}${key.slice(-8)}`
+        const isInvitation = redemption.code_type === 'invitation'
+        const fullValue = isInvitation
+          ? `${window.location.origin}/register?invite=${encodeURIComponent(key)}`
+          : key
 
         return (
           <MaskedValueDisplay
-            label={t('Full Code')}
-            fullValue={key}
+            label={t(isInvitation ? 'Registration Link' : 'Full Code')}
+            fullValue={fullValue}
             maskedValue={maskedKey}
-            copyTooltip={t('Copy code')}
-            copyAriaLabel={t('Copy redemption code')}
+            copyTooltip={t(
+              isInvitation ? 'Copy registration link' : 'Copy code'
+            )}
+            copyAriaLabel={t(
+              isInvitation ? 'Copy registration link' : 'Copy redemption code'
+            )}
           />
         )
       },
@@ -158,6 +192,23 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       accessorKey: 'quota',
       header: t('Quota'),
       cell: ({ row }) => {
+        const redemption = row.original
+        if (redemption.code_type === 'invitation') {
+          const mode = redemption.multi_use
+            ? t('Multiple users')
+            : t('Single user')
+          return (
+            <StatusBadge
+              label={t('{{mode}} · {{count}} registered', {
+                mode,
+                count: redemption.use_count,
+              })}
+              variant='neutral'
+              copyable={false}
+              className='-ml-1.5'
+            />
+          )
+        }
         const quota = row.getValue('quota') as number
         return (
           <StatusBadge
@@ -233,7 +284,7 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
                   className='cursor-help'
                 />
               }
-            ></TooltipTrigger>
+            />
             <TooltipContent>
               <div className='space-y-1 text-xs'>
                 <div>

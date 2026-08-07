@@ -5277,6 +5277,27 @@
     "In-flight / Capacity": "在途 / 容量",
     "Isolated Keys": "Key 隔離",
     "Confirm Recovery": "確認恢復",
-    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "僅清除所選的本機健康狀態，並以慢啟動容量恢復；不會解除上游帳號本身的限制。"
+    "This clears only the selected local health state and resumes with slow-start capacity. Upstream account restrictions are not removed.": "僅清除所選的本機健康狀態，並以慢啟動容量恢復；不會解除上游帳號本身的限制。",
+    "Code Type": "代碼類型",
+    "Top-up code": "充值碼",
+    "Invitation code": "邀請碼",
+    "Invitation": "邀請碼",
+    "Target Group": "目標分組",
+    "Please select a target group": "請選擇目標分組",
+    "Select a target group": "選擇目標分組",
+    "Single user": "單人使用",
+    "Multiple users": "多人使用",
+    "Usage Mode": "使用模式",
+    "Invitation codes assign the selected group during registration.": "邀請碼會在註冊時為使用者分配所選分組。",
+    "New users registered with this code join this group.": "使用此邀請碼註冊的新使用者將加入該分組。",
+    "The code becomes unavailable after one successful registration.": "成功註冊一個使用者後，該邀請碼將失效。",
+    "The link remains available until disabled, deleted, or expired.": "連結在被停用、刪除或到期前可持續使用。",
+    "Registration Link": "註冊連結",
+    "Copy registration link": "複製註冊連結",
+    "Type / Group": "類型 / 分組",
+    "Optional invitation code": "選填邀請碼",
+    "Registrations": "註冊人數",
+    "{{count}} · {{mode}}": "{{count}} · {{mode}}",
+    "{{mode}} · {{count}} registered": "{{mode}} · 已註冊 {{count}} 人"
   }
 }

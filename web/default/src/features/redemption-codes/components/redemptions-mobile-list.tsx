@@ -111,6 +111,10 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
         )
         const statusConfig = REDEMPTION_STATUSES[redemption.status]
         const maskedKey = `${redemption.key.slice(0, 8)}******${redemption.key.slice(-8)}`
+        const isInvitation = redemption.code_type === 'invitation'
+        const fullValue = isInvitation
+          ? `${window.location.origin}/register?invite=${encodeURIComponent(redemption.key)}`
+          : redemption.key
 
         return (
           <div
@@ -128,7 +132,9 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
                   {redemption.name}
                 </div>
                 <div className='text-muted-foreground text-[11px]'>
-                  {t('Redemption Code')}
+                  {isInvitation
+                    ? `${t('Invitation')} · ${redemption.group}`
+                    : t('Top-up code')}
                 </div>
               </div>
               {expired ? (
@@ -151,20 +157,35 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
             <div className='flex min-w-0 items-center justify-between gap-2'>
               <div className='min-w-0 flex-1 [&_button:first-child]:max-w-full [&_button:first-child]:truncate [&_button:first-child]:px-0'>
                 <MaskedValueDisplay
-                  label={t('Full Code')}
-                  fullValue={redemption.key}
+                  label={t(isInvitation ? 'Registration Link' : 'Full Code')}
+                  fullValue={fullValue}
                   maskedValue={maskedKey}
-                  copyTooltip={t('Copy code')}
-                  copyAriaLabel={t('Copy redemption code')}
+                  copyTooltip={t(
+                    isInvitation ? 'Copy registration link' : 'Copy code'
+                  )}
+                  copyAriaLabel={t(
+                    isInvitation
+                      ? 'Copy registration link'
+                      : 'Copy redemption code'
+                  )}
                 />
               </div>
               <DataTableRowActions row={row} />
             </div>
 
             <div className='flex items-center justify-between gap-2 text-xs'>
-              <span className='text-muted-foreground'>{t('Quota')}</span>
+              <span className='text-muted-foreground'>
+                {t(isInvitation ? 'Registrations' : 'Quota')}
+              </span>
               <span className='font-medium tabular-nums'>
-                {formatQuota(redemption.quota)}
+                {isInvitation
+                  ? t('{{count}} · {{mode}}', {
+                      count: redemption.use_count,
+                      mode: redemption.multi_use
+                        ? t('Multiple users')
+                        : t('Single user'),
+                    })
+                  : formatQuota(redemption.quota)}
               </span>
             </div>
           </div>

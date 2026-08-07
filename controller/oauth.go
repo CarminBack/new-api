@@ -28,6 +28,12 @@ func GenerateOAuthCode(c *gin.Context) {
 	if affCode != "" {
 		session.Set("aff", affCode)
 	}
+	invitationCode := c.Query("invite")
+	if invitationCode != "" {
+		session.Set("invite", invitationCode)
+	} else {
+		session.Delete("invite")
+	}
 	session.Set("oauth_state", state)
 	err := session.Save()
 	if err != nil {
@@ -109,6 +115,10 @@ func HandleOAuth(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
+			return
+		}
+		if errors.Is(err, model.ErrInvitationUnavailable) {
+			common.ApiErrorI18n(c, i18n.MsgUserInvitationUnavailable)
 			return
 		}
 		switch err.(type) {
@@ -281,13 +291,14 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	if affCode != nil {
 		inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
 	}
+	invitationCode, _ := session.Get("invite").(string)
 
 	// Use transaction to ensure user creation and OAuth binding are atomic
 	if genericProvider, ok := provider.(*oauth.GenericOAuthProvider); ok {
 		// Custom provider: create user and binding in a transaction
 		err := model.DB.Transaction(func(tx *gorm.DB) error {
 			// Create user
-			if err := user.InsertWithTx(tx, inviterId); err != nil {
+			if err := insertOAuthUserWithInvitation(tx, user, inviterId, invitationCode); err != nil {
 				return err
 			}
 
@@ -313,7 +324,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		// Built-in provider: create user and update provider ID in a transaction
 		err := model.DB.Transaction(func(tx *gorm.DB) error {
 			// Create user
-			if err := user.InsertWithTx(tx, inviterId); err != nil {
+			if err := insertOAuthUserWithInvitation(tx, user, inviterId, invitationCode); err != nil {
 				return err
 			}
 
@@ -341,6 +352,13 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	}
 
 	return user, nil
+}
+
+func insertOAuthUserWithInvitation(tx *gorm.DB, user *model.User, inviterId int, invitationCode string) error {
+	if invitationCode == "" {
+		return user.InsertWithTx(tx, inviterId)
+	}
+	return user.InsertWithInvitationTx(tx, inviterId, invitationCode)
 }
 
 // Error types for OAuth

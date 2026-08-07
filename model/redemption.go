@@ -4,12 +4,21 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"gorm.io/gorm"
 )
+
+const (
+	RedemptionTypeTopup      = "topup"
+	RedemptionTypeInvitation = "invitation"
+)
+
+var ErrInvitationUnavailable = errors.New("invitation code is unavailable")
 
 type Redemption struct {
 	Id           int            `json:"id"`
@@ -24,6 +33,21 @@ type Redemption struct {
 	UsedUserId   int            `json:"used_user_id"`
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 	ExpiredTime  int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+	CodeType     string         `json:"code_type" gorm:"type:varchar(16);index"`
+	Group        string         `json:"group" gorm:"type:varchar(64)"`
+	MultiUse     bool           `json:"multi_use"`
+	UseCount     int            `json:"use_count"`
+}
+
+func normalizeRedemptionType(codeType string) string {
+	if strings.TrimSpace(codeType) == "" {
+		return RedemptionTypeTopup
+	}
+	return strings.TrimSpace(codeType)
+}
+
+func IsInvitationRedemption(redemption *Redemption) bool {
+	return redemption != nil && normalizeRedemptionType(redemption.CodeType) == RedemptionTypeInvitation
 }
 
 func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
@@ -153,6 +177,9 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if err != nil {
 			return errors.New("无效的兑换码")
 		}
+		if IsInvitationRedemption(redemption) {
+			return errors.New("无效的兑换码")
+		}
 		if redemption.Status != common.RedemptionCodeStatusEnabled {
 			return errors.New("该兑换码已被使用")
 		}
@@ -185,10 +212,60 @@ func Redeem(key string, userId int) (quota int, err error) {
 	return redemption.Quota, nil
 }
 
+func getInvitationWithTx(tx *gorm.DB, key string) (*Redemption, error) {
+	key = strings.TrimSpace(key)
+	if len(key) != 32 {
+		return nil, ErrInvitationUnavailable
+	}
+
+	keyCol := "`key`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		keyCol = `"key"`
+	}
+	invitation := &Redemption{}
+	if err := lockForUpdate(tx).Where(keyCol+" = ?", key).First(invitation).Error; err != nil {
+		return nil, ErrInvitationUnavailable
+	}
+	if !IsInvitationRedemption(invitation) || invitation.Status != common.RedemptionCodeStatusEnabled {
+		return nil, ErrInvitationUnavailable
+	}
+	if invitation.ExpiredTime != 0 && invitation.ExpiredTime < common.GetTimestamp() {
+		return nil, ErrInvitationUnavailable
+	}
+	if invitation.Group == "" || !ratio_setting.ContainsGroupRatio(invitation.Group) {
+		return nil, ErrInvitationUnavailable
+	}
+	return invitation, nil
+}
+
+func consumeInvitationWithTx(tx *gorm.DB, invitation *Redemption, userID int) error {
+	now := common.GetTimestamp()
+	query := tx.Model(&Redemption{}).
+		Where("id = ? AND status = ?", invitation.Id, common.RedemptionCodeStatusEnabled).
+		Where("expired_time = 0 OR expired_time >= ?", now)
+
+	updates := map[string]interface{}{
+		"redeemed_time": now,
+		"use_count":     gorm.Expr("use_count + ?", 1),
+	}
+	if !invitation.MultiUse {
+		updates["status"] = common.RedemptionCodeStatusUsed
+		updates["used_user_id"] = userID
+	}
+
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrInvitationUnavailable
+	}
+	return nil
+}
+
 func (redemption *Redemption) Insert() error {
-	var err error
-	err = DB.Create(redemption).Error
-	return err
+	redemption.CodeType = normalizeRedemptionType(redemption.CodeType)
+	return DB.Create(redemption).Error
 }
 
 func (redemption *Redemption) SelectUpdate() error {
