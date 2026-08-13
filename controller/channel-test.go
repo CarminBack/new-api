@@ -1022,6 +1022,10 @@ func selectChannelsForAutomaticTest(channels []*model.Channel, mode string) []*m
 		if channel.Status == common.ChannelStatusManuallyDisabled {
 			continue
 		}
+		groups := channel.GetGroups()
+		if len(groups) == 1 && groups[0] == "Image" {
+			continue
+		}
 		if mode == operation_setting.ChannelTestModePassiveRecovery && channel.Status != common.ChannelStatusAutoDisabled {
 			continue
 		}

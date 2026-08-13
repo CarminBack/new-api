@@ -128,6 +128,18 @@ func TestSelectChannelsForAutomaticTestScheduledSkipsManualDisabled(t *testing.T
 	require.Equal(t, 2, selected[1].Id)
 }
 
+func TestSelectChannelsForAutomaticTestSkipsPureImageChannels(t *testing.T) {
+	channels := []*model.Channel{
+		{Id: 4, Status: common.ChannelStatusEnabled, Group: "Image"},
+		{Id: 5, Status: common.ChannelStatusEnabled, Group: "Image, ChatGPT"},
+	}
+
+	selected := selectChannelsForAutomaticTest(channels, operation_setting.ChannelTestModeScheduledAll)
+
+	require.Len(t, selected, 1)
+	require.Equal(t, 5, selected[0].Id)
+}
+
 func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.SystemTask{}, &model.SystemTaskLock{}))
