@@ -24,8 +24,15 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react'
-import { Reorder, useDragControls } from 'motion/react'
-import { useState, useMemo, useEffect, useCallback, memo } from 'react'
+import {
+  useState,
+  useMemo,
+  useEffect,
+  useCallback,
+  useRef,
+  memo,
+  type DragEvent,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -491,6 +498,7 @@ function GroupPricingTable({
   onShowDetail,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
+  const [draggedRowId, setDraggedRowId] = useState<string | null>(null)
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
     buildGroupPricingRows(
       groupRatio,
@@ -596,6 +604,27 @@ function GroupPricingTable({
       reorderRows(nextRows)
     },
     [reorderRows, rows]
+  )
+
+  const dropRow = useCallback(
+    (targetId: string) => {
+      if (!draggedRowId || draggedRowId === targetId) {
+        setDraggedRowId(null)
+        return
+      }
+      const sourceIndex = rows.findIndex((row) => row._id === draggedRowId)
+      const targetIndex = rows.findIndex((row) => row._id === targetId)
+      if (sourceIndex < 0 || targetIndex < 0) {
+        setDraggedRowId(null)
+        return
+      }
+      const nextRows = [...rows]
+      const [movedRow] = nextRows.splice(sourceIndex, 1)
+      nextRows.splice(targetIndex, 0, movedRow)
+      reorderRows(nextRows)
+      setDraggedRowId(null)
+    },
+    [draggedRowId, reorderRows, rows]
   )
 
   const duplicateNames = useMemo(() => {
@@ -756,26 +785,26 @@ function GroupPricingTable({
                 ))}
               </TableRow>
             </TableHeader>
-            <Reorder.Group
-              as='tbody'
-              axis='y'
-              values={rows}
-              onReorder={reorderRows}
+            <tbody
               className='[&_tr:last-child]:border-0 [&>tr]:h-15'
             >
               {rows.length > 0 ? (
                 rows.map((row, index) => (
-                  <SortableGroupPricingRow
+                  <DraggableGroupPricingRow
                     key={row._id}
                     row={row}
                     index={index}
                     columns={columns}
+                    isDragging={draggedRowId === row._id}
                     dragLabel={t(
                       'Reorder {{group}}. Drag or use the arrow keys.',
                       {
                         group: row.name || t('group'),
                       }
                     )}
+                    onDragStart={setDraggedRowId}
+                    onDragEnd={() => setDraggedRowId(null)}
+                    onDrop={dropRow}
                     onMove={moveRow}
                   />
                 ))
@@ -789,7 +818,7 @@ function GroupPricingTable({
                   </TableCell>
                 </TableRow>
               )}
-            </Reorder.Group>
+            </tbody>
           </StaticDataTable>
 
           {duplicateNames.length > 0 && (
@@ -805,30 +834,52 @@ function GroupPricingTable({
   )
 }
 
-type SortableGroupPricingRowProps = {
+type DraggableGroupPricingRowProps = {
   row: GroupPricingRow
   index: number
   columns: StaticDataTableColumn<GroupPricingRow>[]
+  isDragging: boolean
   dragLabel: string
+  onDragStart: (id: string) => void
+  onDragEnd: () => void
+  onDrop: (id: string) => void
   onMove: (id: string, direction: 'up' | 'down') => void
 }
 
-function SortableGroupPricingRow(props: SortableGroupPricingRowProps) {
-  const dragControls = useDragControls()
+function DraggableGroupPricingRow(props: DraggableGroupPricingRowProps) {
+  const dragHandleActive = useRef(false)
+
+  const handleDragStart = (event: DragEvent<HTMLTableRowElement>) => {
+    if (!dragHandleActive.current) {
+      event.preventDefault()
+      return
+    }
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', props.row._id)
+    props.onDragStart(props.row._id)
+  }
 
   return (
-    <Reorder.Item
-      as='tr'
-      value={props.row}
-      dragListener={false}
-      dragControls={dragControls}
-      dragElastic={0.04}
-      className='group relative border-b transition-colors hover:[background-color:color-mix(in_oklch,var(--muted)_50%,var(--background))] motion-reduce:!transition-none'
-      whileDrag={{
-        backgroundColor: 'var(--muted)',
-        boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.12)',
-        zIndex: 1,
+    <TableRow
+      draggable
+      onDragStart={handleDragStart}
+      onDragEnd={() => {
+        dragHandleActive.current = false
+        props.onDragEnd()
       }}
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        dragHandleActive.current = false
+        props.onDrop(props.row._id)
+      }}
+      className={cn(
+        'relative',
+        props.isDragging && 'bg-muted opacity-70 shadow-sm'
+      )}
     >
       {props.columns.map((column) => {
         const cellClassName =
@@ -847,7 +898,15 @@ function SortableGroupPricingRow(props: SortableGroupPricingRowProps) {
                 size='icon'
                 className='size-11 cursor-grab touch-none active:cursor-grabbing'
                 aria-label={props.dragLabel}
-                onPointerDown={(event) => dragControls.start(event)}
+                onPointerDown={() => {
+                  dragHandleActive.current = true
+                }}
+                onPointerUp={() => {
+                  dragHandleActive.current = false
+                }}
+                onPointerCancel={() => {
+                  dragHandleActive.current = false
+                }}
                 onKeyDown={(event) => {
                   if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
                     return
@@ -867,7 +926,7 @@ function SortableGroupPricingRow(props: SortableGroupPricingRowProps) {
           </TableCell>
         )
       })}
-    </Reorder.Item>
+    </TableRow>
   )
 }
 
