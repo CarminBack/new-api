@@ -44,14 +44,9 @@ func GetUserGroups(c *gin.Context) {
 			"desc":  setting.GetUsableGroupDescription("auto"),
 		}
 	}
-	groupNames := make([]string, 0, len(usableGroups))
-	for groupName := range usableGroups {
-		groupNames = append(groupNames, groupName)
-	}
 	c.JSON(http.StatusOK, gin.H{
-		"success":     true,
-		"message":     "",
-		"data":        usableGroups,
-		"group_order": setting.OrderGroupNames(groupNames),
+		"success": true,
+		"message": "",
+		"data":    usableGroups,
 	})
 }

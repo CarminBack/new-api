@@ -5298,11 +5298,6 @@
     "Optional invitation code": "Код приглашения (необязательно)",
     "Registrations": "Регистрации",
     "{{count}} · {{mode}}": "{{count}} · {{mode}}",
-    "{{mode}} · {{count}} registered": "{{mode}} · зарегистрировано: {{count}}",
-    "Group display order": "Порядок отображения групп",
-    "JSON array controlling the order of groups in user selection lists. It does not affect billing or routing.": "JSON-массив, задающий порядок групп в списках выбора пользователя. Он не влияет на тарификацию или маршрутизацию.",
-    "All group names live here. Drag rows to control their order in user group selectors. Billing and routing are not affected.": "Здесь управляются все группы. Перетаскивайте строки, чтобы изменить порядок в пользовательских списках выбора. Тарификация и маршрутизация не меняются.",
-    "Display order": "Порядок отображения",
-    "Reorder {{group}}. Drag or use the arrow keys.": "Изменить порядок {{group}}. Перетащите строку или используйте клавиши со стрелками."
+    "{{mode}} · {{count}} registered": "{{mode}} · зарегистрировано: {{count}}"
   }
 }

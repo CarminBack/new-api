@@ -24,23 +24,11 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react'
-import {
-  useState,
-  useMemo,
-  useEffect,
-  useCallback,
-  useRef,
-  memo,
-  type DragEvent,
-} from 'react'
+import { useState, useMemo, useEffect, useCallback, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import {
-  StaticDataTable,
-  type StaticDataTableColumn,
-} from '@/components/data-table/static/static-data-table'
+import { StaticDataTable } from '@/components/data-table/static/static-data-table'
 import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
-import { Dialog } from '@/components/dialog'
 import {
   sideDrawerContentClassName,
   sideDrawerFormClassName,
@@ -61,6 +49,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { Dialog } from '@/components/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -78,13 +67,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import {
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { cn } from '@/lib/utils'
 
 import { safeJsonParse } from '../utils/json-parser'
 
@@ -94,7 +76,6 @@ type GroupRatioVisualEditorProps = {
   userUsableGroups: string
   groupGroupRatio: string
   autoGroups: string
-  groupDisplayOrder: string
   groupSpecialUsableGroup: string
   onChange: (field: string, value: string) => void
 }
@@ -142,24 +123,6 @@ function parseUsableMap(value: string): Record<string, string> {
   })
 }
 
-function parseGroupDisplayOrder(value: string): string[] {
-  return safeJsonParse<string[]>(value, {
-    fallback: [],
-    silent: true,
-  })
-}
-
-function orderGroupNames(names: string[], displayOrder: string[]): string[] {
-  const remaining = new Set(names)
-  const ordered: string[] = []
-  for (const name of displayOrder) {
-    if (!remaining.has(name)) continue
-    ordered.push(name)
-    remaining.delete(name)
-  }
-  return [...ordered, ...remaining]
-}
-
 function parseNestedRatioMap(
   value: string
 ): Record<string, Record<string, number>> {
@@ -172,8 +135,7 @@ function parseNestedRatioMap(
 function buildGroupPricingRows(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string,
-  groupDisplayOrder: string
+  topupGroupRatio: string
 ): GroupPricingRow[] {
   const ratioMap = parseRatioMap(groupRatio)
   const usableMap = parseUsableMap(userUsableGroups)
@@ -184,10 +146,7 @@ function buildGroupPricingRows(
     ...Object.keys(topupMap),
   ])
 
-  return orderGroupNames(
-    [...names],
-    parseGroupDisplayOrder(groupDisplayOrder)
-  ).map((name) => ({
+  return [...names].map((name) => ({
     _id: createGroupPricingId(),
     name,
     ratio: String(normalizeRatio(ratioMap[name])),
@@ -219,11 +178,6 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
     GroupRatio: JSON.stringify(groupRatio, null, 2),
     UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
     TopupGroupRatio: JSON.stringify(topupGroupRatio, null, 2),
-    GroupDisplayOrder: JSON.stringify(
-      rows.map((row) => row.name.trim()).filter(Boolean),
-      null,
-      2
-    ),
   }
 }
 
@@ -233,34 +187,18 @@ function groupPricingSignature(rows: GroupPricingRow[]): string {
     groupRatio: parseRatioMap(serialized.GroupRatio),
     userUsableGroups: parseUsableMap(serialized.UserUsableGroups),
     topupGroupRatio: parseRatioMap(serialized.TopupGroupRatio),
-    groupDisplayOrder: parseGroupDisplayOrder(serialized.GroupDisplayOrder),
   })
 }
 
 function sourceGroupPricingSignature(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string,
-  groupDisplayOrder: string
+  topupGroupRatio: string
 ): string {
-  const ratioMap = parseRatioMap(groupRatio)
-  const usableMap = parseUsableMap(userUsableGroups)
-  const topupMap = parseRatioMap(topupGroupRatio)
-  const names = [
-    ...new Set([
-      ...Object.keys(ratioMap),
-      ...Object.keys(usableMap),
-      ...Object.keys(topupMap),
-    ]),
-  ]
   return JSON.stringify({
-    groupRatio: ratioMap,
-    userUsableGroups: usableMap,
-    topupGroupRatio: topupMap,
-    groupDisplayOrder: orderGroupNames(
-      names,
-      parseGroupDisplayOrder(groupDisplayOrder)
-    ),
+    groupRatio: parseRatioMap(groupRatio),
+    userUsableGroups: parseUsableMap(userUsableGroups),
+    topupGroupRatio: parseRatioMap(topupGroupRatio),
   })
 }
 
@@ -319,7 +257,6 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   userUsableGroups,
   groupGroupRatio,
   autoGroups,
-  groupDisplayOrder,
   groupSpecialUsableGroup,
   onChange,
 }: GroupRatioVisualEditorProps) {
@@ -392,7 +329,6 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         groupRatio={groupRatio}
         userUsableGroups={userUsableGroups}
         topupGroupRatio={topupGroupRatio}
-        groupDisplayOrder={groupDisplayOrder}
         onChange={onChange}
         onShowDetail={setDetailGroup}
       />
@@ -484,7 +420,6 @@ type GroupPricingTableProps = {
   groupRatio: string
   userUsableGroups: string
   topupGroupRatio: string
-  groupDisplayOrder: string
   onChange: (field: string, value: string) => void
   onShowDetail: (name: string) => void
 }
@@ -493,26 +428,19 @@ function GroupPricingTable({
   groupRatio,
   userUsableGroups,
   topupGroupRatio,
-  groupDisplayOrder,
   onChange,
   onShowDetail,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
-  const [draggedRowId, setDraggedRowId] = useState<string | null>(null)
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
-    buildGroupPricingRows(
-      groupRatio,
-      userUsableGroups,
-      topupGroupRatio,
-      groupDisplayOrder
-    )
+    buildGroupPricingRows(groupRatio, userUsableGroups, topupGroupRatio)
   )
+
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
       groupRatio,
       userUsableGroups,
-      topupGroupRatio,
-      groupDisplayOrder
+      topupGroupRatio
     )
     setRows((currentRows) => {
       if (groupPricingSignature(currentRows) === incomingSignature) {
@@ -521,11 +449,10 @@ function GroupPricingTable({
       return buildGroupPricingRows(
         groupRatio,
         userUsableGroups,
-        topupGroupRatio,
-        groupDisplayOrder
+        topupGroupRatio
       )
     })
-  }, [groupRatio, userUsableGroups, topupGroupRatio, groupDisplayOrder])
+  }, [groupRatio, userUsableGroups, topupGroupRatio])
 
   const emitRows = useCallback(
     (nextRows: GroupPricingRow[]) => {
@@ -534,18 +461,6 @@ function GroupPricingTable({
       onChange('GroupRatio', serialized.GroupRatio)
       onChange('UserUsableGroups', serialized.UserUsableGroups)
       onChange('TopupGroupRatio', serialized.TopupGroupRatio)
-      onChange('GroupDisplayOrder', serialized.GroupDisplayOrder)
-    },
-    [onChange]
-  )
-
-  const reorderRows = useCallback(
-    (nextRows: GroupPricingRow[]) => {
-      setRows(nextRows)
-      onChange(
-        'GroupDisplayOrder',
-        serializeGroupPricingRows(nextRows).GroupDisplayOrder
-      )
     },
     [onChange]
   )
@@ -591,42 +506,6 @@ function GroupPricingTable({
     [emitRows, rows]
   )
 
-  const moveRow = useCallback(
-    (id: string, direction: 'up' | 'down') => {
-      const currentIndex = rows.findIndex((row) => row._id === id)
-      const nextIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
-      if (currentIndex < 0 || nextIndex < 0 || nextIndex >= rows.length) return
-      const nextRows = [...rows]
-      ;[nextRows[currentIndex], nextRows[nextIndex]] = [
-        nextRows[nextIndex],
-        nextRows[currentIndex],
-      ]
-      reorderRows(nextRows)
-    },
-    [reorderRows, rows]
-  )
-
-  const dropRow = useCallback(
-    (targetId: string) => {
-      if (!draggedRowId || draggedRowId === targetId) {
-        setDraggedRowId(null)
-        return
-      }
-      const sourceIndex = rows.findIndex((row) => row._id === draggedRowId)
-      const targetIndex = rows.findIndex((row) => row._id === targetId)
-      if (sourceIndex < 0 || targetIndex < 0) {
-        setDraggedRowId(null)
-        return
-      }
-      const nextRows = [...rows]
-      const [movedRow] = nextRows.splice(sourceIndex, 1)
-      nextRows.splice(targetIndex, 0, movedRow)
-      reorderRows(nextRows)
-      setDraggedRowId(null)
-    },
-    [draggedRowId, reorderRows, rows]
-  )
-
   const duplicateNames = useMemo(() => {
     const counts = new Map<string, number>()
     for (const row of rows) {
@@ -639,122 +518,6 @@ function GroupPricingTable({
       .map(([name]) => name)
   }, [rows])
 
-  const columns = useMemo<StaticDataTableColumn<GroupPricingRow>[]>(
-    () => [
-      {
-        id: 'order',
-        header: t('Display order'),
-        className: 'w-16',
-      },
-      {
-        id: 'group',
-        header: t('Group name'),
-        className: 'min-w-40',
-        cell: (row) => (
-          <Input
-            value={row.name}
-            onChange={(event) => updateRow(row._id, 'name', event.target.value)}
-            aria-invalid={duplicateNames.includes(row.name.trim())}
-          />
-        ),
-      },
-      {
-        id: 'ratio',
-        header: t('Ratio'),
-        className: 'w-28',
-        cell: (row) => (
-          <Input
-            type='number'
-            min={0}
-            step={0.1}
-            value={row.ratio}
-            onChange={(event) =>
-              updateRow(row._id, 'ratio', event.target.value)
-            }
-          />
-        ),
-      },
-      {
-        id: 'topup-ratio',
-        header: t('Top-up ratio'),
-        className: 'w-28',
-        cell: (row) => (
-          <Input
-            type='number'
-            min={0}
-            step={0.1}
-            value={row.topupRatio}
-            placeholder={t('Not set')}
-            onChange={(event) =>
-              updateRow(row._id, 'topupRatio', event.target.value)
-            }
-          />
-        ),
-      },
-      {
-        id: 'selectable',
-        header: t('User selectable'),
-        className: 'w-28 text-center',
-        cell: (row) => (
-          <div className='flex justify-center'>
-            <Checkbox
-              checked={row.selectable}
-              onCheckedChange={(checked) =>
-                updateRow(row._id, 'selectable', checked === true)
-              }
-              aria-label={t('User selectable')}
-            />
-          </div>
-        ),
-      },
-      {
-        id: 'description',
-        header: t('Description'),
-        className: 'min-w-56',
-        cell: (row) =>
-          row.selectable ? (
-            <Input
-              value={row.description}
-              placeholder={t('Group description')}
-              onChange={(event) =>
-                updateRow(row._id, 'description', event.target.value)
-              }
-            />
-          ) : (
-            <span className='text-muted-foreground px-3 text-sm'>-</span>
-          ),
-      },
-      {
-        id: 'actions',
-        header: t('Actions'),
-        className: 'text-right',
-        cellClassName: 'text-right',
-        cell: (row) => (
-          <div className='flex justify-end gap-1'>
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => onShowDetail(row.name.trim())}
-              disabled={!row.name.trim()}
-              aria-label={t('Details')}
-            >
-              <Info className='h-4 w-4' />
-            </Button>
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => removeRow(row._id)}
-              aria-label={t('Delete')}
-            >
-              <Trash2 className='h-4 w-4' />
-            </Button>
-          </div>
-        ),
-      },
-    ],
-    [duplicateNames, onShowDetail, removeRow, t, updateRow]
-  )
-
   return (
     <Card className={sectionCardClassName}>
       <CardHeader className={sectionHeaderClassName}>
@@ -763,7 +526,7 @@ function GroupPricingTable({
             <CardTitle>{t('Pricing groups')}</CardTitle>
             <CardDescription>
               {t(
-                'All group names live here. Drag rows to control their order in user group selectors. Billing and routing are not affected.'
+                'All group names live here. Ratio applies when calls are billed as this group; top-up ratio applies to users whose account is in this group.'
               )}
             </CardDescription>
           </div>
@@ -775,51 +538,123 @@ function GroupPricingTable({
       </CardHeader>
       <CardContent>
         <div className='space-y-3'>
-          <StaticDataTable>
-            <TableHeader>
-              <TableRow>
-                {columns.map((column) => (
-                  <TableHead key={column.id} className={column.className}>
-                    {column.header}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <tbody
-              className='[&_tr:last-child]:border-0 [&>tr]:h-15'
-            >
-              {rows.length > 0 ? (
-                rows.map((row, index) => (
-                  <DraggableGroupPricingRow
-                    key={row._id}
-                    row={row}
-                    index={index}
-                    columns={columns}
-                    isDragging={draggedRowId === row._id}
-                    dragLabel={t(
-                      'Reorder {{group}}. Drag or use the arrow keys.',
-                      {
-                        group: row.name || t('group'),
-                      }
-                    )}
-                    onDragStart={setDraggedRowId}
-                    onDragEnd={() => setDraggedRowId(null)}
-                    onDrop={dropRow}
-                    onMove={moveRow}
+          <StaticDataTable
+            data={rows}
+            getRowKey={(row) => row._id}
+            emptyClassName='text-muted-foreground h-20 text-sm'
+            emptyContent={t('No groups yet. Add a group to get started.')}
+            columns={[
+              {
+                id: 'group',
+                header: t('Group name'),
+                className: 'min-w-40',
+                cell: (row) => (
+                  <Input
+                    value={row.name}
+                    onChange={(event) =>
+                      updateRow(row._id, 'name', event.target.value)
+                    }
+                    aria-invalid={duplicateNames.includes(row.name.trim())}
                   />
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={columns.length}
-                    className='text-muted-foreground h-20 text-center text-sm'
-                  >
-                    {t('No groups yet. Add a group to get started.')}
-                  </TableCell>
-                </TableRow>
-              )}
-            </tbody>
-          </StaticDataTable>
+                ),
+              },
+              {
+                id: 'ratio',
+                header: t('Ratio'),
+                className: 'w-28',
+                cell: (row) => (
+                  <Input
+                    type='number'
+                    min={0}
+                    step={0.1}
+                    value={row.ratio}
+                    onChange={(event) =>
+                      updateRow(row._id, 'ratio', event.target.value)
+                    }
+                  />
+                ),
+              },
+              {
+                id: 'topup-ratio',
+                header: t('Top-up ratio'),
+                className: 'w-28',
+                cell: (row) => (
+                  <Input
+                    type='number'
+                    min={0}
+                    step={0.1}
+                    value={row.topupRatio}
+                    placeholder={t('Not set')}
+                    onChange={(event) =>
+                      updateRow(row._id, 'topupRatio', event.target.value)
+                    }
+                  />
+                ),
+              },
+              {
+                id: 'selectable',
+                header: t('User selectable'),
+                className: 'w-28 text-center',
+                cell: (row) => (
+                  <div className='flex justify-center'>
+                    <Checkbox
+                      checked={row.selectable}
+                      onCheckedChange={(checked) =>
+                        updateRow(row._id, 'selectable', checked === true)
+                      }
+                      aria-label={t('User selectable')}
+                    />
+                  </div>
+                ),
+              },
+              {
+                id: 'description',
+                header: t('Description'),
+                className: 'min-w-56',
+                cell: (row) =>
+                  row.selectable ? (
+                    <Input
+                      value={row.description}
+                      placeholder={t('Group description')}
+                      onChange={(event) =>
+                        updateRow(row._id, 'description', event.target.value)
+                      }
+                    />
+                  ) : (
+                    <span className='text-muted-foreground px-3 text-sm'>
+                      -
+                    </span>
+                  ),
+              },
+              {
+                id: 'actions',
+                header: t('Actions'),
+                className: 'text-right',
+                cellClassName: 'text-right',
+                cell: (row) => (
+                  <div className='flex justify-end gap-1'>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => onShowDetail(row.name.trim())}
+                      disabled={!row.name.trim()}
+                      aria-label={t('Details')}
+                    >
+                      <Info className='h-4 w-4' />
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => removeRow(row._id)}
+                      aria-label={t('Delete')}
+                    >
+                      <Trash2 className='h-4 w-4' />
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+          />
 
           {duplicateNames.length > 0 && (
             <p className='text-destructive text-sm'>
@@ -831,102 +666,6 @@ function GroupPricingTable({
         </div>
       </CardContent>
     </Card>
-  )
-}
-
-type DraggableGroupPricingRowProps = {
-  row: GroupPricingRow
-  index: number
-  columns: StaticDataTableColumn<GroupPricingRow>[]
-  isDragging: boolean
-  dragLabel: string
-  onDragStart: (id: string) => void
-  onDragEnd: () => void
-  onDrop: (id: string) => void
-  onMove: (id: string, direction: 'up' | 'down') => void
-}
-
-function DraggableGroupPricingRow(props: DraggableGroupPricingRowProps) {
-  const dragHandleActive = useRef(false)
-
-  const handleDragStart = (event: DragEvent<HTMLTableRowElement>) => {
-    if (!dragHandleActive.current) {
-      event.preventDefault()
-      return
-    }
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', props.row._id)
-    props.onDragStart(props.row._id)
-  }
-
-  return (
-    <TableRow
-      draggable
-      onDragStart={handleDragStart}
-      onDragEnd={() => {
-        dragHandleActive.current = false
-        props.onDragEnd()
-      }}
-      onDragOver={(event) => {
-        event.preventDefault()
-        event.dataTransfer.dropEffect = 'move'
-      }}
-      onDrop={(event) => {
-        event.preventDefault()
-        dragHandleActive.current = false
-        props.onDrop(props.row._id)
-      }}
-      className={cn(
-        'relative',
-        props.isDragging && 'bg-muted opacity-70 shadow-sm'
-      )}
-    >
-      {props.columns.map((column) => {
-        const cellClassName =
-          typeof column.cellClassName === 'function'
-            ? column.cellClassName(props.row, props.index)
-            : column.cellClassName
-        return (
-          <TableCell
-            key={column.id}
-            className={cn('max-w-full min-w-0 overflow-hidden', cellClassName)}
-          >
-            {column.id === 'order' ? (
-              <Button
-                type='button'
-                variant='ghost'
-                size='icon'
-                className='size-11 cursor-grab touch-none active:cursor-grabbing'
-                aria-label={props.dragLabel}
-                onPointerDown={() => {
-                  dragHandleActive.current = true
-                }}
-                onPointerUp={() => {
-                  dragHandleActive.current = false
-                }}
-                onPointerCancel={() => {
-                  dragHandleActive.current = false
-                }}
-                onKeyDown={(event) => {
-                  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
-                    return
-                  }
-                  event.preventDefault()
-                  props.onMove(
-                    props.row._id,
-                    event.key === 'ArrowUp' ? 'up' : 'down'
-                  )
-                }}
-              >
-                <GripVertical className='text-muted-foreground size-4' />
-              </Button>
-            ) : (
-              column.cell?.(props.row, props.index)
-            )}
-          </TableCell>
-        )
-      })}
-    </TableRow>
   )
 }
 
@@ -1361,13 +1100,10 @@ function GroupOverrideDialog({
           <p className='text-muted-foreground text-xs'>
             {baseRatio !== undefined
               ? t('(instead of {{ratio}})', { ratio: baseRatio })
-              : t(
-                  'Multiplier applied when {{userGroup}} uses {{targetGroup}}',
-                  {
-                    userGroup: userGroup || t('this user group'),
-                    targetGroup: targetGroup || t('this token group'),
-                  }
-                )}
+              : t('Multiplier applied when {{userGroup}} uses {{targetGroup}}', {
+                  userGroup: userGroup || t('this user group'),
+                  targetGroup: targetGroup || t('this token group'),
+                })}
           </p>
         </div>
       </div>

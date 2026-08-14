@@ -5298,11 +5298,6 @@
     "Optional invitation code": "招待コード（任意）",
     "Registrations": "登録数",
     "{{count}} · {{mode}}": "{{count}} · {{mode}}",
-    "{{mode}} · {{count}} registered": "{{mode}} · {{count}}人登録済み",
-    "Group display order": "グループ表示順",
-    "JSON array controlling the order of groups in user selection lists. It does not affect billing or routing.": "ユーザー選択リストでのグループ順を制御する JSON 配列です。課金やルーティングには影響しません。",
-    "All group names live here. Drag rows to control their order in user group selectors. Billing and routing are not affected.": "すべてのグループをここで管理します。行をドラッグするとユーザーのグループ選択欄の表示順を変更できます。課金やルーティングには影響しません。",
-    "Display order": "表示順",
-    "Reorder {{group}}. Drag or use the arrow keys.": "{{group}} の順序を変更します。ドラッグするか矢印キーを使用してください。"
+    "{{mode}} · {{count}} registered": "{{mode}} · {{count}}人登録済み"
   }
 }

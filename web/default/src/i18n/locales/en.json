@@ -5298,11 +5298,6 @@
     "Optional invitation code": "Optional invitation code",
     "Registrations": "Registrations",
     "{{count}} · {{mode}}": "{{count}} · {{mode}}",
-    "{{mode}} · {{count}} registered": "{{mode}} · {{count}} registered",
-    "Group display order": "Group display order",
-    "JSON array controlling the order of groups in user selection lists. It does not affect billing or routing.": "JSON array controlling the order of groups in user selection lists. It does not affect billing or routing.",
-    "All group names live here. Drag rows to control their order in user group selectors. Billing and routing are not affected.": "All group names live here. Drag rows to control their order in user group selectors. Billing and routing are not affected.",
-    "Display order": "Display order",
-    "Reorder {{group}}. Drag or use the arrow keys.": "Reorder {{group}}. Drag or use the arrow keys."
+    "{{mode}} · {{count}} registered": "{{mode}} · {{count}} registered"
   }
 }
