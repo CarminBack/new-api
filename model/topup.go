@@ -107,6 +107,81 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 	})
 }
 
+// RechargeEpay atomically completes an Epay order and credits its user.
+// alreadyDone is true when a previous callback completed the same order.
+func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (alreadyDone bool, err error) {
+	if tradeNo == "" {
+		return false, errors.New("未提供支付单号")
+	}
+
+	refCol := "`trade_no`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		refCol = `"trade_no"`
+	}
+
+	var quotaToAdd int
+	topUp := &TopUp{}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if topUp.PaymentProvider != PaymentProviderEpay {
+			return ErrPaymentMethodMismatch
+		}
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyDone = true
+			return nil
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+		if actualPaymentMethod != "" && topUp.PaymentMethod != actualPaymentMethod {
+			topUp.PaymentMethod = actualPaymentMethod
+		}
+
+		quotaAmount := decimal.NewFromFloat(topUp.QuotaAmount)
+		if topUp.QuotaAmount <= 0 {
+			quotaAmount = decimal.NewFromInt(topUp.Amount)
+		}
+		quotaToAdd, err = common.QuotaFromDecimalStrict(
+			quotaAmount.Mul(decimal.NewFromFloat(common.QuotaPerUnit)).Truncate(0),
+		)
+		if err != nil || quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
+
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		if !errors.Is(err, ErrTopUpNotFound) && !errors.Is(err, ErrPaymentMethodMismatch) && !errors.Is(err, ErrTopUpStatusInvalid) {
+			common.SysError("epay topup failed: " + err.Error())
+		}
+		return false, err
+	}
+	if alreadyDone {
+		return true, nil
+	}
+	if err := invalidateUserCache(topUp.UserId); err != nil {
+		common.SysLog(fmt.Sprintf("failed to invalidate user quota cache after epay topup: %s", err.Error()))
+	}
+
+	common.SysLog(fmt.Sprintf("易支付充值成功 trade_no=%s user_id=%d quota_to_add=%d money=%.2f", topUp.TradeNo, topUp.UserId, quotaToAdd, topUp.Money))
+	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentProviderEpay)
+	return false, nil
+}
+
 func Recharge(referenceId string, customerId string, callerIp string) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")

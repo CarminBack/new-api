@@ -146,3 +146,9 @@ func QuotaFromDecimalChecked(d decimal.Decimal) (int, *QuotaClamp) {
 	f, _ := d.Round(0).Float64()
 	return saturateQuota(f, "QuotaFromDecimal")
 }
+
+// QuotaFromDecimalStrict rejects values that would otherwise be saturated at
+// the database's int32 quota boundary.
+func QuotaFromDecimalStrict(d decimal.Decimal) (int, error) {
+	return strictQuota(QuotaFromDecimalChecked(d))
+}
