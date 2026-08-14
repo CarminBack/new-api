@@ -5298,6 +5298,11 @@
     "Optional invitation code": "Mã mời không bắt buộc",
     "Registrations": "Lượt đăng ký",
     "{{count}} · {{mode}}": "{{count}} · {{mode}}",
-    "{{mode}} · {{count}} registered": "{{mode}} · đã đăng ký {{count}}"
+    "{{mode}} · {{count}} registered": "{{mode}} · đã đăng ký {{count}}",
+    "Group display order": "Thứ tự hiển thị nhóm",
+    "JSON array controlling the order of groups in user selection lists. It does not affect billing or routing.": "Mảng JSON kiểm soát thứ tự nhóm trong danh sách lựa chọn của người dùng. Thiết lập này không ảnh hưởng đến tính phí hoặc định tuyến.",
+    "All group names live here. Drag rows to control their order in user group selectors. Billing and routing are not affected.": "Quản lý tất cả nhóm tại đây. Kéo các hàng để thay đổi thứ tự trong bộ chọn nhóm của người dùng. Việc tính phí và định tuyến không bị ảnh hưởng.",
+    "Display order": "Thứ tự hiển thị",
+    "Reorder {{group}}. Drag or use the arrow keys.": "Sắp xếp lại {{group}}. Kéo hoặc sử dụng các phím mũi tên."
   }
 }

@@ -120,14 +120,21 @@ export function ApiKeysMutateDrawer({
 
   const models = modelsData?.data || []
   const groupsRaw = groupsData?.data || {}
-  const groups: ApiKeyGroupOption[] = Object.entries(groupsRaw).map(
-    ([key, info]) => ({
-      value: key,
-      label: key,
-      desc: info.desc || key,
-      ratio: info.ratio,
-    })
-  )
+  const groupNames = [
+    ...new Set([...(groupsData?.group_order || []), ...Object.keys(groupsRaw)]),
+  ]
+  const groups: ApiKeyGroupOption[] = groupNames.flatMap((key) => {
+    const info = groupsRaw[key]
+    if (!info) return []
+    return [
+      {
+        value: key,
+        label: key,
+        desc: info.desc || key,
+        ratio: info.ratio,
+      },
+    ]
+  })
   const backendHasAuto = groups.some((g) => g.value === 'auto')
   const schema = getApiKeyFormSchema(t)
 

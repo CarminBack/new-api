@@ -5298,6 +5298,11 @@
     "Optional invitation code": "可选邀请码",
     "Registrations": "注册人数",
     "{{count}} · {{mode}}": "{{count}} · {{mode}}",
-    "{{mode}} · {{count}} registered": "{{mode}} · 已注册 {{count}} 人"
+    "{{mode}} · {{count}} registered": "{{mode}} · 已注册 {{count}} 人",
+    "Group display order": "分组展示顺序",
+    "JSON array controlling the order of groups in user selection lists. It does not affect billing or routing.": "用于控制用户选择列表中分组顺序的 JSON 数组，不影响计费或路由。",
+    "All group names live here. Drag rows to control their order in user group selectors. Billing and routing are not affected.": "在此管理全部分组。拖动行可调整用户分组选择器中的展示顺序，不影响计费或路由。",
+    "Display order": "展示顺序",
+    "Reorder {{group}}. Drag or use the arrow keys.": "调整 {{group}} 的顺序。可拖动或使用方向键。"
   }
 }

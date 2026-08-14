@@ -5298,6 +5298,11 @@
     "Optional invitation code": "Code d'invitation facultatif",
     "Registrations": "Inscriptions",
     "{{count}} · {{mode}}": "{{count}} · {{mode}}",
-    "{{mode}} · {{count}} registered": "{{mode}} · {{count}} inscription(s)"
+    "{{mode}} · {{count}} registered": "{{mode}} · {{count}} inscription(s)",
+    "Group display order": "Ordre d’affichage des groupes",
+    "JSON array controlling the order of groups in user selection lists. It does not affect billing or routing.": "Tableau JSON contrôlant l’ordre des groupes dans les listes de sélection utilisateur. Il n’affecte ni la facturation ni le routage.",
+    "All group names live here. Drag rows to control their order in user group selectors. Billing and routing are not affected.": "Tous les groupes sont gérés ici. Faites glisser les lignes pour définir leur ordre dans les sélecteurs utilisateur. La facturation et le routage ne sont pas affectés.",
+    "Display order": "Ordre d’affichage",
+    "Reorder {{group}}. Drag or use the arrow keys.": "Réorganiser {{group}}. Faites glisser ou utilisez les touches fléchées."
   }
 }
