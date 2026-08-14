@@ -1,21 +1,21 @@
-package dto
+package dto_test
 
 import (
 	"testing"
 
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/require"
 )
 
 func TestImageRequestBuiltInUnitPrice(t *testing.T) {
 	tests := []struct {
 		name    string
-		request ImageRequest
+		request dto.ImageRequest
 		want    float64
 	}{
 		{
 			name: "gpt-image-2 medium 2k square",
-			request: ImageRequest{
+			request: dto.ImageRequest{
 				Model:   "gpt-image-2",
 				Size:    "2048x2048",
 				Quality: "medium",
@@ -24,7 +24,7 @@ func TestImageRequestBuiltInUnitPrice(t *testing.T) {
 		},
 		{
 			name: "gpt-image-2 high 4k landscape",
-			request: ImageRequest{
+			request: dto.ImageRequest{
 				Model:   "gpt-image-2",
 				Size:    "3840x2160",
 				Quality: "high",
@@ -33,7 +33,7 @@ func TestImageRequestBuiltInUnitPrice(t *testing.T) {
 		},
 		{
 			name: "banana 2 4k",
-			request: ImageRequest{
+			request: dto.ImageRequest{
 				Model: "gemini-3.1-flash-image",
 				Size:  "4096x4096",
 			},
@@ -41,7 +41,7 @@ func TestImageRequestBuiltInUnitPrice(t *testing.T) {
 		},
 		{
 			name: "banana pro 2k",
-			request: ImageRequest{
+			request: dto.ImageRequest{
 				Model: "gemini-3-pro-image",
 				Size:  "2048x2048",
 			},
@@ -49,7 +49,7 @@ func TestImageRequestBuiltInUnitPrice(t *testing.T) {
 		},
 		{
 			name: "empty size defaults to 1k",
-			request: ImageRequest{
+			request: dto.ImageRequest{
 				Model: "gemini-3.1-flash-image",
 			},
 			want: 0.067,
@@ -64,45 +64,8 @@ func TestImageRequestBuiltInUnitPrice(t *testing.T) {
 	}
 }
 
-func TestImageRequestImageGroupUnitPrice(t *testing.T) {
-	tests := []struct {
-		name string
-		size string
-		want float64
-	}{
-		{name: "empty defaults to 1k", want: 0.10},
-		{name: "1k", size: "1024x1024", want: 0.10},
-		{name: "2k", size: "2048x2048", want: 0.14},
-		{name: "4k", size: "4096x4096", want: 0.20},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			req := ImageRequest{
-				Model: "any-image-model",
-				Size:  test.size,
-			}
-			meta := req.GetTokenCountMeta()
-			require.InDelta(t, test.want, meta.ImageGroupUnitPrice, 0.000001)
-		})
-	}
-}
-
-func TestImageRequestImageGroupUnitPriceUsesSystemSetting(t *testing.T) {
-	original := ratio_setting.ImageGroupPrice2JSONString()
-	t.Cleanup(func() {
-		require.NoError(t, ratio_setting.UpdateImageGroupPriceByJSONString(original))
-	})
-	require.NoError(t, ratio_setting.UpdateImageGroupPriceByJSONString(`{"1k":0.12,"2k":0.16,"4k":0.24}`))
-
-	req := ImageRequest{Model: "any-image-model", Size: "2048x2048"}
-	meta := req.GetTokenCountMeta()
-
-	require.InDelta(t, 0.16, meta.ImageGroupUnitPrice, 0.000001)
-}
-
 func TestImageRequestUnknownBuiltInPriceKeepsLegacyImageRatio(t *testing.T) {
-	req := ImageRequest{
+	req := dto.ImageRequest{
 		Model:   "dall-e-3",
 		Size:    "1024x1792",
 		Quality: "hd",
@@ -134,7 +97,7 @@ func TestImageSizeTier(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tier, ok := ImageSizeTier(test.size)
+			tier, ok := dto.ImageSizeTier(test.size)
 			require.Equal(t, test.wantOK, ok)
 			require.Equal(t, test.wantTier, tier)
 		})

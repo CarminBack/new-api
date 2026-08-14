@@ -19,7 +19,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -105,18 +104,20 @@ func CanvasOAuthAuthorize(c *gin.Context) {
 		return
 	}
 
-	session := sessions.Default(c)
-	userID, ok := sessionInt(session.Get("id"))
-	if !ok || userID <= 0 || session.Get("username") == nil {
+	rawRefreshToken, err := c.Cookie(service.RefreshCookieName)
+	if err != nil || rawRefreshToken == "" {
 		returnTo := c.Request.URL.RequestURI()
 		c.Redirect(http.StatusFound, "/sign-in?redirect="+url.QueryEscape(returnTo))
 		return
 	}
-	user, err := model.GetUserById(userID, false)
+	bundle, user, err := service.RefreshLoginSession(rawRefreshToken, "", c.ClientIP(), c.Request.UserAgent())
 	if err != nil || user.Status != common.UserStatusEnabled {
+		service.ClearRefreshCookie(c)
 		c.Redirect(http.StatusFound, "/sign-in?redirect="+url.QueryEscape(c.Request.URL.RequestURI()))
 		return
 	}
+	service.WriteRefreshCookie(c, bundle.RefreshToken)
+	userID := user.Id
 
 	rawCode, err := common.GenerateRandomCharsKey(64)
 	if err != nil {
@@ -304,17 +305,4 @@ func getOrCreateCanvasToken(userID int, tokenName, tokenGroup string) (*model.To
 
 func canvasOAuthError(c *gin.Context, status int, code, description string) {
 	c.JSON(status, gin.H{"error": code, "error_description": description})
-}
-
-func sessionInt(value any) (int, bool) {
-	switch typed := value.(type) {
-	case int:
-		return typed, true
-	case int64:
-		return int(typed), true
-	case float64:
-		return int(typed), true
-	default:
-		return 0, false
-	}
 }

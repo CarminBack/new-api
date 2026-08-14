@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
@@ -403,7 +404,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 		err := fmt.Errorf("provider response did not contain a task id")
 		return "", body, service.TaskErrorWrapper(err, "invalid_response", http.StatusBadGateway)
 	}
-	video := dto.NewOpenAIVideo()
+	video := kitdto.NewOpenAIVideo()
 	video.ID = info.PublicTaskID
 	video.TaskID = info.PublicTaskID
 	video.Model = info.OriginModelName
@@ -481,7 +482,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 }
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
-	video := dto.NewOpenAIVideo()
+	video := kitdto.NewOpenAIVideo()
 	video.ID = task.TaskID
 	video.TaskID = task.TaskID
 	video.Model = task.Properties.OriginModelName
@@ -491,7 +492,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	video.CompletedAt = task.UpdatedAt
 	video.SetMetadata("result_url", task.GetResultURL())
 	if task.Status == model.TaskStatusFailure {
-		video.Error = &dto.OpenAIVideoError{Code: "task_failed", Message: task.FailReason}
+		video.Error = &kitdto.OpenAIVideoError{Code: "task_failed", Message: task.FailReason}
 	}
 	return common.Marshal(video)
 }

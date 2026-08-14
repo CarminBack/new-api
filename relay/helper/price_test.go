@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
-	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -186,15 +187,19 @@ func TestModelPriceHelperImageGroupUsesResolutionUnitPriceForAnyModel(t *testing
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(w)
+	common.SetContextKey(ctx, constant.ContextKeyImageResolutionTier, "2k")
+	original := ratio_setting.ImageGroupPrice2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateImageGroupPriceByJSONString(original))
+	})
+	require.NoError(t, ratio_setting.UpdateImageGroupPriceByJSONString(`{"1k":0.10,"2k":0.14,"4k":0.20}`))
 
 	info := &relaycommon.RelayInfo{
 		OriginModelName: "unknown-image-model",
 		UsingGroup:      "image",
 	}
 
-	priceData, err := ModelPriceHelper(ctx, info, 1, &types.TokenCountMeta{
-		ImageGroupUnitPrice: 0.14,
-	})
+	priceData, err := ModelPriceHelper(ctx, info, 1, &types.TokenCountMeta{})
 
 	require.NoError(t, err)
 	require.True(t, priceData.UsePrice)

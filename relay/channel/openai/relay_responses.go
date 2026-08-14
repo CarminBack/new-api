@@ -8,12 +8,12 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,28 +35,32 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
-	if responsesResponse.HasImageGenerationCall() {
-		c.Set("image_generation_call", true)
-		c.Set("image_generation_call_quality", responsesResponse.GetQuality())
-		c.Set("image_generation_call_size", responsesResponse.GetSize())
-	}
-
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	// compute usage
 	usage, _ := responsesUsage(&responsesResponse)
-	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
-		return usage, nil
-	}
-	// 解析 Tools 用量
-	for _, tool := range responsesResponse.Tools {
-		buildToolinfo, ok := info.ResponsesUsageInfo.BuiltInTools[common.Interface2String(tool["type"])]
-		if !ok || buildToolinfo == nil {
-			logger.LogError(c, fmt.Sprintf("BuiltInTools not found for tool type: %v", tool["type"]))
-			continue
+	if info != nil {
+		// Count actual tool invocations from Output, not request declarations.
+		for _, output := range responsesResponse.Output {
+			switch output.Type {
+			case dto.BuildInCallWebSearchCall:
+				info.CountBillableToolCall(dto.BuildInCallWebSearchCall, "")
+			case dto.BuildInCallFileSearchCall:
+				info.CountBillableToolCall(dto.BuildInCallFileSearchCall, "")
+			case dto.BuildInCallFunctionCall:
+				info.CountBillableToolCall(dto.BuildInCallFunctionCall, output.Name)
+			}
 		}
-		buildToolinfo.CallCount++
+
+		imageCounter := &relaycommon.ImageGenerationCallCounter{}
+		if !relaycommon.IsNonBillableResponsesStatus(responsesResponse.Status) {
+			for i := range responsesResponse.Output {
+				idx := i
+				imageCounter.Observe(&responsesResponse.Output[i], &idx)
+			}
+		}
+		imageCounter.Commit(info)
 	}
 	return usage, nil
 }
@@ -106,6 +110,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseTextBuilder strings.Builder
 	var finalResponse *dto.OpenAIResponsesResponse
 	var streamErr *types.NewAPIError
+	imageCounter := &relaycommon.ImageGenerationCallCounter{}
+	imageCommitted := false
 	type pendingEvent struct {
 		response dto.ResponsesStreamResponse
 		data     string
@@ -163,12 +169,17 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				sr.Stop(streamErr)
 				return
 			}
-			if finalResponse != nil {
-				if finalResponse.HasImageGenerationCall() {
-					c.Set("image_generation_call", true)
-					c.Set("image_generation_call_quality", finalResponse.GetQuality())
-					c.Set("image_generation_call_size", finalResponse.GetSize())
+			if !imageCommitted {
+				if finalResponse == nil || relaycommon.IsNonBillableResponsesStatus(finalResponse.Status) {
+					imageCounter.Reset()
+				} else {
+					for i := range finalResponse.Output {
+						idx := i
+						imageCounter.Observe(&finalResponse.Output[i], &idx)
+					}
 				}
+				imageCounter.Commit(info)
+				imageCommitted = true
 			}
 			if !flushPending() {
 				sr.Stop(streamErr)
@@ -180,7 +191,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				return
 			}
 			sr.Done()
-		case "response.failed", "response.error":
+		case "response.failed", "response.error", "response.cancelled", "response.canceled":
+			if !imageCommitted {
+				imageCounter.Reset()
+				imageCounter.Commit(info)
+				imageCommitted = true
+			}
 			info.StreamTerminalEvent = streamResponse.Type
 			actualOutputStarted := streamActualOutputStarted()
 			recordResponsesUpstreamFailure(c, info, streamResponse, actualOutputStarted)
@@ -235,14 +251,17 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 				sr.Stop(streamErr)
 			}
 		case dto.ResponsesOutputTypeItemDone:
-			// 函数调用处理
 			if streamResponse.Item != nil {
 				switch streamResponse.Item.Type {
 				case dto.BuildInCallWebSearchCall:
-					if info != nil && info.ResponsesUsageInfo != nil && info.ResponsesUsageInfo.BuiltInTools != nil {
-						if webSearchTool, exists := info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolWebSearchPreview]; exists && webSearchTool != nil {
-							webSearchTool.CallCount++
-						}
+					info.CountBillableToolCall(dto.BuildInCallWebSearchCall, "")
+				case dto.BuildInCallFileSearchCall:
+					info.CountBillableToolCall(dto.BuildInCallFileSearchCall, "")
+				case dto.BuildInCallFunctionCall:
+					info.CountBillableToolCall(dto.BuildInCallFunctionCall, streamResponse.Item.Name)
+				case dto.ResponsesOutputTypeImageGenerationCall:
+					if !imageCommitted {
+						imageCounter.Observe(streamResponse.Item, streamResponse.OutputIndex)
 					}
 				}
 			}

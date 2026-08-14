@@ -8,12 +8,13 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -24,7 +25,7 @@ func TestShouldRetryTaskRelaySkipsForbidden(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(nil)
 
-	retry := shouldRetryTaskRelay(ctx, 19, &dto.TaskError{StatusCode: http.StatusForbidden}, 5)
+	retry := shouldRetryTaskRelay(ctx, 19, &taskdto.TaskError{StatusCode: http.StatusForbidden}, 5)
 
 	require.False(t, retry)
 }
@@ -34,7 +35,7 @@ func TestTaskTemporaryRedirectRespectsReplayProtection(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 
-	decision := decideTaskChannelFailure(ctx, &dto.TaskError{StatusCode: http.StatusTemporaryRedirect}, 1)
+	decision := decideTaskChannelFailure(ctx, &taskdto.TaskError{StatusCode: http.StatusTemporaryRedirect}, 1)
 
 	require.Equal(t, service.ChannelFailureTransient, decision.Class)
 	require.False(t, decision.Retry)

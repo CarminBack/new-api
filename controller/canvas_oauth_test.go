@@ -8,8 +8,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +18,6 @@ func TestCanvasOAuthAuthorizeRedirectsAnonymousUserToDefaultSignIn(t *testing.T)
 	t.Setenv("CANVAS_OAUTH_REDIRECT_URI", "https://canvas.example/auth/callback")
 
 	router := gin.New()
-	router.Use(sessions.Sessions("session", cookie.NewStore([]byte("test-session-secret"))))
 	router.GET("/oauth/authorize", CanvasOAuthAuthorize)
 
 	request := httptest.NewRequest(http.MethodGet, "/oauth/authorize?response_type=code&client_id=canvas&redirect_uri=https%3A%2F%2Fcanvas.example%2Fauth%2Fcallback&state=1234567890abcdef&code_challenge=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ&code_challenge_method=S256", nil)
@@ -37,7 +34,6 @@ func TestVideoOAuthAuthorizeRedirectsAnonymousUserToDefaultSignIn(t *testing.T) 
 	t.Setenv("VIDEO_OAUTH_REDIRECT_URI", "https://video.example/auth/callback")
 
 	router := gin.New()
-	router.Use(sessions.Sessions("session", cookie.NewStore([]byte("test-session-secret"))))
 	router.GET("/oauth/authorize", CanvasOAuthAuthorize)
 
 	request := httptest.NewRequest(http.MethodGet, "/oauth/authorize?response_type=code&client_id=video&redirect_uri=https%3A%2F%2Fvideo.example%2Fauth%2Fcallback&state=1234567890abcdef&code_challenge=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ&code_challenge_method=S256", nil)
