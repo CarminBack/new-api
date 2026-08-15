@@ -20,6 +20,8 @@ const (
 	systemTaskRunnerIdleInterval = 15 * time.Second
 	systemTaskLockTTL            = 60 * time.Second
 	logCleanupBatchSize          = 100
+	logRetentionBatchDelay       = 200 * time.Millisecond
+	logRetentionInterval         = 24 * time.Hour
 
 	// systemTaskSchedulerInterval throttles how often the scheduler/stale-lock
 	// pass runs, independent of how often the runner wakes to claim tasks.
@@ -83,6 +85,20 @@ func (logCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runner
 	runLogCleanupTask(ctx, task, runnerID)
 }
 
+func (logCleanupHandler) Enabled() bool {
+	return common.GetEnvOrDefaultBool("LOG_RETENTION_ENABLED", false) && len(configuredLogRetentionPolicies()) > 0
+}
+
+func (logCleanupHandler) Interval() time.Duration { return logRetentionInterval }
+
+func (logCleanupHandler) NewPayload() any {
+	return LogCleanupPayload{
+		RetentionPolicies: configuredLogRetentionPolicies(),
+		BatchSize:         logCleanupBatchSize,
+		BatchDelayMillis:  int(logRetentionBatchDelay / time.Millisecond),
+	}
+}
+
 func init() {
 	RegisterSystemTaskHandler(logCleanupHandler{})
 	RegisterSystemTaskHandler(requestDiagnosticCleanupHandler{})
@@ -119,8 +135,10 @@ func (requestDiagnosticCleanupHandler) Run(ctx context.Context, task *model.Syst
 }
 
 type LogCleanupPayload struct {
-	TargetTimestamp int64 `json:"target_timestamp"`
-	BatchSize       int   `json:"batch_size"`
+	TargetTimestamp   int64                `json:"target_timestamp,omitempty"`
+	RetentionPolicies []LogRetentionPolicy `json:"retention_policies,omitempty"`
+	BatchSize         int                  `json:"batch_size"`
+	BatchDelayMillis  int                  `json:"batch_delay_millis,omitempty"`
 }
 
 type LogCleanupState struct {
@@ -132,6 +150,57 @@ type LogCleanupState struct {
 
 type LogCleanupResult struct {
 	DeletedCount int64 `json:"deleted_count"`
+}
+
+type LogRetentionPolicy struct {
+	LogType       int `json:"log_type"`
+	RetentionDays int `json:"retention_days"`
+}
+
+type LogRetentionPolicyState struct {
+	LogType         int   `json:"log_type"`
+	RetentionDays   int   `json:"retention_days"`
+	TargetTimestamp int64 `json:"target_timestamp"`
+	Total           int64 `json:"total"`
+	Processed       int64 `json:"processed"`
+	Remaining       int64 `json:"remaining"`
+}
+
+type LogRetentionState struct {
+	Policies  []LogRetentionPolicyState `json:"policies"`
+	Total     int64                     `json:"total"`
+	Processed int64                     `json:"processed"`
+	Remaining int64                     `json:"remaining"`
+	Progress  int                       `json:"progress"`
+}
+
+type LogRetentionResult struct {
+	DeletedCount int64                     `json:"deleted_count"`
+	Policies     []LogRetentionPolicyState `json:"policies"`
+}
+
+func configuredLogRetentionPolicies() []LogRetentionPolicy {
+	configs := []struct {
+		LogType    int
+		Env        string
+		DefaultDay int
+	}{
+		{model.LogTypeTopup, "LOG_RETENTION_TOPUP_DAYS", 365},
+		{model.LogTypeConsume, "LOG_RETENTION_CONSUME_DAYS", 180},
+		{model.LogTypeManage, "LOG_RETENTION_MANAGE_DAYS", 365},
+		{model.LogTypeError, "LOG_RETENTION_ERROR_DAYS", 30},
+		{model.LogTypeRefund, "LOG_RETENTION_REFUND_DAYS", 365},
+		{model.LogTypeLogin, "LOG_RETENTION_LOGIN_DAYS", 180},
+	}
+	policies := make([]LogRetentionPolicy, 0, len(configs))
+	for _, config := range configs {
+		days := common.GetEnvOrDefault(config.Env, config.DefaultDay)
+		if days <= 0 {
+			continue
+		}
+		policies = append(policies, LogRetentionPolicy{LogType: config.LogType, RetentionDays: days})
+	}
+	return policies
 }
 
 var (
@@ -372,6 +441,10 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 		failSystemTask(task, runnerID, err)
 		return
 	}
+	if len(payload.RetentionPolicies) > 0 {
+		runLogRetentionCleanupTask(ctx, task, runnerID, payload)
+		return
+	}
 	if payload.TargetTimestamp <= 0 {
 		failSystemTask(task, runnerID, errors.New("target timestamp is required"))
 		return
@@ -451,6 +524,116 @@ func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID str
 	}
 
 	result := LogCleanupResult{DeletedCount: state.Processed}
+	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
+		logSystemTaskLockError(ctx, task, err)
+	}
+}
+
+func runLogRetentionCleanupTask(ctx context.Context, task *model.SystemTask, runnerID string, payload LogCleanupPayload) {
+	if payload.BatchSize <= 0 {
+		payload.BatchSize = logCleanupBatchSize
+	}
+	if payload.BatchSize > 1000 {
+		failSystemTask(task, runnerID, errors.New("log retention batch size cannot exceed 1000"))
+		return
+	}
+	if payload.BatchDelayMillis < 0 || payload.BatchDelayMillis > 5000 {
+		failSystemTask(task, runnerID, errors.New("log retention batch delay must be between 0 and 5000 milliseconds"))
+		return
+	}
+
+	state := LogRetentionState{Policies: make([]LogRetentionPolicyState, 0, len(payload.RetentionPolicies))}
+	seenTypes := make(map[int]struct{}, len(payload.RetentionPolicies))
+	now := common.GetTimestamp()
+	for _, policy := range payload.RetentionPolicies {
+		switch policy.LogType {
+		case model.LogTypeTopup, model.LogTypeConsume, model.LogTypeManage,
+			model.LogTypeError, model.LogTypeRefund, model.LogTypeLogin:
+		default:
+			failSystemTask(task, runnerID, fmt.Errorf("unsupported log retention type: %d", policy.LogType))
+			return
+		}
+		if _, exists := seenTypes[policy.LogType]; exists {
+			failSystemTask(task, runnerID, fmt.Errorf("duplicate log retention type: %d", policy.LogType))
+			return
+		}
+		seenTypes[policy.LogType] = struct{}{}
+		if policy.RetentionDays <= 0 || policy.RetentionDays > 36500 {
+			failSystemTask(task, runnerID, fmt.Errorf("invalid retention days for log type %d", policy.LogType))
+			return
+		}
+
+		targetTimestamp := now - int64(policy.RetentionDays)*24*60*60
+		total, err := model.CountOldLogByType(ctx, policy.LogType, targetTimestamp)
+		if err != nil {
+			failSystemTask(task, runnerID, err)
+			return
+		}
+		state.Policies = append(state.Policies, LogRetentionPolicyState{
+			LogType:         policy.LogType,
+			RetentionDays:   policy.RetentionDays,
+			TargetTimestamp: targetTimestamp,
+			Total:           total,
+			Remaining:       total,
+		})
+		state.Total += total
+	}
+	state.Remaining = state.Total
+	state.Progress = logCleanupProgress(state.Processed, state.Total)
+	if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
+		logSystemTaskLockError(ctx, task, err)
+		return
+	}
+
+	for i := range state.Policies {
+		policy := &state.Policies[i]
+		for policy.Remaining > 0 {
+			rowsAffected, err := model.DeleteOldLogByTypeBatch(ctx, policy.LogType, policy.TargetTimestamp, payload.BatchSize)
+			if err != nil {
+				failSystemTask(task, runnerID, err)
+				return
+			}
+			if rowsAffected == 0 {
+				failSystemTask(task, runnerID, fmt.Errorf("no log rows were deleted for type %d", policy.LogType))
+				return
+			}
+
+			policy.Processed += rowsAffected
+			state.Processed += rowsAffected
+			if rowsAffected >= policy.Remaining {
+				policy.Remaining = 0
+			} else {
+				policy.Remaining -= rowsAffected
+			}
+			if rowsAffected >= state.Remaining {
+				state.Remaining = 0
+			} else {
+				state.Remaining -= rowsAffected
+			}
+			state.Progress = logCleanupProgress(state.Processed, state.Total)
+			if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
+				logSystemTaskLockError(ctx, task, err)
+				return
+			}
+
+			if state.Remaining > 0 && payload.BatchDelayMillis > 0 {
+				select {
+				case <-ctx.Done():
+					failSystemTask(task, runnerID, ctx.Err())
+					return
+				case <-time.After(time.Duration(payload.BatchDelayMillis) * time.Millisecond):
+				}
+			}
+		}
+	}
+
+	state.Remaining = 0
+	state.Progress = 100
+	if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
+		logSystemTaskLockError(ctx, task, err)
+		return
+	}
+	result := LogRetentionResult{DeletedCount: state.Processed, Policies: state.Policies}
 	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
 		logSystemTaskLockError(ctx, task, err)
 	}

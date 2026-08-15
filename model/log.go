@@ -744,6 +744,16 @@ func CountOldLog(ctx context.Context, targetTimestamp int64) (int64, error) {
 	return total, nil
 }
 
+func CountOldLogByType(ctx context.Context, logType int, targetTimestamp int64) (int64, error) {
+	var total int64
+	if err := LOG_DB.WithContext(ctx).Model(&Log{}).
+		Where("type = ? AND created_at < ?", logType, targetTimestamp).
+		Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
 // ClearExpiredRequestDiagnostics removes only the admin request bodies whose
 // retention window has elapsed. The surrounding error log remains available
 // for normal troubleshooting. ClickHouse logs are left untouched here because
@@ -821,6 +831,42 @@ func DeleteOldLogBatch(ctx context.Context, targetTimestamp int64, limit int) (i
 
 	result := LOG_DB.WithContext(ctx).Where("created_at < ?", targetTimestamp).Limit(limit).Delete(&Log{})
 	if nil != result.Error {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
+func DeleteOldLogByTypeBatch(ctx context.Context, logType int, targetTimestamp int64, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		total, err := CountOldLogByType(ctx, logType, targetTimestamp)
+		if err != nil {
+			return 0, err
+		}
+		if total == 0 {
+			return 0, nil
+		}
+		if err := LOG_DB.WithContext(ctx).Exec(
+			"ALTER TABLE logs DELETE WHERE type = ? AND created_at < ? SETTINGS mutations_sync = 1",
+			logType,
+			targetTimestamp,
+		).Error; err != nil {
+			return 0, err
+		}
+		return total, nil
+	}
+
+	result := LOG_DB.WithContext(ctx).
+		Where("type = ? AND created_at < ?", logType, targetTimestamp).
+		Limit(limit).
+		Delete(&Log{})
+	if result.Error != nil {
 		return 0, result.Error
 	}
 	return result.RowsAffected, nil
