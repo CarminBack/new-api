@@ -98,6 +98,32 @@ func TestRunLogRetentionCleanupAppliesPerTypeCutoffs(t *testing.T) {
 	}
 }
 
+func TestRunLogRetentionCleanupSucceedsWithoutMatchingLogs(t *testing.T) {
+	truncate(t)
+	payload := LogCleanupPayload{
+		RetentionPolicies: []LogRetentionPolicy{{LogType: model.LogTypeError, RetentionDays: 30}},
+		BatchSize:         100,
+	}
+	task, err := model.CreateSystemTask(model.SystemTaskTypeLogCleanup, payload, nil)
+	require.NoError(t, err)
+	claimedTask, claimed, err := model.ClaimSystemTask(task.ID, task.Type, "retention-runner", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	runLogCleanupTask(context.Background(), claimedTask, "retention-runner")
+
+	reloaded, err := model.GetSystemTaskByTaskID(task.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, reloaded)
+	assert.Equal(t, model.SystemTaskStatusSucceeded, reloaded.Status)
+	var result LogRetentionResult
+	require.NoError(t, common.UnmarshalJsonStr(reloaded.Result, &result))
+	assert.Zero(t, result.DeletedCount)
+	require.Len(t, result.Policies, 1)
+	assert.Zero(t, result.Policies[0].Processed)
+	assert.Zero(t, result.Policies[0].Remaining)
+}
+
 func TestRunLogRetentionCleanupRejectsUnmanagedType(t *testing.T) {
 	truncate(t)
 	now := common.GetTimestamp()

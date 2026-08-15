@@ -627,12 +627,6 @@ func runLogRetentionCleanupTask(ctx context.Context, task *model.SystemTask, run
 		}
 	}
 
-	state.Remaining = 0
-	state.Progress = 100
-	if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
-		logSystemTaskLockError(ctx, task, err)
-		return
-	}
 	result := LogRetentionResult{DeletedCount: state.Processed, Policies: state.Policies}
 	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
 		logSystemTaskLockError(ctx, task, err)
