@@ -64,6 +64,7 @@ func DecideChannelFailureForModel(c *gin.Context, err *types.NewAPIError, modelN
 		(decision.Class == ChannelFailureUncertain && allowUncertainRetry)
 	if isPotentiallyNonIdempotentPath(path) {
 		if isImageGenerationPath(path) && isSafeImageFallback(err, decision) {
+			decision.Retry = true
 			decision.Reason += ":safe_image_fallback"
 		} else {
 			decision.Retry = false
@@ -423,7 +424,17 @@ func isSafeImageFallback(err *types.NewAPIError, decision ChannelFailureDecision
 	switch decision.Class {
 	case ChannelFailureRateLimited, ChannelFailurePoolAccount, ChannelFailureChannelFatal, ChannelFailureKeyCapability:
 		return true
+	case ChannelFailureUncertain:
+		return err.StatusCode == 524 &&
+			err.GetErrorCode() != types.ErrorCodeReadResponseBodyFailed &&
+			err.GetErrorCode() != types.ErrorCodeBadResponseBody
 	case ChannelFailureTransient:
+		if err.GetErrorCode() == types.ErrorCodeReadResponseBodyFailed || err.GetErrorCode() == types.ErrorCodeBadResponseBody {
+			return false
+		}
+		if err.StatusCode == http.StatusInternalServerError {
+			return true
+		}
 		if types.IsChannelError(err) {
 			return true
 		}
@@ -434,12 +445,7 @@ func isSafeImageFallback(err *types.NewAPIError, decision ChannelFailureDecision
 		if err.StatusCode != http.StatusBadGateway && err.StatusCode != http.StatusServiceUnavailable {
 			return false
 		}
-		switch err.GetErrorCode() {
-		case types.ErrorCodeReadResponseBodyFailed, types.ErrorCodeBadResponseBody:
-			return false
-		default:
-			return err.Err != nil
-		}
+		return err.Err != nil
 	default:
 		return false
 	}

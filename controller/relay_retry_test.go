@@ -74,8 +74,9 @@ func TestAllowsUncertainCrossChannelRetry(t *testing.T) {
 func TestRelayRetriesRemainingCapsImageFallback(t *testing.T) {
 	require.Equal(t, 5, relayRetriesRemaining("/v1/responses", 0, 5))
 	require.Equal(t, 4, relayRetriesRemaining("/v1/responses", 1, 5))
-	require.Equal(t, 1, relayRetriesRemaining("/v1/images/generations", 0, 5))
-	require.Equal(t, 0, relayRetriesRemaining("/v1/images/edits", 1, 5))
+	require.Equal(t, 2, relayRetriesRemaining("/v1/images/generations", 0, 5))
+	require.Equal(t, 1, relayRetriesRemaining("/v1/images/edits", 1, 5))
+	require.Equal(t, 0, relayRetriesRemaining("/v1/images/edits", 2, 5))
 	require.Equal(t, 0, relayRetriesRemaining("/v1/images/edits", 0, 0))
 }
 

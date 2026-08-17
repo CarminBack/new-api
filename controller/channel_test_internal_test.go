@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -35,6 +36,57 @@ func TestAutomaticChannelTestPromptsAreJSONSafe(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, strings.ToLower(string(body)), "json")
 	}
+}
+
+func TestImageGroupChannelTestUsesImageGenerationEndpoint(t *testing.T) {
+	channel := &model.Channel{
+		Type:  constant.ChannelTypeOpenAI,
+		Group: "default,Image",
+	}
+
+	endpointType := normalizeChannelTestEndpoint(channel, "gpt-image-2", "")
+	require.Equal(t, string(constant.EndpointTypeImageGeneration), endpointType)
+
+	request := buildTestRequest("gpt-image-2", endpointType, channel, false)
+	imageRequest, ok := request.(*dto.ImageRequest)
+	require.True(t, ok)
+	require.Equal(t, "gpt-image-2", imageRequest.Model)
+	require.Equal(t, "1024x1024", imageRequest.Size)
+	require.Equal(t, uint(1), *imageRequest.N)
+}
+
+func TestImageGroupChannelTestKeepsExplicitEndpoint(t *testing.T) {
+	channel := &model.Channel{
+		Type:  constant.ChannelTypeOpenAI,
+		Group: "Image",
+	}
+
+	endpointType := normalizeChannelTestEndpoint(channel, "gpt-image-2", string(constant.EndpointTypeOpenAI))
+	require.Equal(t, string(constant.EndpointTypeOpenAI), endpointType)
+}
+
+func TestImageGroupChannelTestUsesMappedUpstreamModel(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("model_mapping", `{"gpt-image-2":"gpt-image-2-low"}`)
+	request := &dto.ImageRequest{
+		Model:  "gpt-image-2",
+		Prompt: "a cute cat",
+		N:      common.GetPointer(uint(1)),
+		Size:   "1024x1024",
+	}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-image-2",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "gpt-image-2",
+		},
+	}
+
+	err := relayhelper.ModelMappedHelper(ctx, info, request)
+
+	require.NoError(t, err)
+	require.True(t, info.IsModelMapped)
+	require.Equal(t, "gpt-image-2-low", info.UpstreamModelName)
+	require.Equal(t, "gpt-image-2-low", request.Model)
 }
 
 func TestValidateChannelProxy(t *testing.T) {

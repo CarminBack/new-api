@@ -33,7 +33,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const maxImageFallbacks = 1
+const maxImageFallbacks = 2
 
 func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	var err *types.NewAPIError
