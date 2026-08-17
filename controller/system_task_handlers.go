@@ -33,9 +33,11 @@ type channelHealthProbeHandler struct{}
 
 const (
 	channelHealthProbeTimeout     = 15 * time.Second
-	imageHealthProbeTimeout       = 90 * time.Second
+	imageHealthProbeTimeout       = 5 * time.Minute
 	channelHealthProbeConcurrency = 4
 	channelHealthProbeRunLimit    = 20
+	imageHealthProbeConcurrency   = 3
+	imageHealthProbeRunLimit      = 6
 )
 
 type channelHealthProbeOutcome struct {
@@ -77,21 +79,22 @@ func channelHealthProbeEndpointType(requestPath string) string {
 	}
 }
 
-func (channelHealthProbeHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
-	testUserID, err := resolveChannelTestUserID(nil)
-	if err != nil {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
-		return
-	}
+func startChannelHealthProbeWorkers(
+	ctx context.Context,
+	testUserID int,
+	concurrency int,
+	runLimit int,
+	claim func(int) []service.ChannelHealthProbeTarget,
+	results chan<- channelHealthProbeOutcome,
+	workers *sync.WaitGroup,
+) {
 	var claimCount atomic.Int32
-	results := make(chan channelHealthProbeOutcome, channelHealthProbeConcurrency)
-	var workers sync.WaitGroup
-	for range channelHealthProbeConcurrency {
+	for range concurrency {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			for ctx.Err() == nil && claimCount.Add(1) <= channelHealthProbeRunLimit {
-				targets := service.ClaimDueChannelHealthProbes(1)
+			for ctx.Err() == nil && claimCount.Add(1) <= int32(runLimit) {
+				targets := claim(1)
 				if len(targets) == 0 {
 					return
 				}
@@ -99,6 +102,24 @@ func (channelHealthProbeHandler) Run(ctx context.Context, task *model.SystemTask
 			}
 		}()
 	}
+}
+
+func (channelHealthProbeHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	results := make(chan channelHealthProbeOutcome, channelHealthProbeConcurrency+imageHealthProbeConcurrency)
+	var workers sync.WaitGroup
+	startChannelHealthProbeWorkers(
+		ctx, testUserID, channelHealthProbeConcurrency, channelHealthProbeRunLimit,
+		service.ClaimDueStandardChannelHealthProbes, results, &workers,
+	)
+	startChannelHealthProbeWorkers(
+		ctx, testUserID, imageHealthProbeConcurrency, imageHealthProbeRunLimit,
+		service.ClaimDueImageChannelHealthProbes, results, &workers,
+	)
 	go func() {
 		workers.Wait()
 		close(results)

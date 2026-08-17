@@ -42,6 +42,7 @@ func TestChannelHealthStateCrossDatabase(t *testing.T) {
 				Revision:               2,
 				ProbeID:                7,
 				ProbeType:              "initial",
+				ProbeFailures:          4,
 				RecoveryTargetCapacity: 128,
 				RecoveryCapacity:       2,
 				RecoverySuccesses:      3,
@@ -57,6 +58,7 @@ func TestChannelHealthStateCrossDatabase(t *testing.T) {
 			require.Equal(t, "open", saved.State)
 			require.Equal(t, int64(200), saved.NextProbeAt)
 			require.Equal(t, uint64(3), saved.Revision)
+			require.Equal(t, 4, saved.ProbeFailures)
 			require.Equal(t, 128, saved.RecoveryTargetCapacity)
 			require.Equal(t, 2, saved.RecoveryCapacity)
 			require.Equal(t, 3, saved.RecoverySuccesses)

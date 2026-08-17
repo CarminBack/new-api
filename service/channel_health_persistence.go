@@ -54,6 +54,7 @@ func persistRouteHealthStateLocked(identity channelHealthIdentity, state *channe
 		RecoveryCapacity:       state.Capacity,
 		RecoverySuccesses:      state.RecoverySuccesses,
 		RecoveryStartedAt:      persistentTime(state.LastRecoveryAt),
+		ProbeFailures:          state.ProbeFailures,
 	}
 	if err := model.SaveChannelHealthState(record); err != nil {
 		logger.LogError(nil, fmt.Sprintf("persist route health state failed: channel #%d: %v", state.ChannelID, err))
@@ -84,6 +85,7 @@ func persistAggregateHealthStateLocked(identity channelHealthIdentity, state *ch
 		ProbeID:       state.ProbeID,
 		ProbeType:     string(state.ProbeType),
 		ProbeLeaseEnd: persistentTime(state.ProbeLeaseUntil),
+		ProbeFailures: state.ProbeFailures,
 	}
 	if err := model.SaveChannelHealthState(record); err != nil {
 		logger.LogError(nil, fmt.Sprintf("persist channel health state failed: channel #%d: %v", state.ChannelID, err))
@@ -171,6 +173,7 @@ func restorePersistentChannelHealthRecord(record model.ChannelHealthState, chann
 		state.ProbeScope = ChannelHealthProbeScopeChannel
 		state.ProbeRouteLabel = identity.RouteLabel
 		state.ProbeRouteKey = identity.RouteKey
+		state.ProbeFailures = max(record.ProbeFailures, 0)
 		state.LastFailureReason = record.Reason
 		if record.OpenedAt > 0 {
 			state.LastFailureAt = time.Unix(record.OpenedAt, 0)
@@ -225,6 +228,7 @@ func restorePersistentChannelHealthRecord(record model.ChannelHealthState, chann
 		state.Capacity = capacity
 		state.RecoverySuccesses = recoverySuccesses
 		state.RecoveryFailures = 0
+		state.ProbeFailures = 0
 		state.LastRecoveryAt = lastRecoveryAt
 		state.LastFailureReason = record.Reason
 		if record.OpenedAt > 0 {
@@ -237,6 +241,7 @@ func restorePersistentChannelHealthRecord(record model.ChannelHealthState, chann
 	due := restoredProbeDue(record, now)
 	state.ProbeGeneration = record.Revision
 	state.ProbeType = probeType
+	state.ProbeFailures = max(record.ProbeFailures, 0)
 	state.LastFailureReason = record.Reason
 	if record.OpenedAt > 0 {
 		state.LastFailureAt = time.Unix(record.OpenedAt, 0)

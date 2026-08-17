@@ -20,6 +20,7 @@ func TestChannelHealthStateLifecycle(t *testing.T) {
 		Revision:               2,
 		ProbeID:                7,
 		ProbeType:              "initial",
+		ProbeFailures:          4,
 		RecoveryTargetCapacity: 128,
 		RecoveryCapacity:       2,
 		RecoverySuccesses:      3,
@@ -32,6 +33,7 @@ func TestChannelHealthStateLifecycle(t *testing.T) {
 	require.Len(t, states, 1)
 	require.Equal(t, state.ScopeKey, states[0].ScopeKey)
 	require.Equal(t, uint64(2), states[0].Revision)
+	require.Equal(t, 4, states[0].ProbeFailures)
 	require.Equal(t, 128, states[0].RecoveryTargetCapacity)
 	require.Equal(t, 2, states[0].RecoveryCapacity)
 	require.Equal(t, 3, states[0].RecoverySuccesses)

@@ -22,6 +22,7 @@ type ChannelHealthState struct {
 	ProbeID                uint64 `json:"probe_id" gorm:"bigint"`
 	ProbeType              string `json:"probe_type" gorm:"type:varchar(16)"`
 	ProbeLeaseEnd          int64  `json:"probe_lease_end" gorm:"bigint"`
+	ProbeFailures          int    `json:"probe_failures"`
 	RecoveryTargetCapacity int    `json:"recovery_target_capacity"`
 	RecoveryCapacity       int    `json:"recovery_capacity"`
 	RecoverySuccesses      int    `json:"recovery_successes"`

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -27,8 +28,8 @@ func TestChannelHealthProbeEndpointTypeForImagePaths(t *testing.T) {
 }
 
 func TestChannelHealthProbeTimeoutForImagePaths(t *testing.T) {
-	require.Equal(t, imageHealthProbeTimeout, channelHealthProbeTimeoutForPath("/v1/images/generations"))
-	require.Equal(t, channelHealthProbeTimeout, channelHealthProbeTimeoutForPath("/v1/responses"))
+	require.Equal(t, 5*time.Minute, channelHealthProbeTimeoutForPath("/v1/images/generations"))
+	require.Equal(t, 15*time.Second, channelHealthProbeTimeoutForPath("/v1/responses"))
 }
 
 func TestValidateChannelHealthRecoveryPayload(t *testing.T) {
