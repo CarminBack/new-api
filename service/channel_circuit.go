@@ -48,6 +48,7 @@ const (
 	channelHealthRateLimitConfirmFor     = 2 * time.Minute
 	channelHealthRecoverySuccessTarget   = 3
 	channelHealthProbeLease              = 20 * time.Second
+	imageChannelHealthProbeLease         = 2 * time.Minute
 
 	ginKeyChannelHealthReservation = "channel_health_reservation"
 )
@@ -496,14 +497,18 @@ func shouldScheduleChannelProbeLocked(state *channelRouteHealthState, now time.T
 func ChannelHealthProbeSupportsPath(requestPath string) bool {
 	switch requestPath {
 	case "/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/responses/compact",
-		"/v1/messages", "/v1/embeddings", "/v1/rerank", "/rerank":
+		"/v1/messages", "/v1/embeddings", "/v1/images/generations", "/v1/images/edits",
+		"/v1/images/variations", "/v1/rerank", "/rerank":
 		return true
 	default:
 		return false
 	}
 }
 
-func channelHealthProbeLeaseForPath(_ string) time.Duration {
+func channelHealthProbeLeaseForPath(requestPath string) time.Duration {
+	if isImageGenerationPath(requestPath) {
+		return imageChannelHealthProbeLease
+	}
 	return channelHealthProbeLease
 }
 
@@ -541,7 +546,7 @@ func startRouteRecoveryLocked(state *channelRouteHealthState, now time.Time) {
 // are selecting a candidate must still reserve capacity with
 // AllowChannelHealthAttempt before sending a request.
 func IsChannelHealthAvailable(channel *model.Channel, modelName string, requestPath string) bool {
-	if channel == nil || isImageGenerationPath(requestPath) {
+	if channel == nil {
 		return true
 	}
 	now := channelCircuitNow()
@@ -559,7 +564,7 @@ func IsChannelHealthAvailable(channel *model.Channel, modelName string, requestP
 // IsChannelHealthCircuitClosed ignores transient capacity saturation and only
 // reports whether the channel remains eligible for affinity ownership.
 func IsChannelHealthCircuitClosed(channel *model.Channel, modelName string, requestPath string) bool {
-	if channel == nil || isImageGenerationPath(requestPath) {
+	if channel == nil {
 		return true
 	}
 	now := channelCircuitNow()
@@ -581,7 +586,7 @@ func IsChannelPriorityAffinityReady(channel *model.Channel, modelName string, re
 	if !IsChannelHealthAvailable(channel, modelName, requestPath) {
 		return false
 	}
-	if channel == nil || isImageGenerationPath(requestPath) {
+	if channel == nil {
 		return true
 	}
 	now := channelCircuitNow()
@@ -1049,9 +1054,6 @@ func allowChannelHealthAttempt(c *gin.Context, channel *model.Channel, channelID
 	if channelID <= 0 && channel == nil {
 		return true
 	}
-	if isImageGenerationPath(requestPath) {
-		return true
-	}
 	now := channelCircuitNow()
 	identity := buildChannelHealthIdentity(channel, channelID, modelName, requestPath, now)
 	if !hasHealthyChannelKey(channel, identity, now) {
@@ -1120,7 +1122,7 @@ func releaseRouteReservation(reservation channelHealthReservation) {
 }
 
 func recordChannelCircuitFailure(c *gin.Context, channelID int, modelName string, requestPath string, class ChannelFailureClass, reason string, statusCode int) {
-	if channelID <= 0 || isImageGenerationPath(requestPath) {
+	if channelID <= 0 {
 		return
 	}
 	now := channelCircuitNow()
@@ -1222,7 +1224,7 @@ func RecordChannelCircuitFailureDecision(c *gin.Context, channelID int, modelNam
 }
 
 func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string, requestPath string) {
-	if channelID <= 0 || isImageGenerationPath(requestPath) {
+	if channelID <= 0 {
 		return
 	}
 	now := channelCircuitNow()
@@ -1295,7 +1297,7 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 // ReleaseChannelCircuitProbe releases reserved capacity when setup fails before
 // an upstream attempt. Active health probes are managed separately.
 func ReleaseChannelCircuitProbe(c *gin.Context, channelID int, modelName string, requestPath string) {
-	if channelID <= 0 || isImageGenerationPath(requestPath) {
+	if channelID <= 0 {
 		return
 	}
 	reservation := currentHealthReservation(c, channelID, modelName, requestPath)
@@ -1320,7 +1322,7 @@ func ReleaseCurrentChannelHealthReservation(c *gin.Context) {
 }
 
 func ChannelHealthKeyExclusions(channel *model.Channel, modelName string, requestPath string, existing map[int]struct{}) map[int]struct{} {
-	if channel == nil || isImageGenerationPath(requestPath) {
+	if channel == nil {
 		return existing
 	}
 	identity := buildChannelHealthIdentity(channel, 0, modelName, requestPath, channelCircuitNow())

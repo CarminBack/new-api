@@ -33,6 +33,7 @@ type channelHealthProbeHandler struct{}
 
 const (
 	channelHealthProbeTimeout     = 15 * time.Second
+	imageHealthProbeTimeout       = 90 * time.Second
 	channelHealthProbeConcurrency = 4
 	channelHealthProbeRunLimit    = 20
 )
@@ -42,7 +43,10 @@ type channelHealthProbeOutcome struct {
 	succeeded bool
 }
 
-func channelHealthProbeTimeoutForPath(_ string) time.Duration {
+func channelHealthProbeTimeoutForPath(requestPath string) time.Duration {
+	if service.IsImageGenerationPath(requestPath) {
+		return imageHealthProbeTimeout
+	}
 	return channelHealthProbeTimeout
 }
 

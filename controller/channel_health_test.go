@@ -26,6 +26,11 @@ func TestChannelHealthProbeEndpointTypeForImagePaths(t *testing.T) {
 	}
 }
 
+func TestChannelHealthProbeTimeoutForImagePaths(t *testing.T) {
+	require.Equal(t, imageHealthProbeTimeout, channelHealthProbeTimeoutForPath("/v1/images/generations"))
+	require.Equal(t, channelHealthProbeTimeout, channelHealthProbeTimeoutForPath("/v1/responses"))
+}
+
 func TestValidateChannelHealthRecoveryPayload(t *testing.T) {
 	keyIndex := 2
 	tests := []struct {
