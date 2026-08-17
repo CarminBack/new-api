@@ -515,7 +515,7 @@ func channelHealthProbeLeaseForPath(requestPath string) time.Duration {
 	return channelHealthProbeLease
 }
 
-func channelHealthProbeBackoffForPath(requestPath string, scopeKey string, consecutiveFailures int) time.Duration {
+func channelHealthProbeBackoffForPath(requestPath string, consecutiveFailures int) time.Duration {
 	if !isImageGenerationPath(requestPath) {
 		return channelHealthOpenFor
 	}
@@ -527,13 +527,7 @@ func channelHealthProbeBackoffForPath(requestPath string, scopeKey string, conse
 			break
 		}
 	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(scopeKey))
-	jitter := time.Duration(int64(backoff) * int64(h.Sum32()%1001) / 10000)
-	if backoff == imageChannelHealthProbeMaxBackoff {
-		return backoff - jitter
-	}
-	return backoff + jitter
+	return backoff
 }
 
 func startRouteRecoveryLocked(state *channelRouteHealthState, now time.Time) {
@@ -1672,7 +1666,7 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 			return
 		}
 		aggregate.ProbeFailures++
-		probeBackoff := channelHealthProbeBackoffForPath(target.RequestPath, target.identity.ChannelKey, aggregate.ProbeFailures)
+		probeBackoff := channelHealthProbeBackoffForPath(target.RequestPath, aggregate.ProbeFailures)
 		if !isConclusiveProbeFailure(target, result.Class) {
 			aggregate.LastFailureReason = result.Reason
 			aggregate.LastFailureStatusCode = result.StatusCode
@@ -1759,7 +1753,7 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 		return
 	}
 	state.ProbeFailures++
-	probeBackoff := channelHealthProbeBackoffForPath(target.RequestPath, target.identity.RouteKey, state.ProbeFailures)
+	probeBackoff := channelHealthProbeBackoffForPath(target.RequestPath, state.ProbeFailures)
 	if !isConclusiveProbeFailure(target, result.Class) {
 		state.LastFailureClass = result.Class
 		state.LastFailureReason = result.Reason

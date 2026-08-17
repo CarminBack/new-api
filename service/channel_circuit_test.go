@@ -446,13 +446,7 @@ func TestImageProbeBackoffIncreasesAndCapsAtOneHour(t *testing.T) {
 		state := routeStateForTest(37, "gpt-image-2", requestPath)
 		require.Equal(t, attempt+1, state.ProbeFailures)
 		actualBackoff := state.OpenUntil.Sub(*now)
-		if expectedBackoff == time.Hour {
-			require.GreaterOrEqual(t, actualBackoff, 54*time.Minute)
-			require.LessOrEqual(t, actualBackoff, time.Hour)
-		} else {
-			require.GreaterOrEqual(t, actualBackoff, expectedBackoff)
-			require.LessOrEqual(t, actualBackoff, expectedBackoff+expectedBackoff/10)
-		}
+		require.Equal(t, expectedBackoff, actualBackoff)
 		*now = state.OpenUntil
 	}
 
@@ -540,8 +534,7 @@ func TestRestorePersistentChannelHealthRestoresImageProbeState(t *testing.T) {
 	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
 	state := routeStateForTestWithChannel(channel, "gpt-image-2", "/v1/images/edits")
 	require.Equal(t, 3, state.ProbeFailures)
-	require.GreaterOrEqual(t, state.OpenUntil.Sub(*now), 8*time.Minute)
-	require.LessOrEqual(t, state.OpenUntil.Sub(*now), 8*time.Minute+48*time.Second)
+	require.Equal(t, 8*time.Minute, state.OpenUntil.Sub(*now))
 	*now = state.OpenUntil
 	targets = ClaimDueImageChannelHealthProbes(1)
 	require.Len(t, targets, 1)
