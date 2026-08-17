@@ -69,6 +69,7 @@ type ChannelKeyHealthSnapshot struct {
 
 type ChannelAdaptiveHealthSnapshot struct {
 	ChannelID            int                          `json:"channel_id"`
+	ImageGroup           bool                         `json:"image_group,omitempty"`
 	ChannelState         string                       `json:"channel_state"`
 	ChannelOpenUntil     int64                        `json:"channel_open_until"`
 	ChannelNextProbeAt   int64                        `json:"channel_next_probe_at"`
@@ -103,6 +104,7 @@ func channelHealthSnapshotEntry(byChannel map[channelHealthSnapshotKey]*ChannelA
 	if entry == nil {
 		entry = &ChannelAdaptiveHealthSnapshot{
 			ChannelID:    channelID,
+			ImageGroup:   isImageChannel(channelID, fingerprint),
 			ChannelState: ChannelHealthStateHealthy,
 			fingerprint:  fingerprint,
 		}
@@ -121,6 +123,17 @@ func unixTime(value time.Time) int64 {
 		return 0
 	}
 	return value.Unix()
+}
+
+func nextProbeAt(probeDue time.Time, openUntil time.Time, probeInFlight bool, leaseUntil time.Time) int64 {
+	next := probeDue
+	if openUntil.After(next) {
+		next = openUntil
+	}
+	if probeInFlight && leaseUntil.After(next) {
+		next = leaseUntil
+	}
+	return unixTime(next)
 }
 
 func routeHealthStateName(state *channelRouteHealthState, now time.Time) string {
@@ -183,7 +196,7 @@ func GetChannelAdaptiveHealthSnapshots(includeHealthy bool) []ChannelAdaptiveHea
 				RequestPath:            requestPath,
 				State:                  stateName,
 				OpenUntil:              unixTime(state.OpenUntil),
-				NextProbeAt:            unixTime(state.ProbeDue),
+				NextProbeAt:            nextProbeAt(state.ProbeDue, state.OpenUntil, state.ProbeInFlight, state.ProbeLeaseUntil),
 				ProbeInFlight:          state.ProbeInFlight,
 				InFlight:               state.InFlight,
 				Capacity:               state.Capacity,
@@ -251,7 +264,7 @@ func GetChannelAdaptiveHealthSnapshots(includeHealthy bool) []ChannelAdaptiveHea
 			entry := channelHealthSnapshotEntry(byChannel, state.ChannelID, state.Fingerprint)
 			entry.ChannelState = stateName
 			entry.ChannelOpenUntil = unixTime(state.OpenUntil)
-			entry.ChannelNextProbeAt = unixTime(state.ProbeDue)
+			entry.ChannelNextProbeAt = nextProbeAt(state.ProbeDue, state.OpenUntil, state.ProbeInFlight, state.ProbeLeaseUntil)
 			entry.ChannelProbeInFlight = state.ProbeInFlight
 			entry.ChannelFailureReason = state.LastFailureReason
 		}

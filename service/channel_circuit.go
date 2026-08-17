@@ -49,6 +49,7 @@ const (
 	channelHealthRecoverySuccessTarget   = 3
 	channelHealthProbeLease              = 20 * time.Second
 	imageChannelHealthProbeLease         = 5*time.Minute + 30*time.Second
+	imageHealthProbeInitialBackoff       = 5 * time.Minute
 	imageChannelHealthProbeMaxBackoff    = time.Hour
 
 	ginKeyChannelHealthReservation = "channel_health_reservation"
@@ -177,6 +178,7 @@ type channelHealthIdentity struct {
 	RouteKey        string
 	RouteLabel      string
 	InitialCapacity int
+	ImageGroup      bool
 	Keys            []string
 }
 
@@ -329,6 +331,7 @@ func buildChannelHealthIdentity(channel *model.Channel, channelID int, modelName
 		RouteKey:        channelKey + ":route:" + shortChannelHealthHash(routeLabel),
 		RouteLabel:      routeLabel,
 		InitialCapacity: initialChannelHealthCapacity(channel, fingerprint, now),
+		ImageGroup:      channelInImageGroup(channel),
 	}
 	if channel != nil {
 		if channel.ChannelInfo.IsMultiKey {
@@ -508,18 +511,52 @@ func ChannelHealthProbeSupportsPath(requestPath string) bool {
 	}
 }
 
-func channelHealthProbeLeaseForPath(requestPath string) time.Duration {
-	if isImageGenerationPath(requestPath) {
+func channelInImageGroup(channel *model.Channel) bool {
+	if channel == nil {
+		return false
+	}
+	for _, group := range channel.GetGroups() {
+		if strings.EqualFold(group, "image") {
+			return true
+		}
+	}
+	return false
+}
+
+func isImageChannel(channelID int, fingerprint string) bool {
+	if channelID <= 0 {
+		return false
+	}
+	channel, err := model.CacheGetChannel(channelID)
+	if err != nil || channel == nil {
+		return false
+	}
+	if fingerprint != "" && fingerprint != "legacy" && channelConfigFingerprint(channel) != fingerprint {
+		return false
+	}
+	return channelInImageGroup(channel)
+}
+
+func isImageHealthRoute(channelID int, fingerprint string, requestPath string) bool {
+	return isImageGenerationPath(requestPath) || isImageChannel(channelID, fingerprint)
+}
+
+func channelHealthProbeLeaseFor(imageRoute bool) time.Duration {
+	if imageRoute {
 		return imageChannelHealthProbeLease
 	}
 	return channelHealthProbeLease
 }
 
-func channelHealthProbeBackoffForPath(requestPath string, consecutiveFailures int) time.Duration {
-	if !isImageGenerationPath(requestPath) {
+func channelHealthProbeLeaseForPath(requestPath string) time.Duration {
+	return channelHealthProbeLeaseFor(isImageGenerationPath(requestPath))
+}
+
+func channelHealthProbeBackoffFor(imageRoute bool, consecutiveFailures int) time.Duration {
+	if !imageRoute {
 		return channelHealthOpenFor
 	}
-	backoff := channelHealthOpenFor
+	backoff := imageHealthProbeInitialBackoff
 	for failure := 1; failure < consecutiveFailures; failure++ {
 		backoff *= 2
 		if backoff >= imageChannelHealthProbeMaxBackoff {
@@ -528,6 +565,10 @@ func channelHealthProbeBackoffForPath(requestPath string, consecutiveFailures in
 		}
 	}
 	return backoff
+}
+
+func channelHealthProbeBackoffForPath(requestPath string, consecutiveFailures int) time.Duration {
+	return channelHealthProbeBackoffFor(isImageGenerationPath(requestPath), consecutiveFailures)
 }
 
 func startRouteRecoveryLocked(state *channelRouteHealthState, now time.Time) {
@@ -999,6 +1040,7 @@ func recordAggregateSuccess(identity channelHealthIdentity, now time.Time) {
 }
 
 func recoverChannelRoutesAfterProbe(channelID int, fingerprint string, now time.Time) {
+	imageChannel := isImageChannel(channelID, fingerprint)
 	for index := range memoryChannelHealth.RouteShards {
 		shard := &memoryChannelHealth.RouteShards[index]
 		shard.Lock()
@@ -1007,10 +1049,11 @@ func recoverChannelRoutesAfterProbe(channelID int, fingerprint string, now time.
 				continue
 			}
 			_, requestPath := splitChannelRouteLabel(state.RouteLabel)
+			imageRoute := isImageGenerationPath(requestPath) || imageChannel
 			if !state.OpenUntil.IsZero() || state.Suspect || state.ProbeInFlight ||
-				(isImageGenerationPath(requestPath) && state.RecoveryTargetCapacity > 0) {
+				(imageRoute && (state.RecoveryTargetCapacity > 0 || state.Capacity < state.InitialCapacity)) {
 				state.ProbeGeneration++
-				if isImageGenerationPath(requestPath) {
+				if imageRoute {
 					restoreImageRouteImmediatelyLocked(state, now)
 				} else {
 					startRouteRecoveryLocked(state, now)
@@ -1276,6 +1319,7 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 	recovered := false
 	shard.Lock()
 	state := getRouteHealthStateLocked(shard, identity, now)
+	imageRoute := isImageGenerationPath(requestPath) || identity.ImageGroup
 	hadPersistentState := state.Suspect || state.ProbeInFlight || !state.OpenUntil.IsZero()
 	wasRecovering := state.RecoveryTargetCapacity > 0
 	if state.InFlight > 0 {
@@ -1294,8 +1338,8 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 		state.ProbeLeaseUntil = time.Time{}
 	}
 	if !state.OpenUntil.IsZero() ||
-		(isImageGenerationPath(requestPath) && state.RecoveryTargetCapacity > 0) {
-		if isImageGenerationPath(requestPath) {
+		(imageRoute && (state.RecoveryTargetCapacity > 0 || state.Capacity < state.InitialCapacity)) {
+		if imageRoute {
 			restoreImageRouteImmediatelyLocked(state, now)
 		} else {
 			startRouteRecoveryLocked(state, now)
@@ -1464,20 +1508,22 @@ func HasDueChannelHealthProbe() bool {
 	return false
 }
 
-type channelHealthProbePathFilter func(string) bool
+type channelHealthProbePathFilter func(bool) bool
 
 func ClaimDueChannelHealthProbes(limit int) []ChannelHealthProbeTarget {
 	return claimDueChannelHealthProbes(limit, nil)
 }
 
 func ClaimDueStandardChannelHealthProbes(limit int) []ChannelHealthProbeTarget {
-	return claimDueChannelHealthProbes(limit, func(requestPath string) bool {
-		return !isImageGenerationPath(requestPath)
+	return claimDueChannelHealthProbes(limit, func(imageRoute bool) bool {
+		return !imageRoute
 	})
 }
 
 func ClaimDueImageChannelHealthProbes(limit int) []ChannelHealthProbeTarget {
-	return claimDueChannelHealthProbes(limit, isImageGenerationPath)
+	return claimDueChannelHealthProbes(limit, func(imageRoute bool) bool {
+		return imageRoute
+	})
 }
 
 func claimDueChannelHealthProbes(limit int, includePath channelHealthProbePathFilter) []ChannelHealthProbeTarget {
@@ -1509,8 +1555,13 @@ func claimDueChannelHealthProbes(limit int, includePath channelHealthProbePathFi
 			if state.ProbeRouteKey == "" || !ChannelHealthProbeSupportsPath(requestPath) {
 				continue
 			}
-			if includePath != nil && !includePath(requestPath) {
+			imageRoute := isImageHealthRoute(state.ChannelID, state.Fingerprint, requestPath)
+			if includePath != nil && !includePath(imageRoute) {
 				continue
+			}
+			probePath := requestPath
+			if imageRoute && !isImageGenerationPath(probePath) {
+				probePath = "/v1/images/generations"
 			}
 			probeType := state.ProbeType
 			if wasOpen || probeType == "" {
@@ -1525,7 +1576,7 @@ func claimDueChannelHealthProbes(limit int, includePath channelHealthProbePathFi
 			state.ProbeType = probeType
 			state.ProbeScope = ChannelHealthProbeScopeChannel
 			state.ProbeInFlight = true
-			state.ProbeLeaseUntil = now.Add(channelHealthProbeLeaseForPath(requestPath))
+			state.ProbeLeaseUntil = now.Add(channelHealthProbeLeaseFor(imageRoute))
 			state.LastTouched = now
 			identity := channelHealthIdentity{
 				ChannelID:   state.ChannelID,
@@ -1535,7 +1586,7 @@ func claimDueChannelHealthProbes(limit int, includePath channelHealthProbePathFi
 				RouteLabel:  state.ProbeRouteLabel,
 			}
 			targets = append(targets, ChannelHealthProbeTarget{
-				ChannelID: state.ChannelID, ModelName: modelName, RequestPath: requestPath, DueAt: dueAt,
+				ChannelID: state.ChannelID, ModelName: modelName, RequestPath: probePath, DueAt: dueAt,
 				Scope: ChannelHealthProbeScopeChannel, ProbeType: probeType, Revision: state.ProbeRevision,
 				ProbeID: state.ProbeID, identity: identity, wasOpen: wasOpen, triggerClass: state.ProbeTriggerClass,
 			})
@@ -1569,8 +1620,13 @@ func claimDueChannelHealthProbes(limit int, includePath channelHealthProbePathFi
 			if !ChannelHealthProbeSupportsPath(requestPath) {
 				continue
 			}
-			if includePath != nil && !includePath(requestPath) {
+			imageRoute := isImageHealthRoute(state.ChannelID, state.Fingerprint, requestPath)
+			if includePath != nil && !includePath(imageRoute) {
 				continue
+			}
+			probePath := requestPath
+			if imageRoute && !isImageGenerationPath(probePath) {
+				probePath = "/v1/images/generations"
 			}
 			identity := channelHealthIdentity{
 				ChannelID:       state.ChannelID,
@@ -1590,13 +1646,13 @@ func claimDueChannelHealthProbes(limit int, includePath channelHealthProbePathFi
 			state.ProbeGeneration++
 			state.ProbeID = probeID
 			state.ProbeType = probeType
-			probeLease := channelHealthProbeLeaseForPath(requestPath)
+			probeLease := channelHealthProbeLeaseFor(imageRoute)
 			state.ProbeLeaseUntil = now.Add(probeLease)
 			state.LastTouched = now
 			target := ChannelHealthProbeTarget{
 				ChannelID:    state.ChannelID,
 				ModelName:    modelName,
-				RequestPath:  requestPath,
+				RequestPath:  probePath,
 				DueAt:        dueAt,
 				Scope:        ChannelHealthProbeScopeRoute,
 				ProbeType:    probeType,
@@ -1691,7 +1747,7 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 			return
 		}
 		aggregate.ProbeFailures++
-		probeBackoff := channelHealthProbeBackoffForPath(target.RequestPath, aggregate.ProbeFailures)
+		probeBackoff := channelHealthProbeBackoffFor(isImageGenerationPath(target.RequestPath), aggregate.ProbeFailures)
 		if !isConclusiveProbeFailure(target, result.Class) {
 			aggregate.LastFailureReason = result.Reason
 			aggregate.LastFailureStatusCode = result.StatusCode
@@ -1758,9 +1814,10 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 		aggregate.FailuresSinceSuccess = 0
 		clear(aggregate.FailedRoutesSinceSuccess)
 		aggregate.LastSuccessAt = now
+		imageRoute := isImageGenerationPath(target.RequestPath)
 		if target.wasOpen || !state.OpenUntil.IsZero() ||
-			(isImageGenerationPath(target.RequestPath) && state.RecoveryTargetCapacity > 0) {
-			if isImageGenerationPath(target.RequestPath) {
+			(imageRoute && (state.RecoveryTargetCapacity > 0 || state.Capacity < state.InitialCapacity)) {
+			if imageRoute {
 				restoreImageRouteImmediatelyLocked(state, now)
 			} else {
 				startRouteRecoveryLocked(state, now)
@@ -1783,7 +1840,7 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 		return
 	}
 	state.ProbeFailures++
-	probeBackoff := channelHealthProbeBackoffForPath(target.RequestPath, state.ProbeFailures)
+	probeBackoff := channelHealthProbeBackoffFor(isImageGenerationPath(target.RequestPath), state.ProbeFailures)
 	if !isConclusiveProbeFailure(target, result.Class) {
 		state.LastFailureClass = result.Class
 		state.LastFailureReason = result.Reason

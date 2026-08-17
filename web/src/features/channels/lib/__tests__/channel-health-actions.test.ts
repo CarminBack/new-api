@@ -32,7 +32,8 @@ const channelItem = (
     model_name: string
     request_path: string
     state: 'circuit_open' | 'half_open'
-  }>
+  }>,
+  imageGroup = false
 ) =>
   ({
     ...item,
@@ -42,6 +43,7 @@ const channelItem = (
       channel_open_until: 1,
       channel_next_probe_at: 1,
       channel_probe_in_flight: false,
+      image_group: imageGroup,
       routes,
       keys: [],
     },
@@ -54,6 +56,22 @@ function healthRow(requestPath: string, state: HealthRow['state']): HealthRow {
     scope: 'route',
     requestPath,
     state,
+  }
+}
+
+function imageHealthRow(
+  requestPath: string,
+  state: HealthRow['state']
+): HealthRow {
+  return {
+    ...healthRow(requestPath, state),
+    item: {
+      ...item,
+      adaptive: {
+        ...item.adaptive,
+        image_group: true,
+      },
+    },
   }
 }
 
@@ -86,11 +104,17 @@ describe('channel health actions', () => {
       isImageHealthCircuitOpen(healthRow('/v1/images/generations', 'healthy')),
       false
     )
+    assert.equal(
+      isImageHealthCircuitOpen(
+        imageHealthRow('/v1/chat/completions', 'circuit_open')
+      ),
+      true
+    )
   })
 
   test('limits channel-level actions only when its open routes are all images', () => {
     const imageRoute = {
-      model_name: 'gpt-image-2',
+      model_name: 'mapped-image-model',
       request_path: '/v1/images/generations',
       state: 'circuit_open' as const,
     }
@@ -116,6 +140,15 @@ describe('channel health actions', () => {
         state: 'circuit_open',
       }),
       false
+    )
+    assert.equal(
+      isImageHealthCircuitOpen({
+        id: 'channel-image-group',
+        item: channelItem([textRoute], true),
+        scope: 'channel',
+        state: 'circuit_open',
+      }),
+      true
     )
   })
 })

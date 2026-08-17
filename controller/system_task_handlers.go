@@ -180,6 +180,11 @@ func runChannelHealthProbe(ctx context.Context, testUserID int, target service.C
 				Reason:     "active_probe_timeout",
 				StatusCode: http.StatusGatewayTimeout,
 			})
+		} else if service.IsImageGenerationPath(target.RequestPath) {
+			service.CompleteChannelHealthProbe(target, service.ChannelHealthProbeResult{
+				Class:  service.ChannelFailureUncertain,
+				Reason: result.localErr.Error(),
+			})
 		} else {
 			service.ReleaseChannelHealthProbe(target)
 		}

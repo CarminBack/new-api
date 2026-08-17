@@ -49,14 +49,25 @@ const imageHealthPaths = new Set([
 ])
 const openHealthStates = new Set(['circuit_open', 'half_open'])
 
+function isImageHealthRoute(item: ChannelHealthItem, requestPath?: string) {
+  return (
+    item.adaptive?.image_group === true ||
+    imageHealthPaths.has(requestPath ?? '')
+  )
+}
+
 export function isImageHealthCircuitOpen(row: HealthRow): boolean {
   if (row.scope === 'route') {
     return (
-      imageHealthPaths.has(row.requestPath ?? '') &&
+      isImageHealthRoute(row.item, row.requestPath) &&
       openHealthStates.has(row.state)
     )
   }
   if (row.scope !== 'channel') return false
+
+  if (row.item.adaptive?.image_group === true) {
+    return openHealthStates.has(row.state)
+  }
 
   const openRoutes = (row.item.adaptive?.routes ?? []).filter((route) =>
     openHealthStates.has(route.state)

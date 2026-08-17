@@ -265,6 +265,7 @@ export interface ChannelHealthItem {
   persistent_keys: ChannelPersistentKeyHealth[]
   adaptive: {
     channel_id: number
+    image_group?: boolean
     channel_state?: ChannelHealthState
     channel_open_until: number
     channel_next_probe_at: number
