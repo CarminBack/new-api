@@ -5269,6 +5269,7 @@
     "Test and Recover": "测试并恢复",
     "Recovery failed": "恢复失败",
     "Recovery started": "已进入恢复流程",
+    "Next Retry": "下次重试",
     "Test succeeded and recovery started": "测试成功，已进入恢复流程",
     "Search channel, model, path, or reason": "搜索渠道、模型、路径或原因",
     "Show Healthy": "显示健康渠道",

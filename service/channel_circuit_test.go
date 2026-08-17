@@ -419,7 +419,49 @@ func TestImageProbeFailureOpensRouteUntilRecoveryProbeSucceeds(t *testing.T) {
 	require.Len(t, recovery, 1)
 	require.Equal(t, ChannelHealthProbeTypeRecovery, recovery[0].ProbeType)
 	CompleteChannelHealthProbe(recovery[0], ChannelHealthProbeResult{Success: true})
+	state := routeStateForTest(37, "gpt-image-2", requestPath)
+	require.True(t, state.OpenUntil.IsZero())
+	require.Zero(t, state.RecoveryTargetCapacity)
+	require.Zero(t, state.RecoverySuccesses)
+	require.Equal(t, state.InitialCapacity, state.Capacity)
 	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-image-2", requestPath))
+}
+
+func TestManualImageRecoveryRestoresFullCapacityAfterSuccessfulProbe(t *testing.T) {
+	setupChannelHealthTest(t)
+	const requestPath = "/v1/images/generations"
+	channel := &model.Channel{
+		Id:          37,
+		Type:        constant.ChannelTypeOpenAI,
+		Key:         "test-key",
+		Models:      "gpt-image-2",
+		CreatedTime: channelCircuitNow().Add(-time.Hour).Unix(),
+	}
+
+	scheduleRouteProbeForTest(t, channel, 0, "gpt-image-2", requestPath, ChannelFailureTransient)
+	initial := ClaimDueImageChannelHealthProbes(1)
+	require.Len(t, initial, 1)
+	CompleteChannelHealthProbe(initial[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
+	require.False(t, AllowChannelHealthAttempt(nil, channel, "gpt-image-2", requestPath))
+
+	result, err := RecoverChannelHealth(channel, ChannelHealthRecoveryRequest{
+		Scope:       ChannelHealthRecoveryScopeRoute,
+		ModelName:   "gpt-image-2",
+		RequestPath: requestPath,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.ChangedItems)
+
+	recovery := ClaimDueImageChannelHealthProbes(1)
+	require.Len(t, recovery, 1)
+	require.Equal(t, ChannelHealthProbeTypeRecovery, recovery[0].ProbeType)
+	CompleteChannelHealthProbe(recovery[0], ChannelHealthProbeResult{Success: true})
+
+	state := routeStateForTestWithChannel(channel, "gpt-image-2", requestPath)
+	require.True(t, state.OpenUntil.IsZero())
+	require.Zero(t, state.RecoveryTargetCapacity)
+	require.Equal(t, state.InitialCapacity, state.Capacity)
+	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-image-2", requestPath))
 }
 
 func TestImageProbeBackoffIncreasesAndCapsAtOneHour(t *testing.T) {
@@ -472,6 +514,8 @@ func TestRealImageSuccessResetsProbeBackoff(t *testing.T) {
 	state := routeStateForTest(37, "gpt-image-2", requestPath)
 	require.Zero(t, state.ProbeFailures)
 	require.True(t, state.OpenUntil.IsZero())
+	require.Zero(t, state.RecoveryTargetCapacity)
+	require.Equal(t, state.InitialCapacity, state.Capacity)
 }
 
 func TestImageAndStandardProbeQueuesClaimOnlyTheirOwnPaths(t *testing.T) {

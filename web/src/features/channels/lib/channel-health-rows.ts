@@ -42,6 +42,31 @@ export type HealthRow = {
   persistent?: boolean
 }
 
+const imageHealthPaths = new Set([
+  '/v1/images/generations',
+  '/v1/images/edits',
+  '/v1/images/variations',
+])
+const openHealthStates = new Set(['circuit_open', 'half_open'])
+
+export function isImageHealthCircuitOpen(row: HealthRow): boolean {
+  if (row.scope === 'route') {
+    return (
+      imageHealthPaths.has(row.requestPath ?? '') &&
+      openHealthStates.has(row.state)
+    )
+  }
+  if (row.scope !== 'channel') return false
+
+  const openRoutes = (row.item.adaptive?.routes ?? []).filter((route) =>
+    openHealthStates.has(route.state)
+  )
+  return (
+    openRoutes.length > 0 &&
+    openRoutes.every((route) => imageHealthPaths.has(route.request_path))
+  )
+}
+
 function routeLastChanged(
   route: ChannelHealthItem['adaptive']['routes'][number]
 ) {

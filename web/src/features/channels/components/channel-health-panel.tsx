@@ -47,6 +47,7 @@ import {
 import { CHANNEL_STATUS } from '../constants'
 import {
   buildHealthRows,
+  isImageHealthCircuitOpen,
   type HealthDisplayState,
   type HealthRow,
 } from '../lib/channel-health-rows'
@@ -103,6 +104,22 @@ function formatRecoveryProgress(row: HealthRow) {
   return `${row.recoverySuccesses ?? 0} / ${row.recoverySuccessTarget ?? 3}`
 }
 
+function RetrySchedule(props: { timestamp?: number }) {
+  if (!props.timestamp) return <span>—</span>
+  const remaining = Math.ceil(props.timestamp - Date.now() / 1000)
+
+  return (
+    <div className='whitespace-nowrap'>
+      <div>{formatTime(props.timestamp)}</div>
+      {remaining > 0 && (
+        <div className='text-muted-foreground text-xs'>
+          {formatDuration(remaining)}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function recoveryPayload(_row: HealthRow): ChannelHealthRecoverParams {
   if (_row.scope === 'route') {
     return {
@@ -154,7 +171,8 @@ function HealthRowActions(props: HealthRowActionsProps) {
   const { t } = useTranslation()
   const loading = props.actionKey === props.row.id
   const busy = props.actionKey !== null
-  const canTest = props.row.scope !== 'key'
+  const canTest =
+    props.row.scope !== 'key' && !isImageHealthCircuitOpen(props.row)
   const canRecover =
     props.row.state !== 'healthy' && props.row.state !== 'manual_disabled'
   const testRecoverLabel =
@@ -461,7 +479,7 @@ export function ChannelHealthPanel() {
                     <TableHead>{t('Scope')}</TableHead>
                     <TableHead>{t('State')}</TableHead>
                     <TableHead>{t('Reason')}</TableHead>
-                    <TableHead>{t('Recovery')}</TableHead>
+                    <TableHead>{t('Next Retry')}</TableHead>
                     <TableHead>{t('Progress')}</TableHead>
                     <TableHead className='text-right'>{t('Actions')}</TableHead>
                   </TableRow>
@@ -499,11 +517,7 @@ export function ChannelHealthPanel() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          {row.openUntil && row.openUntil > Date.now() / 1000
-                            ? formatDuration(
-                                Math.ceil(row.openUntil - Date.now() / 1000)
-                              )
-                            : '—'}
+                          <RetrySchedule timestamp={row.openUntil} />
                         </TableCell>
                         <TableCell className='font-mono text-xs'>
                           {formatRecoveryProgress(row)}
@@ -552,13 +566,9 @@ export function ChannelHealthPanel() {
                         )}
                         <div className='text-muted-foreground grid grid-cols-2 gap-2 text-xs'>
                           <span>{formatTime(row.lastChanged)}</span>
-                          <span className='text-right font-mono'>
-                            {row.openUntil && row.openUntil > Date.now() / 1000
-                              ? formatDuration(
-                                  Math.ceil(row.openUntil - Date.now() / 1000)
-                                )
-                              : ''}
-                          </span>
+                          <div className='text-right font-mono'>
+                            <RetrySchedule timestamp={row.openUntil} />
+                          </div>
                         </div>
                         <HealthRowActions
                           row={row}

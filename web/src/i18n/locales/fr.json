@@ -5269,6 +5269,7 @@
     "Test and Recover": "Tester et rétablir",
     "Recovery failed": "Échec du rétablissement",
     "Recovery started": "Rétablissement démarré",
+    "Next Retry": "Prochaine tentative",
     "Test succeeded and recovery started": "Test réussi, rétablissement démarré",
     "Search channel, model, path, or reason": "Rechercher un canal, un modèle, un chemin ou une raison",
     "Show Healthy": "Afficher les canaux sains",

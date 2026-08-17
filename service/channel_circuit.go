@@ -561,6 +561,16 @@ func startRouteRecoveryLocked(state *channelRouteHealthState, now time.Time) {
 	state.LastRecoveryAt = now
 }
 
+// restoreImageRouteImmediatelyLocked restores an image route at its full
+// pre-circuit capacity after a successful image probe or real image request.
+func restoreImageRouteImmediatelyLocked(state *channelRouteHealthState, now time.Time) {
+	startRouteRecoveryLocked(state, now)
+	state.Capacity = state.RecoveryTargetCapacity
+	state.RecoveryTargetCapacity = 0
+	state.RecoverySuccesses = 0
+	state.RecoveryFailures = 0
+}
+
 // IsChannelHealthAvailable performs a read-only admission check. Callers that
 // are selecting a candidate must still reserve capacity with
 // AllowChannelHealthAttempt before sending a request.
@@ -996,9 +1006,15 @@ func recoverChannelRoutesAfterProbe(channelID int, fingerprint string, now time.
 			if state.ChannelID != channelID || state.Fingerprint != fingerprint {
 				continue
 			}
-			if !state.OpenUntil.IsZero() || state.Suspect || state.ProbeInFlight {
+			_, requestPath := splitChannelRouteLabel(state.RouteLabel)
+			if !state.OpenUntil.IsZero() || state.Suspect || state.ProbeInFlight ||
+				(isImageGenerationPath(requestPath) && state.RecoveryTargetCapacity > 0) {
 				state.ProbeGeneration++
-				startRouteRecoveryLocked(state, now)
+				if isImageGenerationPath(requestPath) {
+					restoreImageRouteImmediatelyLocked(state, now)
+				} else {
+					startRouteRecoveryLocked(state, now)
+				}
 				identity := channelHealthIdentity{
 					ChannelID:       state.ChannelID,
 					Fingerprint:     state.Fingerprint,
@@ -1007,7 +1023,11 @@ func recoverChannelRoutesAfterProbe(channelID int, fingerprint string, now time.
 					RouteLabel:      state.RouteLabel,
 					InitialCapacity: state.InitialCapacity,
 				}
-				persistRouteHealthStateLocked(identity, state, persistentChannelHealthRecoveryPending)
+				if state.RecoveryTargetCapacity > 0 {
+					persistRouteHealthStateLocked(identity, state, persistentChannelHealthRecoveryPending)
+				} else {
+					deletePersistentHealthState(identity.RouteKey)
+				}
 			}
 		}
 		shard.Unlock()
@@ -1273,8 +1293,13 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 		state.ProbeID = 0
 		state.ProbeLeaseUntil = time.Time{}
 	}
-	if !state.OpenUntil.IsZero() {
-		startRouteRecoveryLocked(state, now)
+	if !state.OpenUntil.IsZero() ||
+		(isImageGenerationPath(requestPath) && state.RecoveryTargetCapacity > 0) {
+		if isImageGenerationPath(requestPath) {
+			restoreImageRouteImmediatelyLocked(state, now)
+		} else {
+			startRouteRecoveryLocked(state, now)
+		}
 		recovered = true
 	}
 	if state.OpenUntil.IsZero() {
@@ -1733,8 +1758,13 @@ func CompleteChannelHealthProbe(target ChannelHealthProbeTarget, result ChannelH
 		aggregate.FailuresSinceSuccess = 0
 		clear(aggregate.FailedRoutesSinceSuccess)
 		aggregate.LastSuccessAt = now
-		if target.wasOpen || !state.OpenUntil.IsZero() {
-			startRouteRecoveryLocked(state, now)
+		if target.wasOpen || !state.OpenUntil.IsZero() ||
+			(isImageGenerationPath(target.RequestPath) && state.RecoveryTargetCapacity > 0) {
+			if isImageGenerationPath(target.RequestPath) {
+				restoreImageRouteImmediatelyLocked(state, now)
+			} else {
+				startRouteRecoveryLocked(state, now)
+			}
 		}
 		if state.RecoveryTargetCapacity > 0 {
 			persistRouteHealthStateLocked(target.identity, state, persistentChannelHealthRecoveryPending)

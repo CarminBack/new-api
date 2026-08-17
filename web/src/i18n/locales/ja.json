@@ -5269,6 +5269,7 @@
     "Test and Recover": "テストして回復",
     "Recovery failed": "回復に失敗しました",
     "Recovery started": "回復を開始しました",
+    "Next Retry": "次回再試行",
     "Test succeeded and recovery started": "テスト成功、回復を開始しました",
     "Search channel, model, path, or reason": "チャネル、モデル、パス、理由を検索",
     "Show Healthy": "正常なチャネルを表示",
