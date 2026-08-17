@@ -334,6 +334,9 @@ func SetApiRouter(router *gin.Engine) {
 		imageGenerationRoute := apiRouter.Group("/image-generations")
 		imageGenerationRoute.GET("/:id/content", controller.GetImageGenerationContent)
 
+		videoPreviewRoute := apiRouter.Group("/video-previews")
+		videoPreviewRoute.GET("/:task_id/content", controller.VideoPreviewProxy)
+
 		referenceMediaRoute := apiRouter.Group("/reference-media")
 		referenceMediaRoute.GET("/:id/content", controller.GetTemporaryReferenceMediaContent)
 

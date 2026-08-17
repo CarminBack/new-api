@@ -83,6 +83,9 @@ func tasksToDto(tasks []*model.Task, fillUser bool) []*dto.TaskDto {
 			}
 		}
 		result[i] = relay.TaskModel2Dto(task)
+		if task.Status == model.TaskStatusSuccess && task.GetResultURL() != "" {
+			result[i].PreviewURL = model.VideoPreviewContentURL(task)
+		}
 	}
 	return result
 }

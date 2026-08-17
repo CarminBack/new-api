@@ -2,9 +2,12 @@ package controller
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -87,6 +90,39 @@ func TestImageGroupChannelTestUsesMappedUpstreamModel(t *testing.T) {
 	require.True(t, info.IsModelMapped)
 	require.Equal(t, "gpt-image-2-low", info.UpstreamModelName)
 	require.Equal(t, "gpt-image-2-low", request.Model)
+}
+
+func TestArchiveChannelTestImageResultCreatesDrawingLogRecord(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.ImageGeneration{}))
+	storageDir := t.TempDir()
+	t.Setenv("IMAGE_GENERATION_STORAGE_DIR", storageDir)
+
+	imageBytes, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
+	require.NoError(t, err)
+	responseBody, err := common.Marshal(dto.ImageResponse{Data: []dto.ImageData{{B64Json: base64.StdEncoding.EncodeToString(imageBytes)}}})
+	require.NoError(t, err)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	ctx.Set(common.RequestIdKey, "req_channel_test_image")
+	info := &relaycommon.RelayInfo{
+		UserId:          7,
+		OriginModelName: "gpt-image-test",
+		UsingGroup:      "Image",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 9},
+	}
+	request := &dto.ImageRequest{Prompt: "channel test image", Size: "1024x1024"}
+
+	archiveChannelTestImageResult(ctx, info, request, responseBody, 1234)
+
+	var record model.ImageGeneration
+	require.NoError(t, db.First(&record).Error)
+	assert.Equal(t, "req_channel_test_image", record.RequestId)
+	assert.Equal(t, "channel test image", record.Prompt)
+	assert.Equal(t, 1234, record.Quota)
+	_, err = os.Stat(filepath.Join(storageDir, record.FilePath))
+	require.NoError(t, err)
 }
 
 func TestValidateChannelProxy(t *testing.T) {

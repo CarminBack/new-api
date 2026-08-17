@@ -2,8 +2,11 @@ package model
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -40,6 +43,8 @@ const (
 	TaskStatusSuccess               = "SUCCESS"
 	TaskStatusUnknown               = "UNKNOWN"
 )
+
+const videoPreviewURLLifetime = 10 * time.Minute
 
 // TaskRefundLegacyCutoff separates tasks created before timeout refunds were
 // introduced. Those legacy tasks are failed without an automatic refund.
@@ -138,6 +143,43 @@ func (t *Task) GetResultURL() string {
 		return t.PrivateData.ResultURL
 	}
 	return t.FailReason
+}
+
+func VideoPreviewContentURL(task *Task) string {
+	if task == nil || task.TaskID == "" {
+		return ""
+	}
+	expires := time.Now().Add(videoPreviewURLLifetime).Unix()
+	return fmt.Sprintf(
+		"/api/video-previews/%s/content?expires=%d&signature=%s",
+		url.PathEscape(task.TaskID),
+		expires,
+		GenerateVideoPreviewContentSignature(task, expires),
+	)
+}
+
+func GenerateVideoPreviewContentSignature(task *Task, expires int64) string {
+	if task == nil {
+		return ""
+	}
+	payload := fmt.Sprintf(
+		"video-preview-content:%d:%s:%d:%d:%s:%d",
+		task.ID,
+		task.TaskID,
+		task.UserId,
+		expires,
+		task.Status,
+		task.UpdatedAt,
+	)
+	return common.GenerateHMAC(payload)
+}
+
+func ValidateVideoPreviewContentSignature(task *Task, expires int64, signature string) bool {
+	if task == nil || signature == "" || expires <= time.Now().Unix() {
+		return false
+	}
+	expected := GenerateVideoPreviewContentSignature(task, expires)
+	return expected != "" && hmac.Equal([]byte(expected), []byte(signature))
 }
 
 // GenerateTaskID 生成对外暴露的 task_xxxx 格式 ID

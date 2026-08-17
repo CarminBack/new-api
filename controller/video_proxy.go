@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +49,37 @@ func VideoProxy(c *gin.Context) {
 		videoProxyError(c, http.StatusNotFound, "invalid_request_error", "Task not found")
 		return
 	}
+	proxyVideoTask(c, task)
+}
+
+func VideoPreviewProxy(c *gin.Context) {
+	taskID := c.Param("task_id")
+	if taskID == "" {
+		videoProxyError(c, http.StatusBadRequest, "invalid_request_error", "task_id is required")
+		return
+	}
+
+	task, exists, err := model.GetByOnlyTaskId(taskID)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to query video preview task %s: %s", taskID, err.Error()))
+		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to query task")
+		return
+	}
+	if !exists || task == nil {
+		videoProxyError(c, http.StatusNotFound, "invalid_request_error", "Task not found")
+		return
+	}
+
+	expires, err := strconv.ParseInt(c.Query("expires"), 10, 64)
+	if err != nil || !model.ValidateVideoPreviewContentSignature(task, expires, c.Query("signature")) {
+		videoProxyError(c, http.StatusUnauthorized, "invalid_request_error", "Invalid or expired preview URL")
+		return
+	}
+	proxyVideoTask(c, task)
+}
+
+func proxyVideoTask(c *gin.Context, task *model.Task) {
+	taskID := task.TaskID
 
 	if task.Status != model.TaskStatusSuccess {
 		videoProxyError(c, http.StatusBadRequest, "invalid_request_error",

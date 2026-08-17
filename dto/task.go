@@ -43,6 +43,7 @@ type TaskDto struct {
 	Status     string          `json:"status"`
 	FailReason string          `json:"fail_reason"`
 	ResultURL  string          `json:"result_url,omitempty"` // 任务结果 URL（视频地址等）
+	PreviewURL string          `json:"preview_url,omitempty"`
 	SubmitTime int64           `json:"submit_time"`
 	StartTime  int64           `json:"start_time"`
 	FinishTime int64           `json:"finish_time"`

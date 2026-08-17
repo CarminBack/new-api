@@ -100,7 +100,7 @@ function VideoPreviewCell({
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const previewUrl = `/v1/videos/${encodeURIComponent(log.task_id)}/content`
+  const previewUrl = getVideoPreviewUrl(log)
 
   return (
     <>
@@ -121,6 +121,14 @@ function VideoPreviewCell({
         resultUrl={resultUrl}
       />
     </>
+  )
+}
+
+export function getVideoPreviewUrl(
+  log: Pick<TaskLog, 'task_id' | 'preview_url'>
+): string {
+  return (
+    log.preview_url ?? `/v1/videos/${encodeURIComponent(log.task_id)}/content`
   )
 }
 

@@ -331,6 +331,7 @@ export interface TaskLog {
   data?: string // JSON string
   fail_reason?: string
   result_url?: string
+  preview_url?: string
   status: string // NOT_START, SUBMITTED, IN_PROGRESS, SUCCESS, FAILURE, QUEUED, UNKNOWN
   other?: string
   created_at?: number

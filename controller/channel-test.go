@@ -509,6 +509,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	info.SetEstimatePromptTokens(usage.PromptTokens)
 
 	quota, tieredResult := settleTestQuota(info, priceData, usage)
+	archiveChannelTestImageResult(c, info, request, respBody, quota)
 	tok := time.Now()
 	milliseconds := tok.Sub(tik).Milliseconds()
 	consumedTime := float64(milliseconds) / 1000.0
@@ -532,6 +533,14 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		localErr:    nil,
 		newAPIError: nil,
 	}
+}
+
+func archiveChannelTestImageResult(c *gin.Context, info *relaycommon.RelayInfo, request dto.Request, responseBody []byte, quota int) {
+	imageRequest, ok := request.(*dto.ImageRequest)
+	if !ok {
+		return
+	}
+	service.SaveImageGenerationResponse(c, info, imageRequest, responseBody, quota)
 }
 
 func attachTestBillingRequestInput(info *relaycommon.RelayInfo, request dto.Request) error {
