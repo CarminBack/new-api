@@ -106,6 +106,8 @@ func TestArchiveChannelTestImageResultCreatesDrawingLogRecord(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
 	ctx.Set(common.RequestIdKey, "req_channel_test_image")
+	capture := &channelTestResponseCaptureWriter{ResponseWriter: ctx.Writer}
+	ctx.Writer = capture
 	info := &relaycommon.RelayInfo{
 		UserId:          7,
 		OriginModelName: "gpt-image-test",
@@ -114,7 +116,10 @@ func TestArchiveChannelTestImageResultCreatesDrawingLogRecord(t *testing.T) {
 	}
 	request := &dto.ImageRequest{Prompt: "channel test image", Size: "1024x1024"}
 
-	archiveChannelTestImageResult(ctx, info, request, responseBody, 1234)
+	service.IOCopyBytesGracefully(ctx, &http.Response{StatusCode: http.StatusOK, Header: http.Header{}}, responseBody)
+	require.Equal(t, responseBody, capture.Bytes())
+	require.NoError(t, validateChannelTestImageResponse(capture.Bytes()))
+	archiveChannelTestImageResult(ctx, info, request, capture.Bytes(), 1234)
 
 	var record model.ImageGeneration
 	require.NoError(t, db.First(&record).Error)
@@ -123,6 +128,11 @@ func TestArchiveChannelTestImageResultCreatesDrawingLogRecord(t *testing.T) {
 	assert.Equal(t, 1234, record.Quota)
 	_, err = os.Stat(filepath.Join(storageDir, record.FilePath))
 	require.NoError(t, err)
+}
+
+func TestValidateChannelTestImageResponseRejectsMissingImage(t *testing.T) {
+	require.ErrorContains(t, validateChannelTestImageResponse([]byte(`{"data":[]}`)), "does not contain an image")
+	require.ErrorContains(t, validateChannelTestImageResponse(nil), "invalid image test response")
 }
 
 func TestValidateChannelProxy(t *testing.T) {

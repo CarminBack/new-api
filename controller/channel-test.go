@@ -42,6 +42,25 @@ type testResult struct {
 	newAPIError *types.NewAPIError
 }
 
+type channelTestResponseCaptureWriter struct {
+	gin.ResponseWriter
+	body bytes.Buffer
+}
+
+func (w *channelTestResponseCaptureWriter) Write(data []byte) (int, error) {
+	w.body.Write(data)
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *channelTestResponseCaptureWriter) WriteString(data string) (int, error) {
+	w.body.WriteString(data)
+	return w.ResponseWriter.WriteString(data)
+}
+
+func (w *channelTestResponseCaptureWriter) Bytes() []byte {
+	return w.body.Bytes()
+}
+
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
 	if normalized != "" {
@@ -474,6 +493,11 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 			}
 		}
 	}
+	var imageResponseCapture *channelTestResponseCaptureWriter
+	if _, ok := request.(*dto.ImageRequest); ok {
+		imageResponseCapture = &channelTestResponseCaptureWriter{ResponseWriter: c.Writer}
+		c.Writer = imageResponseCapture
+	}
 	usageA, respErr := adaptor.DoResponse(c, httpResp, info)
 	if respErr != nil {
 		return testResult{
@@ -490,13 +514,18 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 			newAPIError: types.NewOpenAIError(usageErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
 		}
 	}
-	result := w.Result()
-	respBody, err := readTestResponseBody(result.Body, isStream)
-	if err != nil {
-		return testResult{
-			context:     c,
-			localErr:    err,
-			newAPIError: types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError),
+	var respBody []byte
+	if imageResponseCapture != nil {
+		respBody = append(respBody, imageResponseCapture.Bytes()...)
+	} else {
+		result := w.Result()
+		respBody, err = readTestResponseBody(result.Body, isStream)
+		if err != nil {
+			return testResult{
+				context:     c,
+				localErr:    err,
+				newAPIError: types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError),
+			}
 		}
 	}
 	if bodyErr := validateTestResponseBody(respBody, isStream); bodyErr != nil {
@@ -504,6 +533,15 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 			context:     c,
 			localErr:    bodyErr,
 			newAPIError: types.NewOpenAIError(bodyErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
+		}
+	}
+	if imageResponseCapture != nil {
+		if imageErr := validateChannelTestImageResponse(respBody); imageErr != nil {
+			return testResult{
+				context:     c,
+				localErr:    imageErr,
+				newAPIError: types.NewOpenAIError(imageErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
+			}
 		}
 	}
 	info.SetEstimatePromptTokens(usage.PromptTokens)
@@ -541,6 +579,19 @@ func archiveChannelTestImageResult(c *gin.Context, info *relaycommon.RelayInfo, 
 		return
 	}
 	service.SaveImageGenerationResponse(c, info, imageRequest, responseBody, quota)
+}
+
+func validateChannelTestImageResponse(responseBody []byte) error {
+	var response dto.ImageResponse
+	if err := common.Unmarshal(responseBody, &response); err != nil {
+		return fmt.Errorf("invalid image test response: %w", err)
+	}
+	for _, image := range response.Data {
+		if strings.TrimSpace(image.B64Json) != "" || strings.TrimSpace(image.Url) != "" {
+			return nil
+		}
+	}
+	return errors.New("image test response does not contain an image")
 }
 
 func attachTestBillingRequestInput(info *relaycommon.RelayInfo, request dto.Request) error {
