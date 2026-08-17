@@ -3,7 +3,6 @@ package controller
 import (
 	"net/http"
 	"strconv"
-	"time"
 
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -21,13 +20,7 @@ func GetPerfMetricsSummary(c *gin.Context) {
 	}
 
 	activeGroups := append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto")
-	var result perfmetrics.SummaryAllResult
-	var err error
-	if c.Query("window") == "today" {
-		result, err = perfmetrics.QuerySummaryAllSince(perfMetricsTodayStart(time.Now()), activeGroups)
-	} else {
-		result, err = perfmetrics.QuerySummaryAll(hours, activeGroups)
-	}
+	result, err := perfmetrics.QuerySummaryAll(hours, activeGroups)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -40,10 +33,6 @@ func GetPerfMetricsSummary(c *gin.Context) {
 		"success": true,
 		"data":    result,
 	})
-}
-
-func perfMetricsTodayStart(now time.Time) int64 {
-	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 }
 
 func GetPerfMetrics(c *gin.Context) {
