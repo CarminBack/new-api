@@ -35,6 +35,7 @@ import type { PerfModelSummary } from '@/features/performance-metrics/types'
 import { cn } from '@/lib/utils'
 
 const PERFORMANCE_WINDOW_HOURS = 24
+const PERFORMANCE_WINDOW = 'today' as const
 const TOP_MODEL_LIMIT = 6
 
 type WeightedMetric = 'avg_latency_ms' | 'avg_tps' | 'success_rate'
@@ -58,9 +59,11 @@ function simpleAverage(
 export function PerformanceHealthPanel() {
   const { t } = useTranslation()
   const metricsQuery = useQuery({
-    queryKey: ['perf-metrics-summary', PERFORMANCE_WINDOW_HOURS],
-    queryFn: () => getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS),
+    queryKey: ['perf-metrics-summary', PERFORMANCE_WINDOW],
+    queryFn: () =>
+      getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS, PERFORMANCE_WINDOW),
     staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
     retry: false,
   })
 
@@ -99,7 +102,7 @@ export function PerformanceHealthPanel() {
         </IconBadge>
         <h3 className='text-sm font-semibold'>{t('Performance health')}</h3>
         <span className='text-muted-foreground ml-auto text-xs'>
-          {t('Performance metrics for the last 24 hours')}
+          {t('Performance metrics for today')}
         </span>
       </div>
 
