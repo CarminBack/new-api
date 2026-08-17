@@ -64,6 +64,8 @@ func channelHealthProbeEndpointType(requestPath string) string {
 		return string(constant.EndpointTypeAnthropic)
 	case "/v1/embeddings":
 		return string(constant.EndpointTypeEmbeddings)
+	case "/v1/images/generations", "/v1/images/edits", "/v1/images/variations":
+		return string(constant.EndpointTypeImageGeneration)
 	case "/v1/rerank", "/rerank":
 		return string(constant.EndpointTypeJinaRerank)
 	default:

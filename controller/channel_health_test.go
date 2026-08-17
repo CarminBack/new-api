@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestChannelHealthProbeEndpointTypeForImagePaths(t *testing.T) {
+	for _, path := range []string{
+		"/v1/images/generations",
+		"/v1/images/edits",
+		"/v1/images/variations",
+	} {
+		require.Equal(t, string(constant.EndpointTypeImageGeneration), channelHealthProbeEndpointType(path))
+	}
+}
 
 func TestValidateChannelHealthRecoveryPayload(t *testing.T) {
 	keyIndex := 2
