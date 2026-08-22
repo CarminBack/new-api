@@ -296,6 +296,35 @@ export interface ChannelHealthResponse {
   }
 }
 
+export interface ChannelLatencyChannel {
+  channel_id: number
+  channel_name: string
+  channel_status: number
+  response_time_ms: number
+  test_time: number
+}
+
+export interface ChannelLatencyGroup {
+  group: string
+  channel_count: number
+  enabled_count: number
+  tested_count: number
+  average_response_time_ms: number
+  min_response_time_ms: number
+  max_response_time_ms: number
+  last_test_time: number
+  channels: ChannelLatencyChannel[]
+}
+
+export interface ChannelLatencyResponse {
+  success: boolean
+  message?: string
+  data?: {
+    generated_at: number
+    groups: ChannelLatencyGroup[]
+  }
+}
+
 export interface ChannelHealthRecoverParams {
   scope: 'channel' | 'route' | 'key'
   model_name?: string

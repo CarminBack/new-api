@@ -1098,6 +1098,18 @@ func GetChannelHealthMetadata() ([]*Channel, error) {
 	return channels, err
 }
 
+// GetChannelLatencyMetadata returns only the non-sensitive fields needed for
+// group-level latency summaries.
+func GetChannelLatencyMetadata() ([]*Channel, error) {
+	var channels []*Channel
+	groupColumn := DB.Statement.Quote("group")
+	err := DB.
+		Select("id, name, status, response_time, test_time, " + groupColumn).
+		Order("id asc").
+		Find(&channels).Error
+	return channels, err
+}
+
 func BatchSetChannelTag(ids []int, tag *string) error {
 	// 开启事务
 	tx := DB.Begin()

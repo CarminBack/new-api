@@ -2429,6 +2429,8 @@
     "Last Used": "最后使用时间",
     "Last used:": "上次使用时间：",
     "Latency": "延迟",
+    "Minimum": "最小值",
+    "Maximum": "最大值",
     "Latency check": "延迟检测",
     "Latency short": "延迟",
     "Latency trend (last 24h)": "延迟趋势（最近 24 小时）",

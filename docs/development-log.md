@@ -24,6 +24,14 @@
 - Backup: `/opt/docker/new-api/docker-compose.yml.bak-20260822-075942`.
 - Verification: `http://127.0.0.1:2888/api/status` returned `success=true`, version `carmin-20260822-6b11877`; production app and Redis were healthy with zero restarts.
 
+## 2026-08-22 Group Channel Latency Detection
+
+- Added read-only `GET /api/channel/latency`, which aggregates the latest channel probe latency by configured channel group and returns per-channel status and last-test time without exposing credentials.
+- Added a Channels page `Latency` tab with group filtering, average/minimum/maximum latency, tested-channel counts, last-test time, per-channel details, refresh, and manual reuse of the existing “Test All Channels” probe task.
+- The display uses scheduled/explicit channel probes; real user-request latency remains passive telemetry and does not create additional upstream calls.
+- Backend tests: `go test ./controller ./router ./model`. Frontend format check, typecheck, targeted oxlint, and production build passed.
+- Test deployment pending; production remains unchanged for this feature.
+
 ## 2026-08-22 API Key Ratio Limit Display
 
 - Changed the API Key list ratio-limit cell to display the numeric value only (for example, `0.1`); `0` still displays `Unlimited`.
