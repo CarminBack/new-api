@@ -215,9 +215,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
       cell: ({ row }) => {
         const maxRatio = row.original.max_ratio ?? 0
         return maxRatio > 0 ? (
-          <span className='font-mono text-xs tabular-nums'>
-            &lt;= {maxRatio}x
-          </span>
+          <span className='font-mono text-xs tabular-nums'>{maxRatio}</span>
         ) : (
           <StatusBadge
             label={t('Unlimited')}
