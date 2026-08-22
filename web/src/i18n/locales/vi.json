@@ -5395,6 +5395,9 @@
     "Verification flow expired": "Quy trình xác minh đã hết hạn",
     "Verification proof was not returned": "Không nhận được bằng chứng xác minh",
     "Verification scope is missing": "Thiếu phạm vi xác minh",
+    "Maximum Group Ratio": "Maximum Group Ratio",
+    "Reject requests when the effective group ratio exceeds this value. 0 means unlimited.": "Reject requests when the effective group ratio exceeds this value. 0 means unlimited.",
+    "Ratio Limit": "Ratio Limit",
     "Verify to view channel key": "Xác minh để xem khóa kênh"
   }
 }

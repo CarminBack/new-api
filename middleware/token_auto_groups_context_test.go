@@ -20,9 +20,12 @@ func newTokenAutoGroupsContext() *gin.Context {
 
 func TestSetupContextForTokenPreservesCustomAutoGroupsOrder(t *testing.T) {
 	ctx := newTokenAutoGroupsContext()
-	token := &model.Token{Id: 1, UserId: 2, AutoGroups: `["vip","default"]`}
+	token := &model.Token{Id: 1, UserId: 2, MaxRatio: 0.1, AutoGroups: `["vip","default"]`}
 
 	require.NoError(t, SetupContextForToken(ctx, token))
+	maxRatio, ok := common.GetContextKeyType[float64](ctx, constant.ContextKeyTokenMaxRatio)
+	require.True(t, ok)
+	assert.Equal(t, 0.1, maxRatio)
 	value, ok := common.GetContextKey(ctx, constant.ContextKeyTokenAutoGroups)
 	require.True(t, ok)
 	assert.Equal(t, []string{"vip", "default"}, value)

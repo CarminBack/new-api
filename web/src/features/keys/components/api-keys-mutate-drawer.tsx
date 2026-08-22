@@ -663,6 +663,34 @@ export function ApiKeysMutateDrawer({
                   </FormItem>
                 )}
               />
+
+              <FormField
+                control={form.control}
+                name='max_ratio'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Maximum Group Ratio')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type='number'
+                        min='0'
+                        step='0.01'
+                        placeholder='0'
+                        onChange={(e) =>
+                          field.onChange(Number.parseFloat(e.target.value) || 0)
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Reject requests when the effective group ratio exceeds this value. 0 means unlimited.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </SideDrawerSection>
 
             <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>

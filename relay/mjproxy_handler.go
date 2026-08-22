@@ -210,6 +210,12 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 			Description: err.Error(),
 		}
 	}
+	if err := helper.CheckTokenGroupRatioLimit(c, priceData.GroupRatioInfo.GroupRatio); err != nil {
+		return &dto.MidjourneyResponse{
+			Code:        4,
+			Description: err.Error(),
+		}
+	}
 
 	userQuota, err := model.GetUserQuota(info.UserId, false)
 	if err != nil {
@@ -512,6 +518,12 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 
 	priceData, err := helper.ModelPriceHelperPerCall(c, relayInfo)
 	if err != nil {
+		return &dto.MidjourneyResponse{
+			Code:        4,
+			Description: err.Error(),
+		}
+	}
+	if err := helper.CheckTokenGroupRatioLimit(c, priceData.GroupRatioInfo.GroupRatio); err != nil {
 		return &dto.MidjourneyResponse{
 			Code:        4,
 			Description: err.Error(),

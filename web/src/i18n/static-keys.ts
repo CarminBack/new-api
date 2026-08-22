@@ -572,4 +572,7 @@ export const STATIC_I18N_KEYS = [
   'This user account is disabled.',
   'Telegram binding failed. Please try again.',
   'Verification scope is missing',
+  'Maximum Group Ratio',
+  'Reject requests when the effective group ratio exceeds this value. 0 means unlimited.',
+  'Ratio Limit',
 ] as const

@@ -209,6 +209,27 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
       meta: { mobileHidden: true },
     },
     {
+      id: 'max_ratio',
+      accessorKey: 'max_ratio',
+      header: t('Ratio Limit'),
+      cell: ({ row }) => {
+        const maxRatio = row.original.max_ratio ?? 0
+        return maxRatio > 0 ? (
+          <span className='font-mono text-xs tabular-nums'>
+            &lt;= {maxRatio}x
+          </span>
+        ) : (
+          <StatusBadge
+            label={t('Unlimited')}
+            variant='neutral'
+            copyable={false}
+          />
+        )
+      },
+      size: 120,
+      meta: { mobileHidden: true },
+    },
+    {
       id: 'model_limits',
       accessorKey: 'model_limits',
       header: t('Models'),

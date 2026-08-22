@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,6 +40,10 @@ type tokenRequest struct {
 type tokenResponse struct {
 	*model.Token
 	AutoGroups []string `json:"auto_groups"`
+}
+
+func isValidTokenMaxRatio(ratio float64) bool {
+	return ratio >= 0 && !math.IsNaN(ratio) && !math.IsInf(ratio, 0)
 }
 
 func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
@@ -272,6 +277,7 @@ func GetTokenUsage(c *gin.Context) {
 			"total_used":           token.UsedQuota,
 			"total_available":      token.RemainQuota,
 			"unlimited_quota":      token.UnlimitedQuota,
+			"max_ratio":            token.MaxRatio,
 			"model_limits":         token.GetModelLimitsMap(),
 			"model_limits_enabled": token.ModelLimitsEnabled,
 			"expires_at":           expiredAt,
@@ -289,6 +295,10 @@ func AddToken(c *gin.Context) {
 	token := request.Token
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
+		return
+	}
+	if !isValidTokenMaxRatio(token.MaxRatio) {
+		common.ApiError(c, fmt.Errorf("倍率上限必须是非负有限数值"))
 		return
 	}
 	// 非无限额度时，检查额度值是否超出有效范围
@@ -344,6 +354,7 @@ func AddToken(c *gin.Context) {
 		ModelLimits:        token.ModelLimits,
 		AllowIps:           token.AllowIps,
 		Group:              token.Group,
+		MaxRatio:           token.MaxRatio,
 		CrossGroupRetry:    token.CrossGroupRetry,
 		AutoGroups:         token.AutoGroups,
 	}
@@ -386,6 +397,10 @@ func UpdateToken(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
+	if !isValidTokenMaxRatio(token.MaxRatio) {
+		common.ApiError(c, fmt.Errorf("倍率上限必须是非负有限数值"))
+		return
+	}
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
 			common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
@@ -424,6 +439,7 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.ModelLimits = token.ModelLimits
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
+		cleanToken.MaxRatio = token.MaxRatio
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
 		if token.Group != "auto" {
 			cleanToken.CrossGroupRetry = false

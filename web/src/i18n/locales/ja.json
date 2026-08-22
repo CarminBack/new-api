@@ -5395,6 +5395,9 @@
     "Verification flow expired": "認証手続きの有効期限が切れました",
     "Verification proof was not returned": "認証証明が返されませんでした",
     "Verification scope is missing": "検証スコープがありません",
+    "Maximum Group Ratio": "Maximum Group Ratio",
+    "Reject requests when the effective group ratio exceeds this value. 0 means unlimited.": "Reject requests when the effective group ratio exceeds this value. 0 means unlimited.",
+    "Ratio Limit": "Ratio Limit",
     "Verify to view channel key": "認証してチャネルキーを表示"
   }
 }

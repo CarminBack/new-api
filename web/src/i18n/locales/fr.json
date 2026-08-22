@@ -5395,6 +5395,9 @@
     "Verification flow expired": "Le processus de vérification a expiré",
     "Verification proof was not returned": "La preuve de vérification n’a pas été renvoyée",
     "Verification scope is missing": "La portée de vérification est manquante",
+    "Maximum Group Ratio": "Maximum Group Ratio",
+    "Reject requests when the effective group ratio exceeds this value. 0 means unlimited.": "Reject requests when the effective group ratio exceeds this value. 0 means unlimited.",
+    "Ratio Limit": "Ratio Limit",
     "Verify to view channel key": "Vérifier pour afficher la clé du canal"
   }
 }

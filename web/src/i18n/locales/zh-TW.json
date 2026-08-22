@@ -5395,6 +5395,9 @@
     "Verification flow expired": "驗證流程已過期",
     "Verification proof was not returned": "伺服器未傳回驗證憑證",
     "Verification scope is missing": "缺少驗證範圍",
+    "Maximum Group Ratio": "最高分組倍率",
+    "Reject requests when the effective group ratio exceeds this value. 0 means unlimited.": "實際分組倍率超過此值時拒絕請求，0 表示不限制。",
+    "Ratio Limit": "倍率上限",
     "Verify to view channel key": "驗證後查看渠道金鑰"
   }
 }

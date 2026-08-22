@@ -171,6 +171,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		return
 	}
+	if err := helper.CheckTokenGroupRatioLimit(c, priceData.GroupRatioInfo.GroupRatio); err != nil {
+		newAPIError = types.NewErrorWithStatusCode(err, types.ErrorCodeTokenRatioExceeded, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		return
+	}
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
