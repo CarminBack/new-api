@@ -225,7 +225,11 @@ function ModelMonitorCard({
   )
 }
 
-export function ChannelModelMonitorPanel() {
+export function ChannelModelMonitorPanel({
+  showActions = true,
+}: {
+  showActions?: boolean
+}) {
   const { t } = useTranslation()
   const [isTesting, setIsTesting] = useState(false)
   const currentUser = useAuthStore((state) => state.auth.user)
@@ -324,19 +328,21 @@ export function ChannelModelMonitorPanel() {
           {t('Updated')} {new Date().toLocaleTimeString()} · {t('24h window')}
         </div>
         <div className='ml-auto flex items-center gap-2'>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={runDetection}
-            disabled={!canOperate || isTesting}
-          >
-            {isTesting ? (
-              <Loader2 className='size-4 animate-spin' />
-            ) : (
-              <TestTube className='size-4' />
-            )}
-            {t('Test All Channels')}
-          </Button>
+          {showActions && (
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={runDetection}
+              disabled={!canOperate || isTesting}
+            >
+              {isTesting ? (
+                <Loader2 className='size-4 animate-spin' />
+              ) : (
+                <TestTube className='size-4' />
+              )}
+              {t('Test All Channels')}
+            </Button>
+          )}
           <Button
             variant='outline'
             size='icon-sm'
