@@ -1,5 +1,11 @@
 # Development Log
 
+## 2026-08-22 Group Status Branch Split
+
+- Group status and grouped channel latency features are retained on `feature/group-status` at `ed89505b4`.
+- Removed those feature commits and the related scheduled-probe extension from `upgrade-rc24-test` with revert commit `995bb75cc`.
+- No server was updated by this branch split; production remains unchanged.
+
 ## 2026-08-22 API Key Group Ratio Limit
 
 - Added `Token.max_ratio`; `0` preserves unlimited behavior and is persisted by the existing Token cache.
