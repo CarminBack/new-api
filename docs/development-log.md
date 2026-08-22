@@ -68,6 +68,7 @@
 - Updated `new-api-rc20-test` only; compose backup: `docker-compose.yml.bak-20260822-101438`.
 - Verification: container is healthy with zero restarts, `/api/status` reports `carmin-20260822-b54b82f`, served assets contain `Group Status`, `5000`, `usable_group`, and `分组状态`, and unauthenticated metrics access returns `401`.
 - Production remains unchanged.
+- Demo fixture values were aligned with the latency rule: `demo-normal` 500 ms TTFT, `demo-warning` 6000 ms TTFT, and `demo-abnormal` 0 successful requests.
 
 ## 2026-08-22 API Key Ratio Limit Display
 
