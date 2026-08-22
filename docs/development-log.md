@@ -10,6 +10,13 @@
 - Verification: Go full test suite, web typecheck/build/format check passed. Test request with actual ratio `0.3` and limit `0.0001` returned HTTP 403 with `token_ratio_exceeded`; boundary limit `0.3` did not trigger the guard. Test token limit restored to `0`; test container remained healthy with zero restarts.
 - Production `new-api-docker` was not changed.
 
+## 2026-08-22 API Key Ratio Limit Retest
+
+- Retested on `new-api-rc20-test` using test token id `57` (original `max_ratio=0.1`), with Token Redis cache invalidated between changes.
+- With limit `0.0001` and effective ChatGPT group ratio `0.3`, the request returned HTTP `403` with code `token_ratio_exceeded` before upstream routing.
+- With boundary limit `0.3`, the request did not return `token_ratio_exceeded`; it continued to normal channel selection and returned `get_channel_failed` because no usable test upstream channel was available.
+- Test token limit was restored to `0.1`; test container remained healthy with zero restarts. Production `new-api-docker` remained unchanged and healthy.
+
 ## 2026-08-22 API Key Ratio Limit Display
 
 - Changed the API Key list ratio-limit cell to display the numeric value only (for example, `0.1`); `0` still displays `Unlimited`.
