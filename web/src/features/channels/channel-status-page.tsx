@@ -25,7 +25,7 @@ export function ChannelStatusPage() {
 
   return (
     <SectionPageLayout fixedContent>
-      <SectionPageLayout.Title>{t('Channel Status')}</SectionPageLayout.Title>
+      <SectionPageLayout.Title>{t('Group Status')}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <ChannelModelMonitorPanel showActions={false} />
       </SectionPageLayout.Content>

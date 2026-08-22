@@ -58,6 +58,14 @@
 - Verification: test container healthy with zero restarts, `/api/status` reports `carmin-20260822-e790059`, bundle contains `/channel-status` and monitor labels, and unauthenticated metrics access returns `401`.
 - Production `new-api-docker` was not changed.
 
+## 2026-08-22 Group Status Display Rules
+
+- Renamed the user-facing status section to `Group Status` (`分组状态`).
+- Group state is now latency-based: latest valid TTFT at or below 5 seconds is Normal/green, above 5 seconds is Warning/yellow, and no successful request or no valid TTFT is Abnormal/red.
+- The TTFT metric displays the latest valid series bucket rather than the 24-hour aggregate average.
+- Group cards and status counts are filtered by the authenticated user's `usable_group` response, which includes special usable-group rules and prevents unavailable groups from being shown.
+- Test deployment pending; production remains unchanged.
+
 ## 2026-08-22 API Key Ratio Limit Display
 
 - Changed the API Key list ratio-limit cell to display the numeric value only (for example, `0.1`); `0` still displays `Unlimited`.

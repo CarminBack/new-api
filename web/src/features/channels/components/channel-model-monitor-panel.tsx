@@ -31,6 +31,7 @@ import type {
   PerformanceGroup,
   PerformanceMetricsData,
   PerfModelSummary,
+  PerformanceSeriesPoint,
 } from '@/features/performance-metrics/types'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import {
@@ -44,23 +45,49 @@ import { testAllChannels } from '../api'
 
 const EMPTY_MODELS: PerfModelSummary[] = []
 const DETAIL_LIMIT = 24
+const TTFT_WARNING_THRESHOLD_MS = 5_000
 
 type MonitorStatus = {
   label: string
   variant: StatusVariant
 }
 
-function groupStatus(group: PerformanceGroup): MonitorStatus {
-  if (group.request_count <= 0) {
+function latencyStatus(
+  requestCount: number,
+  successCount: number,
+  ttftMs: number
+): MonitorStatus {
+  if (requestCount <= 0 || successCount <= 0 || ttftMs <= 0) {
     return { label: 'Abnormal', variant: 'danger' }
   }
-  if (group.success_rate >= 99) {
+  if (ttftMs <= TTFT_WARNING_THRESHOLD_MS) {
     return { label: 'Normal', variant: 'success' }
   }
-  if (group.success_rate >= 95) {
-    return { label: 'Warning', variant: 'warning' }
+  return { label: 'Warning', variant: 'warning' }
+}
+
+function latestTtftMs(group: PerformanceGroup): number {
+  for (let index = group.series.length - 1; index >= 0; index -= 1) {
+    const value = group.series[index]?.avg_ttft_ms ?? 0
+    if (value > 0) return value
   }
-  return { label: 'Abnormal', variant: 'danger' }
+  return 0
+}
+
+function groupStatus(group: PerformanceGroup): MonitorStatus {
+  return latencyStatus(
+    group.request_count,
+    group.success_count,
+    latestTtftMs(group)
+  )
+}
+
+function pointStatus(point: PerformanceSeriesPoint): MonitorStatus {
+  return latencyStatus(
+    point.request_count,
+    point.success_count,
+    point.avg_ttft_ms
+  )
 }
 
 function modelStatus(groups: PerformanceGroup[]): MonitorStatus {
@@ -84,13 +111,14 @@ function HistoryStrip({ group }: { group: PerformanceGroup }) {
   return (
     <div className='flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden'>
       {points.map((point) => {
+        const status = pointStatus(point)
         let color = 'bg-red-500'
-        if (point.request_count <= 0) {
-          color = 'bg-muted'
-        } else if (point.success_rate >= 99) {
+        if (status.variant === 'success') {
           color = 'bg-emerald-500'
-        } else if (point.success_rate >= 95) {
+        } else if (status.variant === 'warning') {
           color = 'bg-amber-500'
+        } else if (point.request_count <= 0) {
+          color = 'bg-muted'
         }
         const title = `${new Date(point.ts * 1000).toLocaleString()} · ${point.success_count}/${point.request_count}`
         return (
@@ -132,13 +160,17 @@ function ModelMonitorCard({
   summary,
   details,
   groupRatios,
+  usableGroups,
 }: {
   summary: PerfModelSummary
   details?: PerformanceMetricsData
   groupRatios: Record<string, number>
+  usableGroups: Record<string, { desc: string; ratio: number }>
 }) {
   const { t } = useTranslation()
-  const groups = details?.data.groups ?? []
+  const groups = (details?.data.groups ?? []).filter(
+    (group) => usableGroups[group.group] !== undefined
+  )
   const status = modelStatus(groups)
 
   return (
@@ -194,7 +226,7 @@ function ModelMonitorCard({
               <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
                 <MetricBlock
                   label={t('Average TTFT')}
-                  value={formatLatency(group.avg_ttft_ms)}
+                  value={formatLatency(latestTtftMs(group))}
                 />
                 <MetricBlock
                   label={t('Availability')}
@@ -268,13 +300,20 @@ export function ChannelModelMonitorPanel({
     () => ({ ...pricing.groupRatio }),
     [pricing.groupRatio]
   )
+  const usableGroups = pricing.usableGroup
   const normalCount = visibleSummaries.filter((model) => {
     const details = detailMap.get(model.model_name)
-    return modelStatus(details?.data.groups ?? []).variant === 'success'
+    const groups = (details?.data.groups ?? []).filter(
+      (group) => usableGroups[group.group] !== undefined
+    )
+    return modelStatus(groups).variant === 'success'
   }).length
   const warningCount = visibleSummaries.filter((model) => {
     const details = detailMap.get(model.model_name)
-    return modelStatus(details?.data.groups ?? []).variant === 'warning'
+    const groups = (details?.data.groups ?? []).filter(
+      (group) => usableGroups[group.group] !== undefined
+    )
+    return modelStatus(groups).variant === 'warning'
   }).length
 
   const refresh = async () => {
@@ -377,6 +416,7 @@ export function ChannelModelMonitorPanel({
               summary={summary}
               details={detailMap.get(summary.model_name)}
               groupRatios={groupRatios}
+              usableGroups={usableGroups}
             />
           ))}
         </div>

@@ -127,7 +127,7 @@ export function Channels() {
                   {t('Latency')}
                 </TabsTrigger>
                 <TabsTrigger value='monitor' className='px-2 text-xs'>
-                  {t('Status')}
+                  {t('Group Status')}
                 </TabsTrigger>
               </TabsList>
             </span>

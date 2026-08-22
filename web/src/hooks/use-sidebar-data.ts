@@ -91,7 +91,7 @@ export function useSidebarData(): SidebarData {
             icon: FileText,
           },
           {
-            title: t('Channel Status'),
+            title: t('Group Status'),
             url: '/channel-status',
             icon: Radio,
           },
