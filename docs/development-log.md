@@ -9,3 +9,12 @@
 - Test deployment: `new-api-rc20-test` only, image digest `sha256:cd1a974ed625d935fd3ca0e83f265fa7babc53cec670ab7e66e51228783fec28`.
 - Verification: Go full test suite, web typecheck/build/format check passed. Test request with actual ratio `0.3` and limit `0.0001` returned HTTP 403 with `token_ratio_exceeded`; boundary limit `0.3` did not trigger the guard. Test token limit restored to `0`; test container remained healthy with zero restarts.
 - Production `new-api-docker` was not changed.
+
+## 2026-08-22 API Key Ratio Limit Display
+
+- Changed the API Key list ratio-limit cell to display the numeric value only (for example, `0.1`); `0` still displays `Unlimited`.
+- Commit: `2824decd0` (`fix(web): show ratio limit as numeric value`), pushed to `CarminBack/new-api` branch `upgrade-rc24-test`.
+- Web format check, typecheck, build, and targeted oxlint passed.
+- Test deployment: `new-api-rc20-test` only, image digest `sha256:eae5c9a2b8389def8757af8f512ea1a8cfdf036f508cd050113ee164be1f2d35`; compose backup `docker-compose.yml.bak-20260822-031156`.
+- Verification: `/api/status` returned success with version `carmin-20260822-2824dec`; container health is `healthy`, restart count `0`, and the running image digest matches the requested digest. Browser UI automation was unavailable because the browser bridge was not trusted in this environment.
+- Production `new-api-docker` was not changed.
