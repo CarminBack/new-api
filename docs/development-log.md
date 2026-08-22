@@ -77,6 +77,13 @@
 - Added an administrator setting editor for the mapping, for example `{"ChatGPT":"gpt-4o-mini"}`.
 - Test deployment pending; production remains unchanged.
 
+## 2026-08-22 Scheduled Group Probe Test Deployment
+
+- Test image built by GitHub Actions run `32567833670`: `sha256:5b2607fd065e1bdeb80febea9bea414ea7cec0bf55f69d86e28c66aa2543ce05`.
+- Updated `new-api-rc20-test` only; compose backup: `docker-compose.yml.bak-20260822-103516`.
+- Test options set to scheduled probes enabled, 5-minute interval, `scheduled_all` mode, and `{"ChatGPT":"gpt-4o-mini"}` as the probe model mapping.
+- Verification: container is healthy with zero restarts, `/api/status` reports `carmin-20260822-a24dbc8`, and the first `channel_test` task completed 26 channel probes. Production remains unchanged.
+
 ## 2026-08-22 API Key Ratio Limit Display
 
 - Changed the API Key list ratio-limit cell to display the numeric value only (for example, `0.1`); `0` still displays `Unlimited`.
