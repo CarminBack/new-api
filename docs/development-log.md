@@ -54,7 +54,7 @@
 - Added authenticated read-only `/channel-status` navigation for all signed-in users; admin-only channel configuration remains protected, and the public status view hides the channel probe action.
 - Test image built by GitHub Actions run `32565750248`: `sha256:a4e973afdc5de4c3e908f501b54a3932ec65f0f2f5c0508b251480ae72e75738`.
 - Updated `new-api-rc20-test` only; compose backup: `docker-compose.yml.bak-20260822-094802`.
-- Inserted temporary `demo-normal`, `demo-warning`, and `demo-abnormal` performance fixtures across 12 hourly buckets in the test database to exercise all status colors. These rows are isolated to the test station and can be removed with `DELETE FROM perf_metrics WHERE model_name LIKE 'demo-%'`.
+- Inserted temporary `demo-normal`, `demo-warning`, and `demo-abnormal` performance fixtures in the active `ChatGPT` group across 12 hourly buckets in the test database to exercise all status colors. An initial `default`-group fixture was removed because inactive groups are filtered from the status response. These rows are isolated to the test station and can be removed with `DELETE FROM perf_metrics WHERE model_name LIKE 'demo-%'`.
 - Verification: test container healthy with zero restarts, `/api/status` reports `carmin-20260822-e790059`, bundle contains `/channel-status` and monitor labels, and unauthenticated metrics access returns `401`.
 - Production `new-api-docker` was not changed.
 
