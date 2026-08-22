@@ -32,6 +32,13 @@
 - Backend tests: `go test ./controller ./router ./model`. Frontend format check, typecheck, targeted oxlint, and production build passed.
 - Test deployment pending; production remains unchanged for this feature.
 
+## 2026-08-22 Group Channel Latency Test Deployment
+
+- Test image built by GitHub Actions run `32562702814`: `sha256:c19cb7842e534eda3c5fee768e6de591ead6bcb20eea931924b9fe9daade0549`.
+- Updated `new-api-rc20-test` only; compose backup: `docker-compose.yml.bak-20260822-083916`.
+- Verification: test container is `healthy` with zero restarts, `/api/status` reports version `carmin-20260822-284fec0`, static bundle contains `/api/channel/latency` and `All Groups`, and unauthenticated latency access correctly returns HTTP `401`.
+- Production `new-api-docker` was not changed for this feature.
+
 ## 2026-08-22 API Key Ratio Limit Display
 
 - Changed the API Key list ratio-limit cell to display the numeric value only (for example, `0.1`); `0` still displays `Unlimited`.
