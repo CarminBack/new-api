@@ -70,6 +70,13 @@
 - Production remains unchanged.
 - Demo fixture values were aligned with the latency rule: `demo-normal` 500 ms TTFT, `demo-warning` 6000 ms TTFT, and `demo-abnormal` 0 successful requests.
 
+## 2026-08-22 Scheduled Group Probe Configuration
+
+- Enabled scheduled channel testing by default at a 5-minute interval.
+- Added `monitor_setting.probe_models`, a JSON group-to-model mapping used by automatic channel tests; unconfigured groups retain each channel's existing test-model fallback.
+- Added an administrator setting editor for the mapping, for example `{"ChatGPT":"gpt-4o-mini"}`.
+- Test deployment pending; production remains unchanged.
+
 ## 2026-08-22 API Key Ratio Limit Display
 
 - Changed the API Key list ratio-limit cell to display the numeric value only (for example, `0.1`); `0` still displays `Unlimited`.

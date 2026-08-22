@@ -90,6 +90,13 @@ function pointStatus(point: PerformanceSeriesPoint): MonitorStatus {
   )
 }
 
+function filterUsableGroups(
+  groups: PerformanceGroup[],
+  usableGroups: Record<string, { desc: string; ratio: number }>
+) {
+  return groups.filter((group) => usableGroups[group.group] !== undefined)
+}
+
 function modelStatus(groups: PerformanceGroup[]): MonitorStatus {
   if (groups.length === 0) return { label: 'Abnormal', variant: 'danger' }
   if (groups.some((group) => groupStatus(group).variant === 'danger')) {
@@ -168,9 +175,7 @@ function ModelMonitorCard({
   usableGroups: Record<string, { desc: string; ratio: number }>
 }) {
   const { t } = useTranslation()
-  const groups = (details?.data.groups ?? []).filter(
-    (group) => usableGroups[group.group] !== undefined
-  )
+  const groups = filterUsableGroups(details?.data.groups ?? [], usableGroups)
   const status = modelStatus(groups)
 
   return (
@@ -301,18 +306,25 @@ export function ChannelModelMonitorPanel({
     [pricing.groupRatio]
   )
   const usableGroups = pricing.usableGroup
+  const detailsLoading = detailQueries.some((query) => query.isLoading)
+  const displaySummaries =
+    detailsLoading || pricing.isLoading
+      ? visibleSummaries
+      : visibleSummaries.filter((model) => {
+          const details = detailMap.get(model.model_name)
+          return (
+            details !== undefined &&
+            filterUsableGroups(details.data.groups, usableGroups).length > 0
+          )
+        })
   const normalCount = visibleSummaries.filter((model) => {
     const details = detailMap.get(model.model_name)
-    const groups = (details?.data.groups ?? []).filter(
-      (group) => usableGroups[group.group] !== undefined
-    )
+    const groups = filterUsableGroups(details?.data.groups ?? [], usableGroups)
     return modelStatus(groups).variant === 'success'
   }).length
-  const warningCount = visibleSummaries.filter((model) => {
+  const warningCount = displaySummaries.filter((model) => {
     const details = detailMap.get(model.model_name)
-    const groups = (details?.data.groups ?? []).filter(
-      (group) => usableGroups[group.group] !== undefined
-    )
+    const groups = filterUsableGroups(details?.data.groups ?? [], usableGroups)
     return modelStatus(groups).variant === 'warning'
   }).length
 
@@ -352,7 +364,7 @@ export function ChannelModelMonitorPanel({
         <div className='bg-background flex items-center gap-2 rounded-md border px-3 py-1.5'>
           <Activity className='text-muted-foreground size-4' />
           <span className='text-sm'>
-            {t('Models')} <strong>{visibleSummaries.length}</strong>
+            {t('Models')} <strong>{displaySummaries.length}</strong>
           </span>
         </div>
         <div className='bg-background rounded-md border px-3 py-1.5 text-sm'>
@@ -403,14 +415,16 @@ export function ChannelModelMonitorPanel({
           {t('Loading...')}
         </div>
       )}
-      {!summaryQuery.isLoading && visibleSummaries.length === 0 && (
-        <div className='text-muted-foreground flex h-40 items-center justify-center'>
-          {t('No latency data available')}
-        </div>
-      )}
-      {!summaryQuery.isLoading && visibleSummaries.length > 0 && (
+      {!summaryQuery.isLoading &&
+        !detailsLoading &&
+        displaySummaries.length === 0 && (
+          <div className='text-muted-foreground flex h-40 items-center justify-center'>
+            {t('No latency data available')}
+          </div>
+        )}
+      {!summaryQuery.isLoading && displaySummaries.length > 0 && (
         <div className='grid grid-cols-1 gap-3 xl:grid-cols-2'>
-          {visibleSummaries.map((summary) => (
+          {displaySummaries.map((summary) => (
             <ModelMonitorCard
               key={summary.model_name}
               summary={summary}
