@@ -49,6 +49,15 @@
 - Verification: container is `healthy` with zero restarts, `/api/status` reports `carmin-20260822-562151a`, unauthenticated `/api/perf-metrics/summary` returns `401`, and the served bundle contains the model monitor labels.
 - Production `new-api-docker` was not changed for this feature.
 
+## 2026-08-22 User-visible Channel Status and Test Fixtures
+
+- Added authenticated read-only `/channel-status` navigation for all signed-in users; admin-only channel configuration remains protected, and the public status view hides the channel probe action.
+- Test image built by GitHub Actions run `32565750248`: `sha256:a4e973afdc5de4c3e908f501b54a3932ec65f0f2f5c0508b251480ae72e75738`.
+- Updated `new-api-rc20-test` only; compose backup: `docker-compose.yml.bak-20260822-094802`.
+- Inserted temporary `demo-normal`, `demo-warning`, and `demo-abnormal` performance fixtures across 12 hourly buckets in the test database to exercise all status colors. These rows are isolated to the test station and can be removed with `DELETE FROM perf_metrics WHERE model_name LIKE 'demo-%'`.
+- Verification: test container healthy with zero restarts, `/api/status` reports `carmin-20260822-e790059`, bundle contains `/channel-status` and monitor labels, and unauthenticated metrics access returns `401`.
+- Production `new-api-docker` was not changed.
+
 ## 2026-08-22 API Key Ratio Limit Display
 
 - Changed the API Key list ratio-limit cell to display the numeric value only (for example, `0.1`); `0` still displays `Unlimited`.
