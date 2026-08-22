@@ -64,7 +64,10 @@
 - Group state is now latency-based: latest valid TTFT at or below 5 seconds is Normal/green, above 5 seconds is Warning/yellow, and no successful request or no valid TTFT is Abnormal/red.
 - The TTFT metric displays the latest valid series bucket rather than the 24-hour aggregate average.
 - Group cards and status counts are filtered by the authenticated user's `usable_group` response, which includes special usable-group rules and prevents unavailable groups from being shown.
-- Test deployment pending; production remains unchanged.
+- Test image built by GitHub Actions run `32566953035`: `sha256:64355e238c7ce214e2009e61b66db422939abbc84231a006db2131009d778bdb`.
+- Updated `new-api-rc20-test` only; compose backup: `docker-compose.yml.bak-20260822-101438`.
+- Verification: container is healthy with zero restarts, `/api/status` reports `carmin-20260822-b54b82f`, served assets contain `Group Status`, `5000`, `usable_group`, and `分组状态`, and unauthenticated metrics access returns `401`.
+- Production remains unchanged.
 
 ## 2026-08-22 API Key Ratio Limit Display
 
