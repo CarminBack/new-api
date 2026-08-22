@@ -39,6 +39,13 @@
 - Verification: test container is `healthy` with zero restarts, `/api/status` reports version `carmin-20260822-284fec0`, static bundle contains `/api/channel/latency` and `All Groups`, and unauthenticated latency access correctly returns HTTP `401`.
 - Production `new-api-docker` was not changed for this feature.
 
+## 2026-08-22 Model Status Monitor Cards
+
+- Added request and success counts to performance metric group and history buckets.
+- Added a Channels `Status` tab with model-by-group cards showing ratio, average TTFT, availability counts, conversation latency, history buckets, and Normal/Warning/Abnormal states from real `/api/perf-metrics` data.
+- Reuses the existing all-channel probe action and refreshes metrics without generating extra upstream requests.
+- Test deployment pending; production remains unchanged for this feature.
+
 ## 2026-08-22 API Key Ratio Limit Display
 
 - Changed the API Key list ratio-limit cell to display the numeric value only (for example, `0.1`); `0` still displays `Unlimited`.

@@ -36,6 +36,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { getChannelOps } from './api'
 import { ChannelHealthPanel } from './components/channel-health-panel'
 import { ChannelLatencyPanel } from './components/channel-latency-panel'
+import { ChannelModelMonitorPanel } from './components/channel-model-monitor-panel'
 import { ChannelsDialogs } from './components/channels-dialogs'
 import { ChannelsPrimaryButtons } from './components/channels-primary-buttons'
 import { ChannelsProvider } from './components/channels-provider'
@@ -57,10 +58,12 @@ export function Channels() {
     typeof retryTimes === 'number' ? `${t('Max Retries')}: ${retryTimes}` : null
   let retryBadge = null
   const [activeView, setActiveView] = useState<
-    'channels' | 'health' | 'latency'
+    'channels' | 'health' | 'latency' | 'monitor'
   >(() => {
     const saved = localStorage.getItem('channels:active-view')
-    return saved === 'health' || saved === 'latency' ? saved : 'channels'
+    return saved === 'health' || saved === 'latency' || saved === 'monitor'
+      ? saved
+      : 'channels'
   })
   if (retryLabel) {
     retryBadge = isRoot ? (
@@ -100,7 +103,9 @@ export function Channels() {
         value={activeView}
         onValueChange={(value) => {
           const nextView =
-            value === 'health' || value === 'latency' ? value : 'channels'
+            value === 'health' || value === 'latency' || value === 'monitor'
+              ? value
+              : 'channels'
           localStorage.setItem('channels:active-view', nextView)
           setActiveView(nextView)
         }}
@@ -121,6 +126,9 @@ export function Channels() {
                 <TabsTrigger value='latency' className='px-2 text-xs'>
                   {t('Latency')}
                 </TabsTrigger>
+                <TabsTrigger value='monitor' className='px-2 text-xs'>
+                  {t('Status')}
+                </TabsTrigger>
               </TabsList>
             </span>
           </SectionPageLayout.Title>
@@ -136,6 +144,9 @@ export function Channels() {
             </TabsContent>
             <TabsContent value='latency' className='h-full min-h-0'>
               <ChannelLatencyPanel />
+            </TabsContent>
+            <TabsContent value='monitor' className='h-full min-h-0'>
+              <ChannelModelMonitorPanel />
             </TabsContent>
           </SectionPageLayout.Content>
         </SectionPageLayout>
