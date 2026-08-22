@@ -37,10 +37,6 @@ func TestChannelStatusRoutesRegisterWithoutConflict(t *testing.T) {
 	})
 }
 
-func TestChannelLatencyRouteUsesReadPermission(t *testing.T) {
-	assertChannelRoutePermission(t, http.MethodGet, "/latency", authz.ChannelRead, controller.GetChannelLatency)
-}
-
 func assertChannelRoutePermission(t *testing.T, method string, path string, permission authz.Permission, handler any) {
 	t.Helper()
 	for _, route := range channelPermissionRoutes {

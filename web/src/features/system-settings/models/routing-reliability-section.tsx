@@ -82,24 +82,6 @@ const routingReliabilitySchema = z
         .int()
         .min(1, 'Interval must be at least 1 minute'),
       channel_test_mode: z.enum(channelTestModes),
-      probe_models: z.string().refine((value) => {
-        const raw = value.trim()
-        if (!raw) return true
-        try {
-          const parsed = JSON.parse(raw)
-          return (
-            parsed !== null &&
-            typeof parsed === 'object' &&
-            !Array.isArray(parsed) &&
-            Object.entries(parsed).every(
-              ([group, model]) =>
-                group.trim().length > 0 && typeof model === 'string'
-            )
-          )
-        } catch {
-          return false
-        }
-      }, 'Use a JSON object mapping group names to probe models'),
     }),
   })
   .superRefine((values, ctx) => {
@@ -145,7 +127,6 @@ type RoutingReliabilitySectionProps = {
     'monitor_setting.auto_test_channel_enabled': boolean
     'monitor_setting.auto_test_channel_minutes': number
     'monitor_setting.channel_test_mode': ChannelTestMode
-    'monitor_setting.probe_models': string
   }
 }
 
@@ -164,7 +145,6 @@ type NormalizedRoutingReliabilityValues = {
   'monitor_setting.auto_test_channel_enabled': boolean
   'monitor_setting.auto_test_channel_minutes': number
   'monitor_setting.channel_test_mode': ChannelTestMode
-  'monitor_setting.probe_models': string
 }
 
 function normalizeChannelTestMode(value?: string): ChannelTestMode {
@@ -191,7 +171,6 @@ const buildFormDefaults = (
     channel_test_mode: normalizeChannelTestMode(
       defaults['monitor_setting.channel_test_mode']
     ),
-    probe_models: defaults['monitor_setting.probe_models'] ?? '{}',
   },
 })
 
@@ -218,9 +197,6 @@ const normalizeDefaults = (
   'monitor_setting.channel_test_mode': normalizeChannelTestMode(
     defaults['monitor_setting.channel_test_mode']
   ),
-  'monitor_setting.probe_models': normalizeProbeModels(
-    defaults['monitor_setting.probe_models']
-  ),
 })
 
 const normalizeFormValues = (
@@ -244,31 +220,7 @@ const normalizeFormValues = (
   'monitor_setting.auto_test_channel_minutes':
     values.monitor_setting.auto_test_channel_minutes,
   'monitor_setting.channel_test_mode': values.monitor_setting.channel_test_mode,
-  'monitor_setting.probe_models': normalizeProbeModels(
-    values.monitor_setting.probe_models
-  ),
 })
-
-function normalizeProbeModels(value?: string) {
-  const raw = (value ?? '').trim()
-  if (!raw) return '{}'
-  try {
-    const parsed = JSON.parse(raw)
-    if (
-      parsed === null ||
-      typeof parsed !== 'object' ||
-      Array.isArray(parsed) ||
-      !Object.entries(parsed).every(
-        ([group, model]) => group.trim().length > 0 && typeof model === 'string'
-      )
-    ) {
-      return raw
-    }
-    return JSON.stringify(parsed)
-  } catch {
-    return raw
-  }
-}
 
 export function RoutingReliabilitySection({
   defaultValues,
@@ -495,30 +447,6 @@ export function RoutingReliabilitySection({
                             'How frequently the system checks auto-disabled channels for recovery'
                           )
                         : t('How frequently the system tests all channels')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='monitor_setting.probe_models'
-                render={({ field }) => (
-                  <FormItem className='lg:col-span-3'>
-                    <FormLabel>{t('Probe model by group')}</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        rows={3}
-                        placeholder='{"ChatGPT":"gpt-4o-mini","Claude":"claude-3-5-sonnet"}'
-                        value={field.value}
-                        onChange={(event) => field.onChange(event.target.value)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'Optional JSON mapping of channel groups to probe models. Unconfigured groups keep their channel test model.'
-                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

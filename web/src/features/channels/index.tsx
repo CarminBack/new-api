@@ -35,8 +35,6 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { getChannelOps } from './api'
 import { ChannelHealthPanel } from './components/channel-health-panel'
-import { ChannelLatencyPanel } from './components/channel-latency-panel'
-import { ChannelModelMonitorPanel } from './components/channel-model-monitor-panel'
 import { ChannelsDialogs } from './components/channels-dialogs'
 import { ChannelsPrimaryButtons } from './components/channels-primary-buttons'
 import { ChannelsProvider } from './components/channels-provider'
@@ -57,14 +55,11 @@ export function Channels() {
   const retryLabel =
     typeof retryTimes === 'number' ? `${t('Max Retries')}: ${retryTimes}` : null
   let retryBadge = null
-  const [activeView, setActiveView] = useState<
-    'channels' | 'health' | 'latency' | 'monitor'
-  >(() => {
-    const saved = localStorage.getItem('channels:active-view')
-    return saved === 'health' || saved === 'latency' || saved === 'monitor'
-      ? saved
+  const [activeView, setActiveView] = useState<'channels' | 'health'>(() =>
+    localStorage.getItem('channels:active-view') === 'health'
+      ? 'health'
       : 'channels'
-  })
+  )
   if (retryLabel) {
     retryBadge = isRoot ? (
       <Tooltip>
@@ -102,10 +97,7 @@ export function Channels() {
       <Tabs
         value={activeView}
         onValueChange={(value) => {
-          const nextView =
-            value === 'health' || value === 'latency' || value === 'monitor'
-              ? value
-              : 'channels'
+          const nextView = value === 'health' ? 'health' : 'channels'
           localStorage.setItem('channels:active-view', nextView)
           setActiveView(nextView)
         }}
@@ -123,12 +115,6 @@ export function Channels() {
                 <TabsTrigger value='health' className='px-2 text-xs'>
                   {t('Channel Health')}
                 </TabsTrigger>
-                <TabsTrigger value='latency' className='px-2 text-xs'>
-                  {t('Latency')}
-                </TabsTrigger>
-                <TabsTrigger value='monitor' className='px-2 text-xs'>
-                  {t('Group Status')}
-                </TabsTrigger>
               </TabsList>
             </span>
           </SectionPageLayout.Title>
@@ -141,12 +127,6 @@ export function Channels() {
             </TabsContent>
             <TabsContent value='health' className='h-full min-h-0'>
               <ChannelHealthPanel />
-            </TabsContent>
-            <TabsContent value='latency' className='h-full min-h-0'>
-              <ChannelLatencyPanel />
-            </TabsContent>
-            <TabsContent value='monitor' className='h-full min-h-0'>
-              <ChannelModelMonitorPanel />
             </TabsContent>
           </SectionPageLayout.Content>
         </SectionPageLayout>

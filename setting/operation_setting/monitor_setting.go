@@ -3,16 +3,14 @@ package operation_setting
 import (
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/QuantumNous/new-api/setting/config"
 )
 
 type MonitorSetting struct {
-	AutoTestChannelEnabled bool              `json:"auto_test_channel_enabled"`
-	AutoTestChannelMinutes float64           `json:"auto_test_channel_minutes"`
-	ChannelTestMode        string            `json:"channel_test_mode"`
-	ProbeModels            map[string]string `json:"probe_models"`
+	AutoTestChannelEnabled bool    `json:"auto_test_channel_enabled"`
+	AutoTestChannelMinutes float64 `json:"auto_test_channel_minutes"`
+	ChannelTestMode        string  `json:"channel_test_mode"`
 }
 
 const (
@@ -22,10 +20,9 @@ const (
 
 // 默认配置
 var monitorSetting = MonitorSetting{
-	AutoTestChannelEnabled: true,
-	AutoTestChannelMinutes: 5,
+	AutoTestChannelEnabled: false,
+	AutoTestChannelMinutes: 10,
 	ChannelTestMode:        ChannelTestModeScheduledAll,
-	ProbeModels:            map[string]string{},
 }
 
 func init() {
@@ -52,11 +49,4 @@ func GetMonitorSetting() *MonitorSetting {
 		monitorSetting.ChannelTestMode = ChannelTestModeScheduledAll
 	}
 	return &monitorSetting
-}
-
-// GetProbeModel returns the explicitly configured model for a channel group.
-// An empty result preserves the channel's existing TestModel/model fallback.
-func GetProbeModel(group string) string {
-	modelName := strings.TrimSpace(GetMonitorSetting().ProbeModels[group])
-	return modelName
 }

@@ -331,8 +331,6 @@ func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResu
 
 		results = append(results, GroupResult{
 			Group:        group,
-			RequestCount: total.requestCount,
-			SuccessCount: total.successCount,
 			AvgTtftMs:    avg(total.ttftSumMs, total.ttftCount),
 			AvgLatencyMs: avg(total.totalLatencyMs, total.requestCount),
 			SuccessRate:  successRate(total),
@@ -351,8 +349,6 @@ func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResu
 func bucketPoint(ts int64, value counters) BucketPoint {
 	return BucketPoint{
 		Ts:           ts,
-		RequestCount: value.requestCount,
-		SuccessCount: value.successCount,
 		AvgTtftMs:    avg(value.ttftSumMs, value.ttftCount),
 		AvgLatencyMs: avg(value.totalLatencyMs, value.requestCount),
 		SuccessRate:  successRate(value),

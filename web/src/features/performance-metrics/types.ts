@@ -18,8 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 export type PerformanceSeriesPoint = {
   ts: number
-  request_count: number
-  success_count: number
   avg_ttft_ms: number
   avg_latency_ms: number
   success_rate: number
@@ -28,8 +26,6 @@ export type PerformanceSeriesPoint = {
 
 export type PerformanceGroup = {
   group: string
-  request_count: number
-  success_count: number
   avg_ttft_ms: number
   avg_latency_ms: number
   success_rate: number

@@ -26,7 +26,6 @@ import type {
   Channel,
   ChannelBalanceResponse,
   ChannelHealthRecoverParams,
-  ChannelLatencyResponse,
   ChannelHealthResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
@@ -122,11 +121,6 @@ export async function getChannelHealth(
   const res = await api.get('/api/channel/health', {
     params: { include_healthy: includeHealthy },
   })
-  return res.data
-}
-
-export async function getChannelLatency(): Promise<ChannelLatencyResponse> {
-  const res = await api.get('/api/channel/latency')
   return res.data
 }
 
