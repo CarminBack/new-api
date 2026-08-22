@@ -17,6 +17,13 @@
 - With boundary limit `0.3`, the request did not return `token_ratio_exceeded`; it continued to normal channel selection and returned `get_channel_failed` because no usable test upstream channel was available.
 - Test token limit was restored to `0.1`; test container remained healthy with zero restarts. Production `new-api-docker` remained unchanged and healthy.
 
+## 2026-08-22 Production Deployment
+
+- After the test retest passed, deployed the verified image to production service `new-api-docker` only.
+- Production image changed from `sha256:e096d669684ba94f0b3c0e206b70653918613076d0d0af736f4d1282db99fb57` to `sha256:6abe93bd95693259921dc9dcb5d580cd6ee51f37bc92a7fd9450bbe0470dde05` (GitHub Actions run `32560695621`, branch `upgrade-rc24-test`).
+- Backup: `/opt/docker/new-api/docker-compose.yml.bak-20260822-075942`.
+- Verification: `http://127.0.0.1:2888/api/status` returned `success=true`, version `carmin-20260822-6b11877`; production app and Redis were healthy with zero restarts.
+
 ## 2026-08-22 API Key Ratio Limit Display
 
 - Changed the API Key list ratio-limit cell to display the numeric value only (for example, `0.1`); `0` still displays `Unlimited`.
