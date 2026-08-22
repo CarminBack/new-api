@@ -44,7 +44,10 @@
 - Added request and success counts to performance metric group and history buckets.
 - Added a Channels `Status` tab with model-by-group cards showing ratio, average TTFT, availability counts, conversation latency, history buckets, and Normal/Warning/Abnormal states from real `/api/perf-metrics` data.
 - Reuses the existing all-channel probe action and refreshes metrics without generating extra upstream requests.
-- Test deployment pending; production remains unchanged for this feature.
+- Test image built by GitHub Actions run `32564899764`: `sha256:38b75457b56361dd2c55cd283b8c31bc0f24f26b2f19d520ed389a9ca788ffe6`.
+- Updated `new-api-rc20-test` only; compose backup: `docker-compose.yml.bak-20260822-092924`.
+- Verification: container is `healthy` with zero restarts, `/api/status` reports `carmin-20260822-562151a`, unauthenticated `/api/perf-metrics/summary` returns `401`, and the served bundle contains the model monitor labels.
+- Production `new-api-docker` was not changed for this feature.
 
 ## 2026-08-22 API Key Ratio Limit Display
 
