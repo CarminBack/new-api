@@ -142,6 +142,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		return streamDownstreamStarted() || responseTextBuilder.Len() > 0 ||
 			(finalResponse != nil && len(finalResponse.Output) > 0)
 	}
+	estimateStreamUsage := func() *dto.Usage {
+		responseText := responseTextBuilder.String()
+		if responseText == "" {
+			responseText = service.ExtractOutputTextFromResponses(finalResponse)
+		}
+		return service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens())
+	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		var streamResponse dto.ResponsesStreamResponse
@@ -291,20 +298,22 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if streamErr != nil {
 		return nil, streamErr
 	}
+	// The upstream accepted these requests but cannot return final usage after
+	// the downstream disappears or a started stream is truncated.
 	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
-		return &dto.Usage{}, nil
+		return estimateStreamUsage(), nil
 	}
 	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonScannerErr {
 		if !streamDownstreamStarted() {
 			return nil, types.NewOpenAIError(fmt.Errorf("responses stream scanner error: %w", info.StreamStatus.EndError), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 		}
-		return &dto.Usage{}, nil
+		return estimateStreamUsage(), nil
 	}
 	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonEOF && info.StreamTerminalEvent == "" {
 		if !streamDownstreamStarted() {
 			return nil, types.NewOpenAIError(fmt.Errorf("empty responses stream: upstream ended before terminal event"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
 		}
-		return &dto.Usage{}, nil
+		return estimateStreamUsage(), nil
 	}
 	if info.StreamStatus != nil &&
 		(!info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors()) {
@@ -317,7 +326,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			responseText = service.ExtractOutputTextFromResponses(finalResponse)
 		}
 		if responseText != "" {
-			usage = service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens())
+			usage = estimateStreamUsage()
 		}
 	}
 

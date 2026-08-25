@@ -141,7 +141,7 @@ func TestOaiResponsesStreamHandlerRecordsEOFWithoutTerminalEvent(t *testing.T) {
 	assert.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
 }
 
-func TestOaiResponsesStreamHandlerLeavesClientDisconnectUncharged(t *testing.T) {
+func TestOaiResponsesStreamHandlerBillsEstimatedInputOnClientDisconnect(t *testing.T) {
 	oldTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
@@ -149,6 +149,7 @@ func TestOaiResponsesStreamHandlerLeavesClientDisconnectUncharged(t *testing.T) 
 	reader, writer := io.Pipe()
 	t.Cleanup(func() { _ = writer.Close() })
 	c, _, resp, info := newDirectResponsesStreamTestContext(t, reader)
+	info.SetEstimatePromptTokens(17)
 	requestCtx, cancel := context.WithCancel(c.Request.Context())
 	c.Request = c.Request.WithContext(requestCtx)
 
@@ -171,9 +172,28 @@ func TestOaiResponsesStreamHandlerLeavesClientDisconnectUncharged(t *testing.T) 
 		t.Fatal("timed out waiting for client disconnect")
 	}
 	require.Nil(t, apiErr)
-	assert.Zero(t, usageTotal)
+	assert.Equal(t, 17, usageTotal)
+	assert.True(t, common.GetContextKeyBool(c, constant.ContextKeyLocalCountTokens))
 	require.NotNil(t, info.StreamStatus)
 	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+}
+
+func TestOaiResponsesStreamHandlerBillsEstimatedUsageAfterOutputEOF(t *testing.T) {
+	body := `data: {"type":"response.output_text.delta","delta":"partial answer"}` + "\n\n"
+	c, recorder, resp, info := newDirectResponsesStreamTestContext(t, strings.NewReader(body))
+	info.SetEstimatePromptTokens(11)
+
+	usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	assert.Equal(t, 11, usage.PromptTokens)
+	assert.Positive(t, usage.CompletionTokens)
+	assert.Equal(t, usage.PromptTokens+usage.CompletionTokens, usage.TotalTokens)
+	assert.Contains(t, recorder.Body.String(), "partial answer")
+	assert.True(t, common.GetContextKeyBool(c, constant.ContextKeyLocalCountTokens))
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
 }
 
 func TestOaiResponsesStreamHandlerTerminalEventWinsOverEOF(t *testing.T) {
