@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -30,6 +31,14 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	err = common.Unmarshal(responseBody, &responsesResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	}
+	if common.DebugEnabled {
+		rawUsage := gjson.GetBytes(responseBody, "usage")
+		if rawUsage.Exists() {
+			logger.LogDebug(c, "openai responses upstream usage: %s", rawUsage.Raw)
+		} else {
+			logger.LogDebug(c, "openai responses upstream usage: <missing>")
+		}
 	}
 	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
@@ -166,6 +175,17 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		case "response.completed", "response.done", "response.incomplete":
 			info.StreamTerminalEvent = streamResponse.Type
 			finalResponse = streamResponse.Response
+			// Keep the raw upstream usage shape available for diagnosing provider
+			// fields that are not represented by the typed DTO. This is gated by
+			// DEBUG and intentionally logs usage only, never prompt or output data.
+			if common.DebugEnabled {
+				rawUsage := gjson.Get(data, "response.usage")
+				if rawUsage.Exists() {
+					logger.LogDebug(c, "openai responses upstream usage: %s", rawUsage.Raw)
+				} else {
+					logger.LogDebug(c, "openai responses upstream usage: <missing>")
+				}
+			}
 			usage, info.StreamUsagePresent = responsesUsage(finalResponse)
 			if !streamHasUpstreamOutput() && !info.StreamUsagePresent {
 				streamErr = types.NewOpenAIError(
