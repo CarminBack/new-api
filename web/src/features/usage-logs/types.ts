@@ -192,6 +192,7 @@ export interface LogOtherData {
   text_output?: number
   cache_tokens?: number
   cache_creation_tokens?: number
+  cache_write_tokens?: number
   cache_creation_tokens_5m?: number
   cache_creation_tokens_1h?: number
   claude?: boolean

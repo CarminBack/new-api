@@ -40,7 +40,7 @@ import { cn } from '@/lib/utils'
 
 import { LOG_TYPE_ENUM } from '../constants'
 import type { UsageLog } from '../data/schema'
-import { parseLogOther } from '../lib/format'
+import { getCacheWriteTokens, parseLogOther } from '../lib/format'
 import { getUsageLogTypeConfig } from '../lib/log-type'
 import {
   getLogTypeConfig,
@@ -207,12 +207,7 @@ function MobileTokensField({ log }: { log: UsageLog }) {
 
   const other = parseLogOther(log.other)
   const cacheReadTokens = other?.cache_tokens || 0
-  const cacheWrite5m = other?.cache_creation_tokens_5m || 0
-  const cacheWrite1h = other?.cache_creation_tokens_1h || 0
-  const hasSplitCache = cacheWrite5m > 0 || cacheWrite1h > 0
-  const cacheWriteTokens = hasSplitCache
-    ? cacheWrite5m + cacheWrite1h
-    : other?.cache_creation_tokens || 0
+  const cacheWriteTokens = getCacheWriteTokens(other)
   const showCache = cacheReadTokens > 0 || cacheWriteTokens > 0
 
   return (

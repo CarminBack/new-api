@@ -295,6 +295,28 @@ export interface TieredBillingSummary {
 }
 
 /**
+ * Normalize cache creation totals across current and legacy log payloads.
+ * Split 5m/1h values are authoritative when present; the two total fields
+ * may describe the same tokens, so use the larger value instead of adding.
+ */
+export function getCacheWriteTokens(
+  other: LogOtherData | null | undefined
+): number {
+  if (!other) return 0
+
+  const cacheWrite5m = other.cache_creation_tokens_5m || 0
+  const cacheWrite1h = other.cache_creation_tokens_1h || 0
+  if (cacheWrite5m > 0 || cacheWrite1h > 0) {
+    return cacheWrite5m + cacheWrite1h
+  }
+
+  return Math.max(
+    other.cache_creation_tokens || 0,
+    other.cache_write_tokens || 0
+  )
+}
+
+/**
  * Whether the request payload reports any cache-related token usage. Used to
  * suppress cache pricing rows from the tiered breakdown when the request did
  * not exercise the cache path.
@@ -303,12 +325,7 @@ export function hasAnyCacheTokens(
   other: LogOtherData | null | undefined
 ): boolean {
   if (!other) return false
-  return (
-    (other.cache_tokens || 0) > 0 ||
-    (other.cache_creation_tokens || 0) > 0 ||
-    (other.cache_creation_tokens_5m || 0) > 0 ||
-    (other.cache_creation_tokens_1h || 0) > 0
-  )
+  return (other.cache_tokens || 0) > 0 || getCacheWriteTokens(other) > 0
 }
 
 export function getTieredBillingSummary(
