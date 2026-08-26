@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 
 	"github.com/gin-gonic/gin"
@@ -45,6 +46,12 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	if c.Writer == nil {
 		return
 	}
+	logger.LogUpstreamUsage(
+		c,
+		common.GetContextKeyInt(c, constant.ContextKeyChannelId),
+		common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		data,
+	)
 
 	body := io.NopCloser(bytes.NewBuffer(data))
 

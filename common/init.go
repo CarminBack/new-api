@@ -85,6 +85,7 @@ func InitEnv() {
 
 	// Initialize variables from constants.go that were using environment variables
 	DebugEnabled = os.Getenv("DEBUG") == "true"
+	initUpstreamUsageLog(time.Now())
 	MemoryCacheEnabled = os.Getenv("MEMORY_CACHE_ENABLED") == "true"
 	IsMasterNode = os.Getenv("NODE_TYPE") != "slave"
 	initNodeNameIdentity()
