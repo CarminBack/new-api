@@ -24,10 +24,18 @@ func isResponsesItemIDPrefixError(err *types.NewAPIError) bool {
 		return false
 	}
 	openAIError := err.ToOpenAIError()
-	if !strings.EqualFold(fmt.Sprint(openAIError.Code), "invalid_id_prefix") {
+	code := strings.TrimSpace(fmt.Sprint(openAIError.Code))
+	param := strings.TrimSpace(openAIError.Param)
+	if strings.EqualFold(code, "invalid_id_prefix") {
+		return isResponsesInputIDParam(param)
+	}
+	if param != "" || (code != "" && code != "<nil>" && !strings.EqualFold(code, "null")) {
 		return false
 	}
-	param := strings.TrimSpace(openAIError.Param)
+	return isTaggedResponsesItemIDPrefixError(openAIError.Message)
+}
+
+func isResponsesInputIDParam(param string) bool {
 	if !strings.HasPrefix(param, "input[") || !strings.HasSuffix(param, "].id") {
 		return false
 	}
@@ -41,6 +49,21 @@ func isResponsesItemIDPrefixError(err *types.NewAPIError) bool {
 		}
 	}
 	return true
+}
+
+func isTaggedResponsesItemIDPrefixError(message string) bool {
+	const prefix = "[ApiIdParam] ["
+	const suffix = "] [invalid_id_prefix] "
+	message = strings.TrimSpace(message)
+	if !strings.HasPrefix(message, prefix) {
+		return false
+	}
+	remainder := strings.TrimPrefix(message, prefix)
+	separator := strings.Index(remainder, suffix)
+	if separator <= 0 {
+		return false
+	}
+	return isResponsesInputIDParam(remainder[:separator])
 }
 
 func normalizeResponsesItemIDs(payload []byte) (responsesItemIDCompatibilityResult, error) {

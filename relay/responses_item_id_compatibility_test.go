@@ -34,17 +34,41 @@ func TestIsResponsesItemIDPrefixError(t *testing.T) {
 		{name: "wrong code", status: http.StatusBadRequest, code: "invalid_value", param: "input[84].id"},
 		{name: "nested id", status: http.StatusBadRequest, code: "invalid_id_prefix", param: "input[84].content[0].id"},
 		{name: "invalid index", status: http.StatusBadRequest, code: "invalid_id_prefix", param: "input[item].id"},
+		{
+			name:   "tagged upstream error",
+			status: http.StatusBadRequest,
+			code:   nil,
+			param:  "",
+			want:   true,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			message := "invalid item id"
+			if test.name == "tagged upstream error" {
+				message = "[ApiIdParam] [input[84].id] [invalid_id_prefix] Invalid 'input[84].id': 'item_redacted'. Expected an ID that begins with 'rs'."
+			}
 			err := types.WithOpenAIError(types.OpenAIError{
-				Message: "invalid item id",
+				Message: message,
 				Code:    test.code,
 				Param:   test.param,
 			}, test.status)
 			assert.Equal(t, test.want, isResponsesItemIDPrefixError(err))
 		})
+	}
+}
+
+func TestIsResponsesItemIDPrefixErrorRejectsMalformedTaggedMessages(t *testing.T) {
+	messages := []string{
+		"[ApiIdParam] [input[item].id] [invalid_id_prefix] invalid",
+		"[ApiIdParam] [input[84].content[0].id] [invalid_id_prefix] invalid",
+		"[ApiIdParam] [input[84].id] [invalid_value] invalid",
+		"prefix [ApiIdParam] [input[84].id] [invalid_id_prefix] invalid",
+	}
+	for _, message := range messages {
+		err := types.WithOpenAIError(types.OpenAIError{Message: message}, http.StatusBadRequest)
+		assert.False(t, isResponsesItemIDPrefixError(err), message)
 	}
 }
 
