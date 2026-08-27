@@ -163,6 +163,12 @@ export interface LogOtherData {
       clamped: number
     }
     request_diagnostic?: RequestDiagnosticInfo
+    responses_item_id_compatibility?: {
+      retried?: boolean
+      stripped?: number
+      id_prefix?: string
+      item_types?: Record<string, number>
+    }
   }
   // Language-independent operation descriptor (audit/login logs).
   // Frontend renders localized content from action + params via i18n templates.

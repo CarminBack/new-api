@@ -11,13 +11,14 @@ import (
 )
 
 type ChannelSettings struct {
-	ForceFormat            bool                `json:"force_format,omitempty"`
-	ThinkingToContent      bool                `json:"thinking_to_content,omitempty"`
-	Proxy                  string              `json:"proxy"`
-	PassThroughBodyEnabled bool                `json:"pass_through_body_enabled,omitempty"`
-	SystemPrompt           string              `json:"system_prompt,omitempty"`
-	SystemPromptOverride   bool                `json:"system_prompt_override,omitempty"`
-	ImageResolutionTiers   map[string][]string `json:"image_resolution_tiers,omitempty"`
+	ForceFormat                         bool                `json:"force_format,omitempty"`
+	ThinkingToContent                   bool                `json:"thinking_to_content,omitempty"`
+	Proxy                               string              `json:"proxy"`
+	PassThroughBodyEnabled              bool                `json:"pass_through_body_enabled,omitempty"`
+	ResponsesItemIDCompatibilityEnabled bool                `json:"responses_item_id_compatibility_enabled,omitempty"`
+	SystemPrompt                        string              `json:"system_prompt,omitempty"`
+	SystemPromptOverride                bool                `json:"system_prompt_override,omitempty"`
+	ImageResolutionTiers                map[string][]string `json:"image_resolution_tiers,omitempty"`
 	// HTTPProtocol controls outbound HTTP version negotiation for this channel.
 	// Accepted values: "", "auto" (default), "http1".
 	HTTPProtocol string `json:"http_protocol,omitempty"`

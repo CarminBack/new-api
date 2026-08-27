@@ -264,6 +264,7 @@ export const channelFormSchema = z
     http_protocol: z.enum(['auto', 'http1']).optional(),
     http2_connection_shards: z.number().int().optional(),
     pass_through_body_enabled: z.boolean().optional(),
+    responses_item_id_compatibility_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
     image_resolution_tiers: imageResolutionTiersSchema.optional(),
@@ -437,6 +438,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   http_protocol: HTTP_PROTOCOL_AUTO,
   http2_connection_shards: 1,
   pass_through_body_enabled: false,
+  responses_item_id_compatibility_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
   image_resolution_tiers: {},
@@ -478,6 +480,7 @@ export function transformChannelToFormDefaults(
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
     http2_connection_shards: 1,
     pass_through_body_enabled: false,
+    responses_item_id_compatibility_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
     image_resolution_tiers: {} as Record<string, Array<'1k' | '2k' | '4k'>>,
@@ -500,6 +503,8 @@ export function transformChannelToFormDefaults(
         http_protocol: protocol,
         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
+        responses_item_id_compatibility_enabled:
+          parsed.responses_item_id_compatibility_enabled || false,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
         image_resolution_tiers: parsedImageResolutionTiers.success
@@ -631,6 +636,8 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
   settingObj.proxy = formData.proxy?.trim() || ''
   settingObj.pass_through_body_enabled =
     formData.pass_through_body_enabled || false
+  settingObj.responses_item_id_compatibility_enabled =
+    formData.responses_item_id_compatibility_enabled || false
   settingObj.system_prompt = formData.system_prompt || ''
   settingObj.system_prompt_override = formData.system_prompt_override || false
 

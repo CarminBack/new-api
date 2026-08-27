@@ -80,6 +80,10 @@ const (
 	// ContextKeyUpstreamFailure stores a sanitized Responses failure summary for
 	// admin-only error diagnostics. It never contains request bodies or secrets.
 	ContextKeyUpstreamFailure ContextKey = "upstream_failure"
+	// ContextKeyResponsesItemIDCompatibility stores a sanitized summary of an
+	// internal Responses item-ID compatibility retry. It never contains full IDs
+	// or request content.
+	ContextKeyResponsesItemIDCompatibility ContextKey = "responses_item_id_compatibility"
 
 	// ContextKeyAuditLogged marks that the current request has already recorded
 	// a manage/operation audit log inside the handler. When set, the admin-audit

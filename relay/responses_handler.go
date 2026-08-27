@@ -77,10 +77,19 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	adaptor.Init(info)
 	var requestBody io.Reader
+	var compatibilityPayload []byte
+	compatibilityEnabled := info.RelayMode == relayconstant.RelayModeResponses &&
+		info.ChannelSetting.ResponsesItemIDCompatibilityEnabled
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+		if compatibilityEnabled {
+			compatibilityPayload, err = storage.Bytes()
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+			}
 		}
 		requestBody = common.NewReplayableBodyReader(storage)
 	} else {
@@ -107,6 +116,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+		if compatibilityEnabled {
+			compatibilityPayload = jsonData
+		}
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
@@ -114,7 +126,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 		defer closer.Close()
-		jsonData = nil
+		if !compatibilityEnabled {
+			jsonData = nil
+		}
 		requestBody = body
 	}
 
@@ -131,9 +145,42 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 
 		if httpResp.StatusCode != http.StatusOK {
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
-			// reset status code 重置状态码
-			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
-			return newAPIError
+			if compatibilityEnabled && !c.Writer.Written() && isResponsesItemIDPrefixError(newAPIError) {
+				compatibilityResult, compatibilityErr := normalizeResponsesItemIDs(compatibilityPayload)
+				if compatibilityErr != nil {
+					logger.LogWarn(c, fmt.Sprintf("responses item id compatibility skipped: channel_id=%d model=%s path=%s reason=%s",
+						info.ChannelId, info.UpstreamModelName, c.Request.URL.Path, compatibilityErr.Error()))
+				} else if compatibilityResult.stripped > 0 {
+					retryBody, retryCloser, retryBodyErr := relaycommon.NewOutboundJSONBody(compatibilityResult.payload)
+					if retryBodyErr != nil {
+						return types.NewError(retryBodyErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+					}
+					defer retryCloser.Close()
+					service.RecordResponsesItemIDCompatibility(c, compatibilityResult.stripped, compatibilityResult.types)
+					logger.LogInfo(c, fmt.Sprintf("responses item id compatibility retry: channel_id=%d model=%s path=%s id_prefix=%s stripped=%d item_types=%s",
+						info.ChannelId, info.UpstreamModelName, c.Request.URL.Path, genericResponsesItemIDPrefix,
+						compatibilityResult.stripped, formatResponsesItemIDCompatibilityTypes(compatibilityResult.types)))
+					retryResp, retryErr := adaptor.DoRequest(c, info, retryBody)
+					if retryErr != nil {
+						return types.NewOpenAIError(retryErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+					}
+					retryHTTPResp, ok := retryResp.(*http.Response)
+					if !ok || retryHTTPResp == nil {
+						return types.NewError(fmt.Errorf("invalid responses compatibility retry response: %T", retryResp), types.ErrorCodeBadResponse)
+					}
+					httpResp = retryHTTPResp
+					if httpResp.StatusCode == http.StatusOK {
+						newAPIError = nil
+					} else {
+						newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
+					}
+				}
+			}
+			if newAPIError != nil {
+				// reset status code 重置状态码
+				service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+				return newAPIError
+			}
 		}
 	}
 
