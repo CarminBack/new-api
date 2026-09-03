@@ -31,13 +31,34 @@ func isResponsesItemIDPrefixError(err *types.NewAPIError) bool {
 	}
 	if strings.EqualFold(code, "invalid_value") && isResponsesInputIDParam(param) {
 		message := strings.TrimSpace(openAIError.Message)
-		return strings.Contains(message, fmt.Sprintf("Invalid '%s':", param)) &&
-			strings.Contains(message, "Expected an ID that begins with 'rs'.")
+		return hasExpectedResponsesItemIDPrefix(message, param)
 	}
 	if param != "" || (code != "" && code != "<nil>" && !strings.EqualFold(code, "null")) {
 		return false
 	}
 	return isTaggedResponsesItemIDPrefixError(openAIError.Message)
+}
+
+func hasExpectedResponsesItemIDPrefix(message, param string) bool {
+	if !strings.Contains(message, fmt.Sprintf("Invalid '%s':", param)) {
+		return false
+	}
+	const marker = "Expected an ID that begins with '"
+	start := strings.Index(message, marker)
+	if start < 0 {
+		return false
+	}
+	valueStart := start + len(marker)
+	valueEnd := strings.Index(message[valueStart:], "'.")
+	if valueEnd <= 0 {
+		return false
+	}
+	switch message[valueStart : valueStart+valueEnd] {
+	case "rs", "fc":
+		return true
+	default:
+		return false
+	}
 }
 
 func isResponsesInputIDParam(param string) bool {

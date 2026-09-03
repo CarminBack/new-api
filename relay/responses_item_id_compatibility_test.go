@@ -31,8 +31,10 @@ func TestIsResponsesItemIDPrefixError(t *testing.T) {
 	}{
 		{name: "exact", status: http.StatusBadRequest, code: "invalid_id_prefix", param: "input[84].id", want: true},
 		{name: "invalid value variant", status: http.StatusBadRequest, code: "invalid_value", param: "input[216].id", want: true},
+		{name: "invalid value function call variant", status: http.StatusBadRequest, code: "invalid_value", param: "input[60].id", want: true},
 		{name: "invalid value mismatched param", status: http.StatusBadRequest, code: "invalid_value", param: "input[216].id"},
 		{name: "invalid value wrong expected prefix", status: http.StatusBadRequest, code: "invalid_value", param: "input[216].id"},
+		{name: "invalid value missing prefix terminator", status: http.StatusBadRequest, code: "invalid_value", param: "input[216].id"},
 		{name: "wrong status", status: http.StatusUnprocessableEntity, code: "invalid_id_prefix", param: "input[84].id"},
 		{name: "wrong code", status: http.StatusBadRequest, code: "invalid_value", param: "input[84].id"},
 		{name: "nested id", status: http.StatusBadRequest, code: "invalid_id_prefix", param: "input[84].content[0].id"},
@@ -52,10 +54,14 @@ func TestIsResponsesItemIDPrefixError(t *testing.T) {
 			switch test.name {
 			case "invalid value variant":
 				message = "Invalid 'input[216].id': 'item_redacted'. Expected an ID that begins with 'rs'."
+			case "invalid value function call variant":
+				message = "Invalid 'input[60].id': 'item_redacted'. Expected an ID that begins with 'fc'."
 			case "invalid value mismatched param":
 				message = "Invalid 'input[215].id': 'item_redacted'. Expected an ID that begins with 'rs'."
 			case "invalid value wrong expected prefix":
 				message = "Invalid 'input[216].id': 'item_redacted'. Expected an ID that begins with 'msg'."
+			case "invalid value missing prefix terminator":
+				message = "Invalid 'input[216].id': 'item_redacted'. Expected an ID that begins with 'fc"
 			case "tagged upstream error":
 				message = "[ApiIdParam] [input[84].id] [invalid_id_prefix] Invalid 'input[84].id': 'item_redacted'. Expected an ID that begins with 'rs'."
 			}
