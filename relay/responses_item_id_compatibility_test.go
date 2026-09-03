@@ -30,6 +30,9 @@ func TestIsResponsesItemIDPrefixError(t *testing.T) {
 		want   bool
 	}{
 		{name: "exact", status: http.StatusBadRequest, code: "invalid_id_prefix", param: "input[84].id", want: true},
+		{name: "invalid value variant", status: http.StatusBadRequest, code: "invalid_value", param: "input[216].id", want: true},
+		{name: "invalid value mismatched param", status: http.StatusBadRequest, code: "invalid_value", param: "input[216].id"},
+		{name: "invalid value wrong expected prefix", status: http.StatusBadRequest, code: "invalid_value", param: "input[216].id"},
 		{name: "wrong status", status: http.StatusUnprocessableEntity, code: "invalid_id_prefix", param: "input[84].id"},
 		{name: "wrong code", status: http.StatusBadRequest, code: "invalid_value", param: "input[84].id"},
 		{name: "nested id", status: http.StatusBadRequest, code: "invalid_id_prefix", param: "input[84].content[0].id"},
@@ -46,7 +49,14 @@ func TestIsResponsesItemIDPrefixError(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			message := "invalid item id"
-			if test.name == "tagged upstream error" {
+			switch test.name {
+			case "invalid value variant":
+				message = "Invalid 'input[216].id': 'item_redacted'. Expected an ID that begins with 'rs'."
+			case "invalid value mismatched param":
+				message = "Invalid 'input[215].id': 'item_redacted'. Expected an ID that begins with 'rs'."
+			case "invalid value wrong expected prefix":
+				message = "Invalid 'input[216].id': 'item_redacted'. Expected an ID that begins with 'msg'."
+			case "tagged upstream error":
 				message = "[ApiIdParam] [input[84].id] [invalid_id_prefix] Invalid 'input[84].id': 'item_redacted'. Expected an ID that begins with 'rs'."
 			}
 			err := types.WithOpenAIError(types.OpenAIError{
@@ -127,7 +137,7 @@ func TestNormalizeResponsesItemIDsRejectsReferencesAndIncompleteItems(t *testing
 	}
 }
 
-func TestResponsesHelperRetriesExactItemIDPrefixErrorOnce(t *testing.T) {
+func TestResponsesHelperRetriesInvalidValueItemIDPrefixErrorOnce(t *testing.T) {
 	var mu sync.Mutex
 	var bodies [][]byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +151,7 @@ func TestResponsesHelperRetriesExactItemIDPrefixErrorOnce(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		if attempt == 1 {
-			_, _ = w.Write([]byte(`{"error":{"message":"Expected an ID that begins with 'rs'.","type":"invalid_request_error","param":"input[0].id","code":"invalid_id_prefix"}}`))
+			_, _ = w.Write([]byte(`{"error":{"message":"Invalid 'input[0].id': 'item_reasoning_secret'. Expected an ID that begins with 'rs'.","type":"invalid_request_error","param":"input[0].id","code":"invalid_value"}}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"error":{"message":"second prefix validation error","type":"invalid_request_error","param":"input[1].id","code":"invalid_id_prefix"}}`))

@@ -29,6 +29,11 @@ func isResponsesItemIDPrefixError(err *types.NewAPIError) bool {
 	if strings.EqualFold(code, "invalid_id_prefix") {
 		return isResponsesInputIDParam(param)
 	}
+	if strings.EqualFold(code, "invalid_value") && isResponsesInputIDParam(param) {
+		message := strings.TrimSpace(openAIError.Message)
+		return strings.Contains(message, fmt.Sprintf("Invalid '%s':", param)) &&
+			strings.Contains(message, "Expected an ID that begins with 'rs'.")
+	}
 	if param != "" || (code != "" && code != "<nil>" && !strings.EqualFold(code, "null")) {
 		return false
 	}
