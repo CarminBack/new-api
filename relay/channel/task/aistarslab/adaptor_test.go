@@ -12,6 +12,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
@@ -55,6 +56,18 @@ func TestCapabilityMatrixMatchesCurrentSeedanceLines(t *testing.T) {
 	require.True(t, channel49.modes["frames2video"])
 	require.False(t, channel49.rations["21:9"])
 	require.True(t, channel49.perItem)
+}
+
+func TestEstimateBillingUsesExplicitPerSecondPricingUnit(t *testing.T) {
+	original := ratio_setting.TaskBillingUnit2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateTaskBillingUnitByJSONString(original)) })
+	require.NoError(t, ratio_setting.UpdateTaskBillingUnitByJSONString(`{"seedance-720p-c49":"per_second"}`))
+
+	c := testJSONContext(`{"model":"seedance-720p-c49","prompt":"test","seconds":"8"}`)
+	c.Set("task_request", relaycommon.TaskSubmitReq{Model: "seedance-720p-c49", Prompt: "test", Seconds: "8"})
+	got := (&TaskAdaptor{}).EstimateBilling(c, nil)
+
+	require.Equal(t, map[string]float64{"seconds": 8}, got)
 }
 
 func TestValidateRejectsPromptLongerThanProviderLimitByUnicodeCharacters(t *testing.T) {

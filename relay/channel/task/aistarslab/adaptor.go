@@ -291,9 +291,14 @@ func stageReferenceMedia(values []string, kind string, store func(string) (strin
 
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
 	if req, err := relaycommon.GetTaskRequest(c); err == nil {
-		capability := capabilityForModel(req.Model)
-		if capability.known && !capability.perItem {
-			return map[string]float64{"seconds": float64(requestedSeconds(req))}
+		// Billing unit is an application pricing decision. The provider
+		// capability snapshot may be stale or incomplete and must not override
+		// an explicit per-second setting in TaskBillingUnit.
+		if ratio_setting.IsTaskPerSecondBilling(req.Model) {
+			seconds := requestedSeconds(req)
+			if seconds > 0 {
+				return map[string]float64{"seconds": float64(seconds)}
+			}
 		}
 	}
 	return nil
