@@ -287,6 +287,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}
 			logger.LogUpstreamUsage(c, channelID, model, []byte(data))
 			if !strings.HasPrefix(data, "[DONE]") {
+				if n := len(info.UpstreamTimings); n > 0 {
+					info.UpstreamTimings[n-1].FirstSSEData()
+				}
 				info.SetFirstResponseTime()
 				info.ReceivedResponseCount++
 

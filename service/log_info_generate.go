@@ -94,6 +94,13 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	}
 
 	adminInfo := make(map[string]interface{})
+	if len(relayInfo.UpstreamTimings) > 0 {
+		timings := make([]map[string]interface{}, 0, len(relayInfo.UpstreamTimings))
+		for _, timing := range relayInfo.UpstreamTimings {
+			timings = append(timings, timing.Snapshot())
+		}
+		adminInfo["upstream_timings"] = timings
+	}
 	adminInfo["use_channel"] = ctx.GetStringSlice("use_channel")
 	isMultiKey := common.GetContextKeyBool(ctx, constant.ContextKeyChannelIsMultiKey)
 	if isMultiKey {

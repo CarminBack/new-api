@@ -128,6 +128,7 @@ export interface LogOtherData {
     is_multi_key?: boolean
     multi_key_index?: number
     use_channel?: number[]
+    upstream_timings?: Array<Record<string, number | boolean>>
     route_attempts?: Array<{
       channel_id?: number
       key_index?: number

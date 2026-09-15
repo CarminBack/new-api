@@ -66,6 +66,7 @@ import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+import { UpstreamTimingDetails } from '../upstream-timing-details'
 import type { UsageLog } from '../../data/schema'
 import {
   parseLogOther,
@@ -1301,6 +1302,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 )}
             </DetailSection>
           )}
+
+        {props.isAdmin && (
+          <UpstreamTimingDetails timings={other?.admin_info?.upstream_timings} />
+        )}
 
         {props.isAdmin &&
           other?.admin_info?.route_attempts &&
