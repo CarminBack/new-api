@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -168,7 +167,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		tieredResult = tieredRes
 	}
 
-	useTimeSeconds := time.Now().Unix() - relayInfo.StartTime.Unix()
+	useTimeSeconds := consumeLogUseTimeSeconds(ctx, relayInfo.StartTime)
 	textInputTokens := usage.InputTokenDetails.TextTokens
 	textOutTokens := usage.OutputTokenDetails.TextTokens
 
@@ -291,7 +290,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		tieredResult = tieredRes
 	}
 
-	useTimeSeconds := time.Now().Unix() - relayInfo.StartTime.Unix()
+	useTimeSeconds := consumeLogUseTimeSeconds(ctx, relayInfo.StartTime)
 	textInputTokens := usage.PromptTokensDetails.TextTokens
 	textOutTokens := usage.CompletionTokenDetails.TextTokens
 

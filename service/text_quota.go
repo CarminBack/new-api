@@ -5,7 +5,6 @@ import (
 	"math"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -232,7 +231,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	summary := textQuotaSummary{
 		ModelName:            relayInfo.OriginModelName,
 		TokenName:            ctx.GetString("token_name"),
-		UseTimeSeconds:       time.Now().Unix() - relayInfo.StartTime.Unix(),
+		UseTimeSeconds:       consumeLogUseTimeSeconds(ctx, relayInfo.StartTime),
 		CompletionRatio:      relayInfo.PriceData.CompletionRatio,
 		CacheRatio:           relayInfo.PriceData.CacheRatio,
 		ImageRatio:           relayInfo.PriceData.ImageRatio,

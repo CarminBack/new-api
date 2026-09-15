@@ -47,6 +47,20 @@ func BeginChannelRouteAttempt(c *gin.Context, channelID int, keyIndex int) {
 	})
 }
 
+// consumeLogUseTimeSeconds reports only the current (successful) channel attempt.
+// Keep the request-wide start time intact for error logs and diagnostics.
+// Callers without route-attempt tracking retain their existing timing behavior.
+func consumeLogUseTimeSeconds(c *gin.Context, requestStart time.Time) int64 {
+	if c != nil {
+		if value, ok := c.Get(ginKeyChannelAttemptCurrent); ok {
+			if attempt, ok := value.(ChannelRouteAttempt); ok && !attempt.startedAt.IsZero() {
+				return max(0, int64(channelCircuitNow().Sub(attempt.startedAt)/time.Second))
+			}
+		}
+	}
+	return max(0, time.Now().Unix()-requestStart.Unix())
+}
+
 func FinishChannelRouteAttempt(c *gin.Context, statusCode int, decision ChannelFailureDecision) {
 	if c == nil {
 		return
