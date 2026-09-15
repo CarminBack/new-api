@@ -8,7 +8,7 @@ import { UpstreamTimingDetails } from '../upstream-timing-details'
 const i18n = createInstance()
 await i18n.init({ lng: 'en', resources: { en: { translation: { Timing: 'Timing', Request: 'Request', Yes: 'Yes', No: 'No' } } } })
 
-function render(timings?: Array<Record<string, number | boolean>>) {
+function render(timings?: Array<Record<string, number | boolean | string>>) {
   return renderToStaticMarkup(<I18nextProvider i18n={i18n}><UpstreamTimingDetails timings={timings} /></I18nextProvider>)
 }
 
@@ -18,9 +18,11 @@ describe('upstream timing details', () => {
     assert.equal(render([]), '')
   })
   test('available zero durations and reused connections are shown without inventing missing phases', () => {
-    const html = render([{ connection_reused: true, response_headers_ms: 0, first_sse_data_ms: 75000 }])
+    const html = render([{ connection_reused: true, response_headers_ms: 0, first_sse_data_ms: 75000, response_header_server_timing: 'queue;dur=31200' }])
     assert.match(html, /75000 ms/)
     assert.match(html, /0 ms/)
+    assert.match(html, /queue;dur=31200/)
+    assert.doesNotMatch(html, /queue;dur=31200 ms/)
     assert.match(html, /Yes/)
     assert.doesNotMatch(html, /dns_ms/)
   })

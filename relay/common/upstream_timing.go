@@ -2,7 +2,9 @@ package common
 
 import (
 	"crypto/tls"
+	"net/http"
 	"net/http/httptrace"
+	"strings"
 	"sync"
 	"time"
 )
@@ -74,8 +76,33 @@ func (t *UpstreamTiming) Trace() *httptrace.ClientTrace {
 	}
 }
 
-func (t *UpstreamTiming) ResponseHeaders() { t.mark("response_headers_ms") }
-func (t *UpstreamTiming) FirstSSEData()    { t.mark("first_sse_data_ms") }
+func (t *UpstreamTiming) ResponseHeaders(headers http.Header) {
+	t.mark("response_headers_ms")
+	for _, name := range []string{
+		"Server-Timing",
+		"X-Openai-Processing-Ms",
+		"Openai-Processing-Ms",
+		"X-Upstream-Response-Time",
+		"X-Response-Time",
+		"X-Processing-Time",
+		"X-Request-Duration",
+		"X-Envoy-Upstream-Service-Time",
+		"X-Ttft",
+		"X-Ttft-Ms",
+	} {
+		value := strings.Join(headers.Values(name), ", ")
+		if value == "" {
+			continue
+		}
+		if len(value) > 512 {
+			value = value[:512]
+		}
+		t.mu.Lock()
+		t.values["response_header_"+strings.ToLower(strings.ReplaceAll(name, "-", "_"))] = value
+		t.mu.Unlock()
+	}
+}
+func (t *UpstreamTiming) FirstSSEData() { t.mark("first_sse_data_ms") }
 func (t *UpstreamTiming) Snapshot() map[string]interface{} {
 	t.mu.Lock()
 	defer t.mu.Unlock()

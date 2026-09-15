@@ -3,6 +3,7 @@ package common
 import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"net/http"
 	"net/http/httptrace"
 	"testing"
 	"time"
@@ -14,8 +15,19 @@ func TestUpstreamTimingSnapshotsDistinguishHeadersAndSSE(t *testing.T) {
 	trace.GotConn(httptrace.GotConnInfo{Reused: true})
 	trace.WroteRequest(httptrace.WroteRequestInfo{})
 	trace.GotFirstResponseByte()
-	timing.ResponseHeaders()
+	timing.ResponseHeaders(http.Header{
+		"Server-Timing":               []string{"queue;dur=31200, model;dur=800"},
+		"X-Ttft-Ms":                   []string{"31200"},
+		"Authorization":               []string{"Bearer must-not-be-logged"},
+		"Set-Cookie":                  []string{"session=must-not-be-logged"},
+		"X-Unrelated-Internal-Header": []string{"must-not-be-logged"},
+	})
 	before := timing.Snapshot()
+	assert.Equal(t, "queue;dur=31200, model;dur=800", before["response_header_server_timing"])
+	assert.Equal(t, "31200", before["response_header_x_ttft_ms"])
+	assert.NotContains(t, before, "response_header_authorization")
+	assert.NotContains(t, before, "response_header_set_cookie")
+	assert.NotContains(t, before, "response_header_x_unrelated_internal_header")
 	assert.Equal(t, true, before["connection_reused"])
 	assert.NotContains(t, before, "dns_ms")
 	assert.NotContains(t, before, "first_sse_data_ms")

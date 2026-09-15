@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
 export function UpstreamTimingDetails(props: {
-  timings?: Array<Record<string, number | boolean>>
+  timings?: Array<Record<string, number | boolean | string>>
 }) {
   const { t } = useTranslation()
   if (!props.timings?.length) return null
@@ -13,7 +13,8 @@ export function UpstreamTimingDetails(props: {
           <div className='text-sm'>{t('Request')} #{index + 1}</div>
           <dl className='space-y-1 text-xs'>
             {Object.entries(timing).map(([key, value]) => {
-              let display = `${value} ms`
+              let display = String(value)
+              if (typeof value === 'number') display = `${value} ms`
               if (typeof value === 'boolean') display = value ? t('Yes') : t('No')
               return (
                 <div key={key} className='flex flex-wrap justify-between gap-2'>

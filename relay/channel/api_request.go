@@ -535,7 +535,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), timing.Trace()))
 	resp, err := relayClient.Do(req)
 	if resp != nil {
-		timing.ResponseHeaders()
+		timing.ResponseHeaders(resp.Header)
 	}
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
