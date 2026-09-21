@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/QuantumNous/new-api/common"
@@ -28,8 +29,15 @@ func ContainsAutoGroup(group string) bool {
 }
 
 func UpdateAutoGroupsByJsonString(jsonString string) error {
-	autoGroups = make([]string, 0)
-	return common.Unmarshal([]byte(jsonString), &autoGroups)
+	if strings.TrimSpace(jsonString) == "" {
+		jsonString = "[]"
+	}
+	updated := make([]string, 0)
+	if err := common.Unmarshal([]byte(jsonString), &updated); err != nil {
+		return err
+	}
+	autoGroups = updated
+	return nil
 }
 
 func AutoGroups2JsonString() string {

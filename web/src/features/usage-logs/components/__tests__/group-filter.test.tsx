@@ -227,11 +227,18 @@ it('keeps the compact input and masks the dropdown together with other sensitive
   const option = await screen.findByRole('option', { name: 'premium' })
   const maskedField = input.closest('.\\[-webkit-text-security\\:disc\\]')
   expect(maskedField).not.toBeNull()
-  expect(maskedField).toContainElement(option)
+  expect(option.closest('.\\[-webkit-text-security\\:disc\\]')).not.toBeNull()
   await userEvent.keyboard('{Escape}')
   expect(input).toHaveAttribute('aria-expanded', 'false')
   await userEvent.tab()
   expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: /^Show$/ }))
+  await userEvent.click(input)
+  const revealedOption = await screen.findByRole('option', { name: 'premium' })
+  expect(input.closest('.\\[-webkit-text-security\\:disc\\]')).toBeNull()
+  expect(
+    revealedOption.closest('.\\[-webkit-text-security\\:disc\\]')
+  ).toBeNull()
 })
 
 it('lets mobile users select a long group name inside the filter drawer and submit it', async () => {

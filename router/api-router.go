@@ -13,6 +13,9 @@ import (
 )
 
 func SetApiRouter(router *gin.Engine) {
+	router.GET("/oauth/authorize", middleware.CriticalRateLimit(), controller.CanvasOAuthAuthorize)
+	router.POST("/oauth/token", middleware.CriticalRateLimit(), controller.CanvasOAuthToken)
+
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
@@ -249,6 +252,8 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			ratioSyncRoute.GET("/channels", controller.GetSyncableChannels)
 			ratioSyncRoute.POST("/fetch", controller.FetchUpstreamRatios)
+			ratioSyncRoute.POST("/aistarslab/sync", controller.SyncAistarsLabConfig)
+			ratioSyncRoute.POST("/task-pricing/migrate", controller.MigrateTaskPricing)
 		}
 		taskPluginRoute := apiRouter.Group("/plugin/task")
 		taskPluginRoute.Use(middleware.RootAuth())
@@ -365,6 +370,12 @@ func SetApiRouter(router *gin.Engine) {
 		mjRoute := apiRouter.Group("/mj")
 		mjRoute.GET("/self", middleware.UserAuth(), controller.GetUserMidjourney)
 		mjRoute.GET("/", middleware.AdminAuth(), controller.GetAllMidjourney)
+
+		imageGenerationRoute := apiRouter.Group("/image-generations")
+		imageGenerationRoute.GET("/:id/content", controller.GetImageGenerationContent)
+
+		referenceMediaRoute := apiRouter.Group("/reference-media")
+		referenceMediaRoute.GET("/:id/content", controller.GetTemporaryReferenceMediaContent)
 
 		taskRoute := apiRouter.Group("/task")
 		{

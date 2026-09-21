@@ -336,7 +336,10 @@ func migrateDB() error {
 
 	err := DB.AutoMigrate(
 		&Channel{},
+		&ChannelHealthState{},
+		&ImageGeneration{},
 		&Token{},
+		&CanvasOAuthCode{},
 		&User{},
 		&UserSession{},
 		&AuthFlow{},

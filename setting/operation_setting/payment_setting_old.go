@@ -6,6 +6,9 @@ This file is the old version of the payment settings file. If you need to add ne
 package operation_setting
 
 import (
+	"math"
+	"strconv"
+
 	"github.com/QuantumNous/new-api/common"
 )
 
@@ -56,4 +59,26 @@ func ContainsPayMethod(method string) bool {
 		}
 	}
 	return false
+}
+
+// GetPayMethodQuotaRatio returns the USD quota granted for one unit of a
+// payment method. Existing methods without quota_ratio preserve Price-based
+// pricing through its inverse (for example Price=7.3 means 1/7.3 USD per CNY).
+func GetPayMethodQuotaRatio(method string) float64 {
+	legacyPrice := Price
+	if legacyPrice <= 0 || math.IsNaN(legacyPrice) || math.IsInf(legacyPrice, 0) {
+		legacyPrice = 1
+	}
+	legacyRatio := 1 / legacyPrice
+	for _, payMethod := range PayMethods {
+		if payMethod["type"] != method {
+			continue
+		}
+		ratio, err := strconv.ParseFloat(payMethod["quota_ratio"], 64)
+		if err == nil && ratio > 0 && !math.IsNaN(ratio) && !math.IsInf(ratio, 0) {
+			return ratio
+		}
+		break
+	}
+	return legacyRatio
 }

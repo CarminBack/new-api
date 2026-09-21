@@ -72,7 +72,7 @@ export function parseTaskResult() { return {status: "SUCCESS"}; }
 	c.Request = httptest.NewRequest(http.MethodPost, "/vendor/submit", nil)
 	c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Plugin: pinned})
 
-	platform, adaptor := getTaskAdaptorForRequest(c, constant.TaskPlatform("missing-task-platform"))
+	platform, adaptor := getTaskAdaptorForRequest(c, constant.TaskPlatform("missing-task-platform"), "")
 	require.NotNil(t, adaptor)
 	assert.Equal(t, constant.TaskPlatform("pinned-request"), platform)
 	assert.Equal(t, "Pinned Generation", adaptor.GetChannelName())
@@ -83,7 +83,7 @@ func TestGetTaskAdaptorForRequestPinsLegacyMappedPlugin(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/video_1/remix", nil)
 	legacyPlatform := constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeSora))
 
-	platform, adaptor := getTaskAdaptorForRequest(c, legacyPlatform)
+	platform, adaptor := getTaskAdaptorForRequest(c, legacyPlatform, "")
 
 	require.NotNil(t, adaptor)
 	assert.Equal(t, legacyPlatform, platform)
@@ -95,4 +95,45 @@ func TestGetTaskAdaptorForRequestPinsLegacyMappedPlugin(t *testing.T) {
 	require.NotNil(t, pinned.Plugin)
 	assert.Equal(t, "sora", pinned.Plugin.Meta.Key)
 	assert.Same(t, pinned.Generation, pluginruntime.DefaultRegistry.Generation())
+}
+
+func TestGetTaskAdaptorForRequestSelectsAistarsLabByBaseURL(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://api.video.aistarslab.com/openai",
+		"https://api.video.aistarslab.com/openai/",
+		"https://api.video.aistarslab.com/openai/v1",
+	} {
+		t.Run(baseURL, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+
+			platform, adaptor := getTaskAdaptorForRequest(c, constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeAli)), baseURL)
+
+			require.NotNil(t, adaptor)
+			assert.Equal(t, constant.TaskPlatform("aistarslab"), platform)
+			pinned := c.MustGet(pluginruntime.ContextKeyPinnedPlugin).(pluginruntime.PinnedPlugin)
+			assert.Equal(t, "aistarslab", pinned.Plugin.Meta.Key)
+		})
+	}
+}
+
+func TestGetTaskAdaptorForRequestDoesNotHijackOtherAistarsLabPaths(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://api.video.aistarslab.com",
+		"https://api.video.aistarslab.com/openapi",
+		"https://api.video.aistarslab.com/openai/v2",
+		"https://api.video.aistarslab.com.evil.example/openai",
+	} {
+		t.Run(baseURL, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+
+			platform, adaptor := getTaskAdaptorForRequest(c, constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeAli)), baseURL)
+
+			require.NotNil(t, adaptor)
+			assert.Equal(t, constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeAli)), platform)
+			pinned := c.MustGet(pluginruntime.ContextKeyPinnedPlugin).(pluginruntime.PinnedPlugin)
+			assert.Equal(t, "alibaba", pinned.Plugin.Meta.Key)
+		})
+	}
 }

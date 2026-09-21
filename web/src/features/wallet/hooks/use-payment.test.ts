@@ -22,6 +22,22 @@ import { PAYMENT_TYPES } from '../constants'
 import { requestPaymentAmount } from './use-payment'
 
 describe('payment amount routing', () => {
+  test('passes the payment method to the regular calculator', async () => {
+    const requests: Array<{ amount: number; payment_method?: string }> = []
+    const amount = await requestPaymentAmount(6.77, 'usdt', {
+      regular: async (request) => {
+        requests.push(request)
+        return { success: true, data: '1.00' }
+      },
+      stripe: async () => ({ success: true, data: '2' }),
+      waffo: async () => ({ success: true, data: '3' }),
+      waffoPancake: async () => ({ success: true, data: '4' }),
+    })
+
+    expect(amount).toBe(1)
+    expect(requests).toEqual([{ amount: 6.77, payment_method: 'usdt' }])
+  })
+
   test('uses the dedicated Waffo amount calculator', async () => {
     const calls: string[] = []
     const amount = await requestPaymentAmount(120, PAYMENT_TYPES.WAFFO, {

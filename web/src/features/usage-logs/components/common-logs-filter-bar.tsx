@@ -350,6 +350,7 @@ export function CommonLogsFilterBar<TData>(
         allowCustomValue
         aria-label={t('Group')}
         emptyText={t('No group found.')}
+        popupClassName={sensitiveInputClass}
         placeholder={t('Group')}
         className='h-8 min-w-0 text-sm leading-5'
         value={filters.group || ''}

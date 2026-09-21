@@ -105,6 +105,9 @@ func main() {
 
 		go model.SyncChannelCache(common.SyncFrequency)
 	}
+	if err := service.RestorePersistentChannelHealth(); err != nil {
+		common.FatalLog("failed to restore channel health: " + err.Error())
+	}
 	wsmanager.StartSubscriber(context.Background())
 
 	// Warm pricing after channel cache initialization so Advanced Custom
@@ -121,19 +124,28 @@ func main() {
 	// 数据看板
 	go model.UpdateQuotaData()
 
-	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
-		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
-		if err != nil {
-			common.FatalLog("failed to parse CHANNEL_UPDATE_FREQUENCY: " + err.Error())
+	if !common.LocalVerificationMode {
+		if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
+			frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
+			if err != nil {
+				common.FatalLog("failed to parse CHANNEL_UPDATE_FREQUENCY: " + err.Error())
+			}
+			go controller.AutomaticallyUpdateChannels(frequency)
 		}
-		go controller.AutomaticallyUpdateChannels(frequency)
+
+		// Optional AistarsLab model, mapping, and billing-expression synchronization.
+		service.StartAistarsLabConfigSyncTask()
+
+		// Remove expired media staged for upstream task providers.
+		service.StartTemporaryReferenceMediaCleanupTask()
+		service.StartImageGenerationCleanupTask()
+
+		// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
+		service.StartCodexCredentialAutoRefreshTask()
+
+		// Subscription quota reset task (daily/weekly/monthly/custom)
+		service.StartSubscriptionQuotaResetTask()
 	}
-
-	// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
-	service.StartCodexCredentialAutoRefreshTask()
-
-	// Subscription quota reset task (daily/weekly/monthly/custom)
-	service.StartSubscriptionQuotaResetTask()
 
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
@@ -156,7 +168,9 @@ func main() {
 	// schedules and executes them. Master-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
 	controller.RegisterScheduledSystemTasks()
-	service.StartSystemTaskRunner()
+	if !common.LocalVerificationMode {
+		service.StartSystemTaskRunner()
+	}
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true
@@ -212,7 +226,7 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:    ":" + port,
+		Addr:    os.Getenv("BIND_ADDRESS") + ":" + port,
 		Handler: server,
 	}
 
@@ -375,7 +389,9 @@ func InitResources() error {
 		// Don't return error, custom OAuth is not critical
 	}
 
-	service.StartAuthArtifactCleanup()
+	if !common.LocalVerificationMode {
+		service.StartAuthArtifactCleanup()
+	}
 
 	return nil
 }

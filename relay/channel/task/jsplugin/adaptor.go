@@ -350,6 +350,9 @@ func replaceJSONFilePlaceholders(value any, form *multipart.Form, limit int64, t
 		if _, isPlaceholder := typed["__fileRef"]; isPlaceholder {
 			return encodeFilePlaceholder(typed, form, limit, total)
 		}
+		if _, isPlaceholder := typed["__dataUrl"]; isPlaceholder {
+			return encodeFilePlaceholder(typed, form, limit, total)
+		}
 		for key, item := range typed {
 			replaced, err := replaceJSONFilePlaceholders(item, form, limit, total)
 			if err != nil {
@@ -375,28 +378,24 @@ func replaceJSONFilePlaceholders(value any, form *multipart.Form, limit int64, t
 func encodeFilePlaceholder(placeholder map[string]any, form *multipart.Form, limit int64, total *int64) (string, error) {
 	for key := range placeholder {
 		switch key {
-		case "__fileRef", "encoding", "mimeType", "maxBytes":
+		case "__fileRef", "__dataUrl", "encoding", "mimeType", "mediaKind", "maxBytes":
 		default:
 			return "", fmt.Errorf("invalid file placeholder")
 		}
 	}
-	ref, _ := placeholder["__fileRef"].(string)
-	if strings.TrimSpace(ref) == "" {
-		return "", fmt.Errorf("unknown file reference %q", ref)
+	ref, hasRef := placeholder["__fileRef"].(string)
+	dataURL, hasDataURL := placeholder["__dataUrl"].(string)
+	if hasRef == hasDataURL || (hasRef && strings.TrimSpace(ref) == "") || (hasDataURL && strings.TrimSpace(dataURL) == "") {
+		return "", fmt.Errorf("invalid file placeholder")
 	}
 	encoding, _ := placeholder["encoding"].(string)
-	if encoding != "base64" && encoding != "dataUrl" {
-		return "", fmt.Errorf("file placeholder encoding must be \"base64\" or \"dataUrl\"")
+	if encoding != "base64" && encoding != "dataUrl" && encoding != "publicUrl" {
+		return "", fmt.Errorf("file placeholder encoding must be \"base64\", \"dataUrl\", or \"publicUrl\"")
 	}
-	if form == nil {
-		return "", fmt.Errorf("unknown file reference %q", ref)
+	mediaKind, _ := placeholder["mediaKind"].(string)
+	if encoding == "publicUrl" && mediaKind != "image" && mediaKind != "video" && mediaKind != "audio" {
+		return "", fmt.Errorf("publicUrl file placeholder requires mediaKind image, video, or audio")
 	}
-	field := strings.TrimPrefix(ref, "request_file:")
-	files := form.File[field]
-	if len(files) == 0 {
-		return "", fmt.Errorf("unknown file reference %q", ref)
-	}
-	header := files[0]
 	maxBytes := limit
 	if raw, exists := placeholder["maxBytes"]; exists {
 		n, ok := usageNumber(raw, false)
@@ -407,17 +406,53 @@ func encodeFilePlaceholder(placeholder map[string]any, form *multipart.Form, lim
 			maxBytes = int64(n)
 		}
 	}
-	if header.Size > maxBytes {
-		return "", fmt.Errorf("file %q exceeds the %d byte limit", ref, maxBytes)
-	}
-	file, openErr := header.Open()
-	if openErr != nil {
-		return "", openErr
-	}
-	data, readErr := io.ReadAll(io.LimitReader(file, maxBytes+1))
-	file.Close()
-	if readErr != nil {
-		return "", readErr
+
+	var data []byte
+	contentType := ""
+	if hasDataURL {
+		if encoding != "publicUrl" {
+			return "", fmt.Errorf("inline data placeholder only supports publicUrl encoding")
+		}
+		parts := strings.SplitN(strings.TrimSpace(dataURL), ",", 2)
+		header := ""
+		if len(parts) > 0 {
+			header = strings.ToLower(parts[0])
+		}
+		if len(parts) != 2 || !strings.HasPrefix(header, "data:"+mediaKind+"/") || !strings.Contains(header, ";base64") {
+			return "", fmt.Errorf("inline reference %s must be a base64 data URL", mediaKind)
+		}
+		if len(parts[1]) > base64.StdEncoding.EncodedLen(int(maxBytes))+4 {
+			return "", fmt.Errorf("inline reference exceeds the %d byte limit", maxBytes)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(parts[1]))
+		if err != nil {
+			return "", fmt.Errorf("invalid inline reference base64: %w", err)
+		}
+		data = decoded
+	} else {
+		if form == nil {
+			return "", fmt.Errorf("unknown file reference %q", ref)
+		}
+		field := strings.TrimPrefix(ref, "request_file:")
+		files := form.File[field]
+		if len(files) == 0 {
+			return "", fmt.Errorf("unknown file reference %q", ref)
+		}
+		header := files[0]
+		if header.Size > maxBytes {
+			return "", fmt.Errorf("file %q exceeds the %d byte limit", ref, maxBytes)
+		}
+		file, openErr := header.Open()
+		if openErr != nil {
+			return "", openErr
+		}
+		var readErr error
+		data, readErr = io.ReadAll(io.LimitReader(file, maxBytes+1))
+		file.Close()
+		if readErr != nil {
+			return "", readErr
+		}
+		contentType = header.Header.Get("Content-Type")
 	}
 	if int64(len(data)) > maxBytes {
 		return "", fmt.Errorf("file %q exceeds the %d byte limit", ref, maxBytes)
@@ -426,6 +461,9 @@ func encodeFilePlaceholder(placeholder map[string]any, form *multipart.Form, lim
 		return "", fmt.Errorf("inlined files exceed the %d byte limit", limit)
 	}
 	*total += int64(len(data))
+	if encoding == "publicUrl" {
+		return service.StoreTemporaryReferenceMedia(data, mediaKind)
+	}
 	encoded := base64.StdEncoding.EncodeToString(data)
 	if encoding == "base64" {
 		return encoded, nil
@@ -433,7 +471,7 @@ func encodeFilePlaceholder(placeholder map[string]any, form *multipart.Form, lim
 	mimeType := "application/octet-stream"
 	if override, ok := placeholder["mimeType"].(string); ok && strings.TrimSpace(override) != "" {
 		mimeType = override
-	} else if contentType := header.Header.Get("Content-Type"); contentType != "" {
+	} else if contentType != "" {
 		mimeType = contentType
 	}
 	return "data:" + mimeType + ";base64," + encoded, nil

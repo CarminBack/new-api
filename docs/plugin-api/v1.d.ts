@@ -16,7 +16,8 @@ export interface HostUtils {
 }
 declare global {const utils: HostUtils;}
 export type FileReference = Readonly<{ref: string; field: string; filename: string; mimeType: string; size: number}>;
-export type FilePlaceholder = Readonly<{__fileRef: string; encoding: "base64" | "dataUrl"; mimeType?: string; maxBytes?: number}>;
+export type FilePlaceholder = Readonly<{__fileRef: string; encoding: "base64" | "dataUrl" | "publicUrl"; mimeType?: string; mediaKind?: "image" | "video" | "audio"; maxBytes?: number}>;
+export type InlineDataPlaceholder = Readonly<{__dataUrl: string; encoding: "publicUrl"; mediaKind: "image" | "video" | "audio"; maxBytes?: number}>;
 export type DecodedBody =
   | Readonly<{kind: "json"; value: JSONValue}>
   | Readonly<{kind: "form"; fields: Readonly<Record<string, readonly string[]>>}>

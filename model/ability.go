@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"sort"
 	"strings"
 	"sync"
@@ -110,6 +111,7 @@ func GetChannel(
 	model string,
 	retry int,
 	filters []dto.ChannelFilter,
+	weightFactor ...func(int) float64,
 ) (*Channel, error) {
 	var abilities []Ability
 	err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Order("priority DESC, weight DESC").Find(&abilities).Error
@@ -140,6 +142,22 @@ func GetChannel(
 		})
 	}
 	channel := Channel{}
+	if len(abilities) > 0 && len(weightFactor) > 0 && weightFactor[0] != nil {
+		weights := make([]float64, len(abilities))
+		total := 0.0
+		for i, ability := range abilities {
+			weights[i] = float64(ability.Weight+10) * weightFactor[0](ability.ChannelId)
+			total += weights[i]
+		}
+		draw := rand.Float64() * total
+		for i, ability := range abilities {
+			draw -= weights[i]
+			if draw < 0 {
+				err := DB.First(&channel, "id = ?", ability.ChannelId).Error
+				return &channel, err
+			}
+		}
+	}
 	if len(abilities) > 0 {
 		// Randomly choose one
 		weightSum := uint(0)
@@ -183,6 +201,11 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
 
 	var channels []*Channel
 	if err := DB.Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
+		for _, filter := range filters {
+			if filter.Kind == dto.FilterExcludedChannels {
+				return nil
+			}
+		}
 		if identityFilterRequiresKey(filters) {
 			return nil
 		}
@@ -194,9 +217,35 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
 		channelsByID[channel.Id] = channel
 	}
 
+	imageTier := ""
+	imageCapabilitiesDeclared := false
+	for _, filter := range filters {
+		if filter.Kind == dto.FilterImageResolution {
+			imageTier = filter.ImageResolutionTier
+			break
+		}
+	}
+	if imageTier != "" {
+		for _, channel := range channels {
+			if _, declared := channel.GetSetting().ImageResolutionTierSupport(modelName, imageTier); declared {
+				imageCapabilitiesDeclared = true
+				break
+			}
+		}
+	}
+
 	filtered := make([]Ability, 0, len(abilities))
 	for _, ability := range abilities {
 		channel := channelsByID[ability.ChannelId]
+		if imageCapabilitiesDeclared {
+			if channel == nil {
+				continue
+			}
+			supported, declared := channel.GetSetting().ImageResolutionTierSupport(modelName, imageTier)
+			if !declared || !supported {
+				continue
+			}
+		}
 		if ok, _ := ChannelSatisfiesFilters(channel, modelName, filters); ok {
 			filtered = append(filtered, ability)
 		}

@@ -6702,8 +6702,18 @@
     "Correct the invalid settings before saving.": "請修正無效設定後再儲存。",
     "Upstream connection": "上游連線",
     "Local check": "本地檢查",
+    "Image Resolution Capabilities": "圖片解析度能力",
+    "Only enable tiers verified with actual output dimensions. Requests are routed by the longest image edge.": "僅勾選已通過實際輸出尺寸驗證的級別。請求會依圖片最長邊進行路由。",
+    "Select image models first, then configure their supported resolution tiers.": "請先選擇圖片模型，再設定其支援的解析度級別。",
+    "Responses item ID compatibility": "Responses 項目 ID 相容",
+    "Retry invalid item ID prefixes once without changing call IDs": "遇到無效項目 ID 前綴時重試一次，且不修改呼叫 ID",
     "Responses WebSocket": "Responses WebSocket",
     "Cross-group retry": "跨分組重試",
-    "Request policy decisions": "請求策略決策"
+    "Request policy decisions": "請求策略決策",
+    "Quota ratio (USD per unit)": "兌換比例（每單位付款方式對應 USD 額度）",
+    "e.g., 6.77 for USDT": "例如：USDT 填寫 6.77",
+    "Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.": "選填：每一單位此付款方式可兌換的 USD 額度。留空則使用舊版 Price 設定。",
+    "USD per unit": "每單位 USD 額度",
+    "USD per unit:": "每單位 USD 額度："
   }
 }

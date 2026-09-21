@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,20 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestRefreshCookieCoversCanvasOAuthAuthorize(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	WriteRefreshCookie(c, "sid.secret")
+
+	cookies := recorder.Result().Cookies()
+	require.NotEmpty(t, cookies)
+	assert.Equal(t, RefreshCookieName, cookies[0].Name)
+	assert.Equal(t, "/", cookies[0].Path)
+	assert.True(t, cookies[0].HttpOnly)
+	assert.Equal(t, http.SameSiteStrictMode, cookies[0].SameSite)
+}
 
 func setupAuthSessionTestDB(t *testing.T) *model.User {
 	t.Helper()

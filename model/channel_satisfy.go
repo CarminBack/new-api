@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
@@ -30,6 +31,45 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 		return isChannelIDInList(group2model2channels[group][normalized], channelID)
 	}
 	return false
+}
+
+func IsChannelEnabledForGroupModelWithImageResolution(group string, modelName string, imageResolutionTier string, channelID int) bool {
+	if !IsChannelEnabledForGroupModel(group, modelName, channelID) {
+		return false
+	}
+	if imageResolutionTier == "" {
+		return true
+	}
+	filter := dto.ChannelFilter{Kind: dto.FilterImageResolution, ImageResolutionTier: imageResolutionTier}
+	if !common.MemoryCacheEnabled {
+		var abilities []Ability
+		queryModel := modelName
+		if err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, queryModel, true).Find(&abilities).Error; err != nil {
+			return false
+		}
+		if len(abilities) == 0 {
+			queryModel = ratio_setting.RoutingMatchModelName(modelName)
+			if err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, queryModel, true).Find(&abilities).Error; err != nil {
+				return false
+			}
+		}
+		filtered := filterAbilitiesByConstraints(abilities, modelName, []dto.ChannelFilter{filter})
+		for _, ability := range filtered {
+			if ability.ChannelId == channelID {
+				return true
+			}
+		}
+		return false
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+	channels := group2model2channels[group][modelName]
+	if len(channels) == 0 {
+		channels = group2model2channels[group][ratio_setting.RoutingMatchModelName(modelName)]
+	}
+	channels = filterCandidateIDsByImageResolution(channels, modelName, []dto.ChannelFilter{filter})
+	return isChannelIDInList(channels, channelID)
 }
 
 func IsChannelEnabledForAnyGroupModel(groups []string, modelName string, channelID int) bool {

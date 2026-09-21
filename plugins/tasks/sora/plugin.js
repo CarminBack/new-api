@@ -10,7 +10,7 @@ export const meta = {
   version: "1.0.3",
   channelTypes: [55, 1], // OpenAI-type channels natively serve sora with the same wire format
   author: { name: "QuantumNous" },
-  models: ["sora-2", "sora-2-pro"],
+  models: ["sora-2", "sora-2-pro", "grok-video-1.5"],
   fetchMode: "per_task",
   usageSchema: {
     // Requested video duration in seconds.
@@ -36,6 +36,30 @@ export const meta = {
 
 function trimmed(value) {
   return String(value || "").trim();
+}
+
+function isGrokVideo15(model) {
+  return trimmed(model).toLowerCase() === "grok-video-1.5";
+}
+
+function requestReferenceCount(req) {
+  const values = [req && req.image, req && req.input_reference];
+  if (Array.isArray(req && req.images)) values.push.apply(values, req.images);
+  if (Array.isArray(req && req.image_urls)) values.push.apply(values, req.image_urls);
+  return values.filter(function (value) {
+    return trimmed(value);
+  }).length;
+}
+
+function requireGrokVideoReference(model, count) {
+  if (isGrokVideo15(model) && count !== 1) throw new Error("grok-video-1.5 requires exactly one reference image");
+}
+
+function taskErrorMessage(body) {
+  const value = body && body.error;
+  if (typeof value === "string") return trimmed(value);
+  if (value && typeof value === "object") return trimmed(value.message || value.code);
+  return "";
 }
 
 function responsesInput(req) {
@@ -150,14 +174,20 @@ export function parseTaskResult(ctx, body) {
     processing: "IN_PROGRESS",
     in_progress: "IN_PROGRESS",
     completed: "SUCCESS",
+    succeeded: "SUCCESS",
+    success: "SUCCESS",
     failed: "FAILURE",
     cancelled: "FAILURE",
   };
   const mapped = statuses[body.status];
-  const result = { status: mapped || "UNKNOWN" };
-  if (!mapped) result.reason = "unrecognized status: " + String(body.status || "");
+  const errorMessage = taskErrorMessage(body);
+  let status = mapped;
+  if (!status && body.status === "unknown" && !errorMessage) status = "QUEUED";
+  if (!status && errorMessage) status = "FAILURE";
+  const result = { status: status || "UNKNOWN" };
+  if (!status) result.reason = "unrecognized status: " + String(body.status || "");
   if (body.progress > 0 && body.progress < 100) result.progress = body.progress + "%";
-  if (result.status === "FAILURE") result.reason = body.error && body.error.message ? body.error.message : "task failed";
+  if (result.status === "FAILURE") result.reason = errorMessage || "task failed";
   return result;
 }
 
@@ -190,9 +220,10 @@ export const protocols = {
       const prompt = input.prompt || trimmed(req.prompt);
       if (!prompt) throw new Error("input is required");
       const images = [];
-      for (const image of [req.image, req.input_reference].concat(req.images || [], input.images)) {
+      for (const image of [req.image, req.input_reference].concat(req.images || [], req.image_urls || [], input.images)) {
         if (trimmed(image) && !images.includes(trimmed(image))) images.push(trimmed(image));
       }
+      requireGrokVideoReference(model, images.length);
       const requestBody = { model: model, prompt: prompt };
       if (images.length) requestBody.input_reference = images[0];
       if (Object.prototype.hasOwnProperty.call(req, "seconds")) requestBody.seconds = req.seconds;
@@ -263,10 +294,11 @@ protocols.openai_video = {
       const seconds = req.seconds === undefined ? req.duration : req.seconds;
       if (seconds !== undefined && (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0 || Number(seconds) > 3600))
         throw new Error("seconds must be between 1 and 3600");
+      requireGrokVideoReference(ctx.model, requestReferenceCount(req));
       return {
         kind: "submit",
         model: ctx.model,
-        action: req.input_reference || req.image ? "image_to_video" : "text_to_video",
+        action: requestReferenceCount(req) ? "image_to_video" : "text_to_video",
         requestBody: Object.assign({}, req, { model: ctx.model }),
       };
     }
@@ -301,10 +333,11 @@ protocols.openai_video = {
     const seconds = req.seconds === undefined ? req.duration : req.seconds;
     if (seconds !== undefined && (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0 || Number(seconds) > 3600))
       throw new Error("seconds must be between 1 and 3600");
+    requireGrokVideoReference(ctx.model, requestReferenceCount(req) + (hasInputReferenceFile ? 1 : 0));
     return {
       kind: "submit",
       model: ctx.model,
-      action: hasInputReferenceFile || req.input_reference || req.image ? "image_to_video" : "text_to_video",
+      action: hasInputReferenceFile || requestReferenceCount(req) ? "image_to_video" : "text_to_video",
       requestBody: Object.assign({}, req, { model: ctx.model }),
     };
   },

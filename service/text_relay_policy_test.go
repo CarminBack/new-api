@@ -1,0 +1,98 @@
+package service
+
+import (
+	"context"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestTextRelayPolicyExcludesImagesAndHostedTools(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, body, group string
+		eligible                bool
+	}{
+		{"chat", "/v1/chat/completions", `{}`, "default", true},
+		{"responses functions", "/v1/responses", `{"tools":[{"type":"function","name":"lookup"}]}`, "default", true},
+		{"image endpoint", "/v1/images/generations", `{}`, "default", false},
+		{"image group", "/v1/chat/completions", `{}`, "Image", false},
+		{"image modality", "/v1/chat/completions", `{"modalities":["image"]}`, "default", false},
+		{"image tool", "/v1/responses", `{"tools":[{"type":"image_generation"}]}`, "default", false},
+		{"hosted tool", "/v1/responses", `{"tools":[{"type":"mcp"}]}`, "default", false},
+		{"background", "/v1/responses", `{"background":true}`, "default", false},
+		{"malformed", "/v1/responses", `broken`, "default", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
+			c.Set("group", tc.group)
+			assert.Equal(t, tc.eligible, IsTextRelayRequest(c))
+			cancel := PrepareTextRelayContext(c, time.Minute)
+			defer cancel()
+			_, hasDeadline := c.Request.Context().Deadline()
+			assert.Equal(t, tc.eligible, hasDeadline)
+		})
+	}
+}
+
+func TestTextRelayDeadlinePreservesParentAndStopsRetryWithoutHealthPenalty(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{}`)).WithContext(ctx)
+	end := PrepareTextRelayContext(c, time.Hour)
+	defer end()
+	parentDeadline, _ := ctx.Deadline()
+	deadline, _ := c.Request.Context().Deadline()
+	assert.Equal(t, parentDeadline, deadline)
+	decision := DecideChannelFailureForModel(c, types.NewError(context.DeadlineExceeded, types.ErrorCodeDoRequestFailed), "model", 3, false, true)
+	assert.False(t, decision.Retry)
+	assert.False(t, decision.CountForCircuit)
+	assert.False(t, decision.EvictAffinity)
+	assert.Equal(t, "text_request_context_done", decision.Reason)
+}
+
+func TestTextAdaptiveWeightNeedsSamplesPreservesFloorAndExpires(t *testing.T) {
+	now := setupChannelHealthTest(t)
+	enabled := common.TextAdaptiveRoutingEnabled
+	common.TextAdaptiveRoutingEnabled = true
+	textChannelLatency.Lock()
+	old := textChannelLatency.samples
+	textChannelLatency.samples = make(map[textLatencyKey]textLatencySample)
+	textChannelLatency.Unlock()
+	t.Cleanup(func() {
+		common.TextAdaptiveRoutingEnabled = enabled
+		textChannelLatency.Lock()
+		textChannelLatency.samples = old
+		textChannelLatency.Unlock()
+	})
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{}`))
+	param := &RetryParam{Ctx: c, ModelName: "model", RequestPath: "/v1/responses"}
+	key := textLatencyKey{7, "model", "/v1/responses"}
+	for range 7 {
+		recordTextLatencySample(key, 120000)
+	}
+	require.Equal(t, 1.0, textChannelWeightFactor(param)(7))
+	recordTextLatencySample(key, 120000)
+	assert.Equal(t, 0.25, textChannelWeightFactor(param)(7), "slow channels retain a recovery traffic floor")
+	assert.Equal(t, 1.0, textChannelWeightFactor(param)(8), "unobserved channels retain configured weight")
+	param.ModelName = "other"
+	assert.Equal(t, 1.0, textChannelWeightFactor(param)(7), "models must not contaminate one another")
+	param.ModelName = "model"
+	for range 12 {
+		recordTextLatencySample(key, 1000)
+	}
+	assert.Equal(t, 1.0, textChannelWeightFactor(param)(7), "successful fast samples restore weight")
+	*now = now.Add(11 * time.Minute)
+	assert.Equal(t, 1.0, textChannelWeightFactor(param)(7))
+	common.TextAdaptiveRoutingEnabled = false
+	assert.Nil(t, textChannelWeightFactor(param))
+}

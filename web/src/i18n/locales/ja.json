@@ -6702,8 +6702,18 @@
     "Correct the invalid settings before saving.": "無効な設定を修正してから保存してください。",
     "Upstream connection": "上流接続",
     "Local check": "ローカルチェック",
+    "Image Resolution Capabilities": "画像解像度の対応範囲",
+    "Only enable tiers verified with actual output dimensions. Requests are routed by the longest image edge.": "実際の出力サイズで検証済みの階層のみ有効にしてください。リクエストは画像の長辺に基づいてルーティングされます。",
+    "Select image models first, then configure their supported resolution tiers.": "先に画像モデルを選択し、対応する解像度階層を設定してください。",
+    "Responses item ID compatibility": "Responses 項目 ID 互換性",
+    "Retry invalid item ID prefixes once without changing call IDs": "呼び出し ID を変更せず、無効な項目 ID プレフィックスを一度だけ再試行する",
     "Responses WebSocket": "Responses WebSocket",
     "Cross-group retry": "グループ横断リトライ",
-    "Request policy decisions": "リクエストポリシーの判断"
+    "Request policy decisions": "リクエストポリシーの判断",
+    "Quota ratio (USD per unit)": "換算比率（1単位あたりのUSDクォータ）",
+    "e.g., 6.77 for USDT": "例：USDTの場合は6.77",
+    "Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.": "任意：この支払い方法1単位で付与するUSDクォータ。空欄の場合は従来のPrice設定を使用します。",
+    "USD per unit": "1単位あたりのUSD",
+    "USD per unit:": "1単位あたりのUSD："
   }
 }

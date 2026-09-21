@@ -8,6 +8,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAutoGroupsPreservesLegacyEmptyAndRejectsMalformedJSON(t *testing.T) {
+	original := AutoGroups2JsonString()
+	t.Cleanup(func() { require.NoError(t, UpdateAutoGroupsByJsonString(original)) })
+	require.NoError(t, UpdateAutoGroupsByJsonString(`["vip"]`))
+	require.Error(t, UpdateAutoGroupsByJsonString(`broken`))
+	assert.Equal(t, []string{"vip"}, GetAutoGroups())
+	for _, value := range []string{"", "  ", "[]"} {
+		require.NoError(t, UpdateAutoGroupsByJsonString(value))
+		assert.Empty(t, GetAutoGroups())
+	}
+}
+
 func TestUpdateMaxTokenAutoGroupsAcceptsAnyPositiveInteger(t *testing.T) {
 	original := GetMaxTokenAutoGroups()
 	t.Cleanup(func() {

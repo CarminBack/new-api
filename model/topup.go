@@ -16,6 +16,7 @@ type TopUp struct {
 	Id              int     `json:"id"`
 	UserId          int     `json:"user_id" gorm:"index"`
 	Amount          int64   `json:"amount"`
+	QuotaAmount     float64 `json:"quota_amount,omitempty"`
 	Money           float64 `json:"money"`
 	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
@@ -55,6 +56,23 @@ func (topUp *TopUp) Insert() error {
 	var err error
 	err = DB.Create(topUp).Error
 	return err
+}
+
+func topUpQuotaDecimal(topUp *TopUp) decimal.Decimal {
+	if topUp != nil && topUp.QuotaAmount > 0 {
+		return decimal.NewFromFloat(topUp.QuotaAmount)
+	}
+	if topUp == nil {
+		return decimal.Zero
+	}
+	return decimal.NewFromInt(topUp.Amount)
+}
+
+func topUpQuotaToAdd(topUp *TopUp) (int, error) {
+	quota := topUpQuotaDecimal(topUp).
+		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Truncate(0)
+	return common.WalletQuotaFromDecimalStrict(quota)
 }
 
 func topUpQuotaMaxCurrent(creditedQuota int) (int, error) {
@@ -203,9 +221,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 			topUp.PaymentMethod = actualPaymentMethod
 		}
 		var quotaErr error
-		quotaToAdd, quotaErr = common.WalletQuotaFromDecimalStrict(
-			decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
-		)
+		quotaToAdd, quotaErr = topUpQuotaToAdd(topUp)
 		if quotaErr != nil || quotaToAdd <= 0 {
 			return ErrInvalidTopUpQuota
 		}
@@ -486,9 +502,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 				decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 			)
 		} else {
-			quotaToAdd, quotaErr = common.WalletQuotaFromDecimalStrict(
-				decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
-			)
+			quotaToAdd, quotaErr = topUpQuotaToAdd(topUp)
 		}
 		if quotaErr != nil || quotaToAdd <= 0 {
 			return ErrInvalidTopUpQuota

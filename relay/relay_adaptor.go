@@ -2,7 +2,9 @@ package relay
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/constant"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -193,10 +195,21 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 	return jspluginadaptor.New(plugin)
 }
 
+// isAistarsLabBaseURL identifies the provider without claiming channel type 17,
+// which remains owned by the Alibaba plugin.
+func isAistarsLabBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || !strings.EqualFold(parsed.Hostname(), "api.video.aistarslab.com") {
+		return false
+	}
+	path := strings.ToLower(strings.TrimRight(parsed.EscapedPath(), "/"))
+	return path == "/openai" || path == "/openai/v1"
+}
+
 // getTaskAdaptorForRequest preserves the exact plugin object pinned by the
 // declarative or shared-endpoint router. Legacy task routes are pinned here
 // from one registry generation before the adaptor is returned.
-func getTaskAdaptorForRequest(c *gin.Context, platform constant.TaskPlatform) (constant.TaskPlatform, channel.TaskAdaptor) {
+func getTaskAdaptorForRequest(c *gin.Context, platform constant.TaskPlatform, baseURL string) (constant.TaskPlatform, channel.TaskAdaptor) {
 	if c != nil {
 		if value, exists := c.Get(pluginruntime.ContextKeyPinnedPlugin); exists {
 			if pinned, ok := value.(pluginruntime.PinnedPlugin); ok && pinned.Plugin != nil {
@@ -221,6 +234,19 @@ func getTaskAdaptorForRequest(c *gin.Context, platform constant.TaskPlatform) (c
 		}
 	}
 	generation := pluginruntime.DefaultRegistry.Generation()
+	if isAistarsLabBaseURL(baseURL) {
+		plugin, ok := generation.Get("aistarslab")
+		if !ok {
+			return constant.TaskPlatform("aistarslab"), nil
+		}
+		if c != nil {
+			c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{
+				Generation: generation,
+				Plugin:     plugin,
+			})
+		}
+		return constant.TaskPlatform(plugin.Meta.Key), jspluginadaptor.New(plugin)
+	}
 	plugin, ok := ResolveTaskPluginForPlatform(generation, platform)
 	if !ok {
 		return platform, nil

@@ -29,6 +29,7 @@ import (
 type ModelRequest struct {
 	Model string `json:"model"`
 	Group string `json:"group,omitempty"`
+	Size  string `json:"size,omitempty"`
 }
 
 func Distribute() func(c *gin.Context) {
@@ -49,6 +50,14 @@ func Distribute() func(c *gin.Context) {
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
+		}
+		if isImageRequestPath(c.Request.URL.Path) {
+			if tier, valid := dto.ImageSizeTier(modelRequest.Size); valid {
+				constraints.AddFilter(taskdto.ChannelFilter{
+					Kind:                taskdto.FilterImageResolution,
+					ImageResolutionTier: tier,
+				})
+			}
 		}
 		_, pinned, _ := constraints.ResolvedPin()
 		if !pinned {
@@ -122,7 +131,11 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		defer service.ReleaseCurrentChannelHealthReservation(c)
+		if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); channel != nil && setupErr != nil {
+			abortWithOpenAiMessage(c, http.StatusServiceUnavailable, setupErr.Error(), setupErr.GetErrorCode())
+			return
+		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
@@ -262,12 +275,16 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 		return nil, errors.New("model must be provided once")
 	}
 
-	values := gjson.GetManyBytes(requestBody, "model", "group")
+	values := gjson.GetManyBytes(requestBody, "model", "group", "size")
 	model, err := getJSONStringValue(values[0], "model")
 	if err != nil {
 		return nil, err
 	}
 	group, err := getJSONStringValue(values[1], "group")
+	if err != nil {
+		return nil, err
+	}
+	size, err := getJSONStringValue(values[2], "size")
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +297,12 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 	return &ModelRequest{
 		Model: model,
 		Group: group,
+		Size:  size,
 	}, nil
+}
+
+func isImageRequestPath(path string) bool {
+	return strings.HasPrefix(path, "/v1/images/generations") || strings.HasPrefix(path, "/v1/images/edits")
 }
 
 func countTopLevelJSONKey(data []byte, target string) int {
@@ -604,9 +626,16 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
-	key, index, newAPIError := channel.GetNextEnabledKey()
+	var excludedKeys map[int]struct{}
+	if c.Request != nil && service.UsesChannelHealth(c, c.Request.URL.Path) {
+		excludedKeys = service.ChannelHealthKeyExclusions(channel, modelName, c.Request.URL.Path, nil)
+	}
+	key, index, newAPIError := channel.GetNextEnabledKeyExcluding(excludedKeys)
 	if newAPIError != nil {
 		return newAPIError
+	}
+	if !service.AcquireChannelHealthKey(c, key) {
+		return types.NewError(fmt.Errorf("channel key is temporarily unavailable"), types.ErrorCodeChannelNoAvailableKey)
 	}
 	if channel.ChannelInfo.IsMultiKey {
 		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)

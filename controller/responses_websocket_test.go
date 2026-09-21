@@ -1020,6 +1020,18 @@ func TestResponsesHTTPHealthCountsFinalResult(t *testing.T) {
 			}))
 			t.Cleanup(upstream.Close)
 			require.NoError(t, model.DB.Model(&model.Channel{}).Where("name = ?", "responses-ws-upstream").Update("base_url", upstream.URL).Error)
+			if tc.success {
+				fallback := *fixture.channel
+				fallback.Id = 0
+				fallback.Name = "responses-http-fallback"
+				fallback.BaseURL = &upstream.URL
+				require.NoError(t, model.DB.Create(&fallback).Error)
+				require.NoError(t, model.DB.Create(&model.Ability{ChannelId: fallback.Id, Model: "ws-billing", Group: "default", Enabled: true}).Error)
+				t.Cleanup(func() {
+					require.NoError(t, model.DB.Where("channel_id = ?", fallback.Id).Delete(&model.Ability{}).Error)
+					require.NoError(t, model.DB.Delete(&fallback).Error)
+				})
+			}
 			request, err := http.NewRequest(http.MethodPost, fixture.gatewayURL+"/v1/responses", strings.NewReader(`{"model":"ws-billing","input":"hello"}`))
 			require.NoError(t, err)
 			request.Header.Set("Authorization", "Bearer sk-"+fixture.token.Key)
@@ -1036,6 +1048,11 @@ func TestResponsesHTTPHealthCountsFinalResult(t *testing.T) {
 			}
 			fixture.closeAndWait(t)
 			assert.Equal(t, int64(tc.attempts), attempts.Load())
+			if tc.success {
+				assertResponsesWSAccounting(t, fixture, []int{1000})
+			} else {
+				assertResponsesWSAccounting(t, fixture, nil)
+			}
 			if !tc.success {
 				assert.Equal(t, tc.firstStatus, response.StatusCode)
 			} else {

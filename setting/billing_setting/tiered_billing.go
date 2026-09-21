@@ -148,6 +148,14 @@ func GetBuiltinBillingExprCopy() map[string]string {
 	return lo.Assign(builtinBillingExpr)
 }
 
+func GetConfiguredBillingModeCopy() map[string]string {
+	return maps.Clone(billingSetting.BillingMode)
+}
+
+func GetConfiguredBillingExprCopy() map[string]string {
+	return maps.Clone(billingSetting.BillingExpr)
+}
+
 func GetBillingModeCopy() map[string]string {
 	modes := lo.Assign(billingSetting.BillingMode)
 	for model := range builtinBillingExpr {

@@ -100,6 +100,8 @@ export interface PaymentMethod {
   min_topup?: number
   /** Optional react-icons component name or safe icon URL */
   icon?: string
+  /** USD quota granted for one unit of this payment method */
+  quota_ratio?: number
 }
 
 /**
@@ -210,6 +212,8 @@ export interface WaffoPancakePaymentRequest {
 export interface AmountRequest {
   /** Topup amount to calculate */
   amount: number
+  /** Payment method identifier used for method-specific pricing */
+  payment_method?: string
 }
 
 /**
@@ -259,6 +263,8 @@ export interface TopupRecord {
   user_id: number
   /** Topup amount (quota) */
   amount: number
+  /** Exact USD quota amount saved when the order was created */
+  quota_amount?: number
   /** Payment amount (actual money paid) */
   money: number
   /** Trade/order number */

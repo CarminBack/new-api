@@ -2,9 +2,11 @@ package relay
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -52,6 +54,21 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	defer closer.Close()
 
+	compatibilityEnabled := info.ChannelSetting.ResponsesItemIDCompatibilityEnabled &&
+		info.RelayMode != relayconstant.RelayModeResponsesCompact
+	var compatibilityPayload []byte
+	if compatibilityEnabled {
+		reader, err := requestBody.NewReader()
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+		compatibilityPayload, err = io.ReadAll(reader)
+		_ = reader.Close()
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+		}
+	}
+
 	var httpResp *http.Response
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
@@ -65,9 +82,41 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 
 		if httpResp.StatusCode != http.StatusOK {
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
-			// reset status code 重置状态码
-			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
-			return newAPIError
+			if compatibilityEnabled && !c.Writer.Written() && isResponsesItemIDPrefixError(newAPIError) {
+				result, normalizeErr := normalizeResponsesItemIDs(compatibilityPayload)
+				if normalizeErr != nil {
+					logger.LogWarn(c, fmt.Sprintf("responses item id compatibility skipped: channel_id=%d model=%s path=%s reason=%s",
+						info.ChannelId, info.UpstreamModelName, c.Request.URL.Path, normalizeErr.Error()))
+				} else if result.stripped > 0 {
+					retryBody, retryCloser, bodyErr := relaycommon.NewOutboundJSONBody(result.payload)
+					if bodyErr != nil {
+						return types.NewError(bodyErr, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+					}
+					defer retryCloser.Close()
+					service.RecordResponsesItemIDCompatibility(c, result.stripped, result.types)
+					logger.LogInfo(c, fmt.Sprintf("responses item id compatibility retry: channel_id=%d model=%s path=%s stripped=%d item_types=%s",
+						info.ChannelId, info.UpstreamModelName, c.Request.URL.Path, result.stripped, formatResponsesItemIDCompatibilityTypes(result.types)))
+					retryResp, retryErr := adaptor.DoRequest(c, info, retryBody)
+					if retryErr != nil {
+						return types.NewOpenAIError(retryErr, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+					}
+					var ok bool
+					httpResp, ok = retryResp.(*http.Response)
+					if !ok || httpResp == nil {
+						return types.NewError(fmt.Errorf("invalid responses compatibility retry response: %T", retryResp), types.ErrorCodeBadResponse)
+					}
+					if httpResp.StatusCode == http.StatusOK {
+						newAPIError = nil
+					} else {
+						newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
+					}
+				}
+			}
+			if newAPIError != nil {
+				// reset status code 重置状态码
+				service.ResetStatusCode(newAPIError, statusCodeMappingStr)
+				return newAPIError
+			}
 		}
 	}
 

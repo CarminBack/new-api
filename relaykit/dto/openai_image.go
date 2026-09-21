@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strconv"
+	"strings"
 
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -157,6 +159,33 @@ func indexComma(s string) int {
 		}
 	}
 	return -1
+}
+
+func ImageSizeTier(size string) (string, bool) {
+	size = strings.ToLower(strings.TrimSpace(size))
+	if size == "" || size == "auto" {
+		size = "1024x1024"
+	}
+	parts := strings.Split(size, "x")
+	if len(parts) != 2 {
+		return "", false
+	}
+	width, widthErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, heightErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
+		return "", false
+	}
+	longEdge := max(width, height)
+	switch {
+	case longEdge <= 1024:
+		return "1k", true
+	case longEdge <= 2048:
+		return "2k", true
+	case longEdge <= 4096:
+		return "4k", true
+	default:
+		return "", false
+	}
 }
 
 func (i *ImageRequest) GetTokenCountMeta() *types.TokenCountMeta {

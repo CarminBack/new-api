@@ -6702,8 +6702,18 @@
     "Correct the invalid settings before saving.": "Correct the invalid settings before saving.",
     "Upstream connection": "Upstream connection",
     "Local check": "Local check",
+    "Image Resolution Capabilities": "Image Resolution Capabilities",
+    "Only enable tiers verified with actual output dimensions. Requests are routed by the longest image edge.": "Only enable tiers verified with actual output dimensions. Requests are routed by the longest image edge.",
+    "Select image models first, then configure their supported resolution tiers.": "Select image models first, then configure their supported resolution tiers.",
+    "Responses item ID compatibility": "Responses item ID compatibility",
+    "Retry invalid item ID prefixes once without changing call IDs": "Retry invalid item ID prefixes once without changing call IDs",
     "Responses WebSocket": "Responses WebSocket",
     "Cross-group retry": "Cross-group retry",
-    "Request policy decisions": "Request policy decisions"
+    "Request policy decisions": "Request policy decisions",
+    "Quota ratio (USD per unit)": "Quota ratio (USD per unit)",
+    "e.g., 6.77 for USDT": "e.g., 6.77 for USDT",
+    "Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.": "Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.",
+    "USD per unit": "USD per unit",
+    "USD per unit:": "USD per unit:"
   }
 }

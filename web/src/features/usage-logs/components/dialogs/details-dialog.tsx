@@ -90,6 +90,7 @@ import {
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
+import { UpstreamTimingDetails } from '../upstream-timing-details'
 import { DetailRow, DetailSection } from './log-detail-layout'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
@@ -1297,6 +1298,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
               />
             )}
           </DetailSection>
+        )}
+
+        {props.isAdmin && (
+          <UpstreamTimingDetails
+            timings={other?.admin_info?.upstream_timings}
+          />
         )}
 
         {/* Param override */}

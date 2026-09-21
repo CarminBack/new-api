@@ -72,6 +72,13 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 		return
 	}
 	other.SetAdmin("use_channel", ctx.GetStringSlice("use_channel"))
+	if relayInfo != nil && len(relayInfo.UpstreamTimings) > 0 {
+		timings := make([]map[string]any, 0, len(relayInfo.UpstreamTimings))
+		for _, timing := range relayInfo.UpstreamTimings {
+			timings = append(timings, timing.Snapshot())
+		}
+		other.SetAdmin("upstream_timings", timings)
+	}
 	if relayInfo != nil {
 		if billingModel := relayInfo.GetBillingModelName(); billingModel != "" && billingModel != relayInfo.OriginModelName {
 			other.SetAdmin("billing_model", billingModel)
@@ -92,6 +99,7 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	}
 
 	AppendChannelAffinityAdminInfo(ctx, other)
+	AppendResponsesItemIDCompatibilityAdminInfo(ctx, other)
 	if events := RequestPolicy(ctx).Events(); len(events) > 0 {
 		other.SetAdmin("request_policy", events)
 	}

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"os"
 	"strings"
 	"testing"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -154,6 +156,75 @@ export function parseSubmitResponse(){return {taskId:"1"}} export function build
 	require.Len(t, items, 1)
 	assert.Equal(t, "data:image/png;base64,"+encoded, items[0])
 	assert.Equal(t, "data:image/jpeg;base64,"+encoded, decoded["dataUrl"])
+}
+
+func TestTaskAdaptorPublishesJSONFilePlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("REFERENCE_MEDIA_STORAGE_DIR", dir)
+	originalServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://gateway.example"
+	t.Cleanup(func() { system_setting.ServerAddress = originalServerAddress })
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL7WQAAAABJRU5ErkJggg==")
+	require.NoError(t, err)
+
+	source := `
+export const meta = {apiVersion:1,key:"json-public-url",name:"JSON Public URL",version:"1.0.0",author:{name:"Test"},models:["m"],fetchMode:"per_task"};
+export function buildSubmitRequest(ctx) { return {url:ctx.baseUrl+"/submit",body:{image:{__fileRef:ctx.files[0].ref,encoding:"publicUrl",mediaKind:"image"}}}; }
+export function parseSubmitResponse(){return {taskId:"1"}} export function buildQueryRequest(){return {url:"https://example.com"}} export function parseTaskResult(){return {status:"SUCCESS"}}
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	adaptor := New(plugin)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://provider.example"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	adaptor.Init(info)
+	c := newMultipartFileContext(t, "input_reference", "ref.png", "image/png", png)
+	c.Set("task_request", map[string]any{"prompt": "p"})
+
+	body, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	requestBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, common.Unmarshal(requestBytes, &decoded))
+	published, ok := decoded["image"].(string)
+	require.True(t, ok)
+	assert.Contains(t, published, "https://gateway.example/api/reference-media/")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+}
+
+func TestTaskAdaptorPublishesInlineDataPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("REFERENCE_MEDIA_STORAGE_DIR", dir)
+	originalServerAddress := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://gateway.example"
+	t.Cleanup(func() { system_setting.ServerAddress = originalServerAddress })
+	dataURL := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL7WQAAAABJRU5ErkJggg=="
+
+	source := `
+export const meta = {apiVersion:1,key:"json-inline-public-url",name:"JSON Inline Public URL",version:"1.0.0",author:{name:"Test"},models:["m"],fetchMode:"per_task"};
+export function buildSubmitRequest(ctx) { return {url:ctx.baseUrl+"/submit",body:{image:{__dataUrl:ctx.requestBody.image,encoding:"publicUrl",mediaKind:"image"}}}; }
+export function parseSubmitResponse(){return {taskId:"1"}} export function buildQueryRequest(){return {url:"https://example.com"}} export function parseTaskResult(){return {status:"SUCCESS"}}
+`
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	adaptor := New(plugin)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://provider.example"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	adaptor.Init(info)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Set("task_request", map[string]any{"image": dataURL})
+
+	body, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	requestBytes, err := io.ReadAll(body)
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, common.Unmarshal(requestBytes, &decoded))
+	published, ok := decoded["image"].(string)
+	require.True(t, ok)
+	assert.Contains(t, published, "https://gateway.example/api/reference-media/")
 }
 
 func TestTaskAdaptorJSONFilePlaceholderErrors(t *testing.T) {

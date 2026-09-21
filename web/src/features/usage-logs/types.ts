@@ -1,4 +1,3 @@
-import type { PolicyEvent } from '@/features/system-settings/request-policies/api'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -21,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
  * Type definitions for usage logs
  */
 import type { RequestRuleTrace } from '@/features/pricing/lib/billing-expr'
+import type { PolicyEvent } from '@/features/system-settings/request-policies/api'
 
 import type { UsageLog } from './data/schema'
 // ============================================================================
@@ -120,6 +120,7 @@ export interface LogOtherData {
     is_multi_key?: boolean
     multi_key_index?: number
     use_channel?: number[]
+    upstream_timings?: Array<Record<string, number | boolean | string>>
     local_count_tokens?: boolean
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo

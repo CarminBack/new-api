@@ -6702,8 +6702,18 @@
     "Correct the invalid settings before saving.": "Исправьте некорректные настройки перед сохранением.",
     "Upstream connection": "Соединение с вышестоящим сервером",
     "Local check": "Локальная проверка",
+    "Image Resolution Capabilities": "Поддерживаемые разрешения изображений",
+    "Only enable tiers verified with actual output dimensions. Requests are routed by the longest image edge.": "Включайте только уровни, проверенные по фактическим размерам результата. Маршрутизация запросов выполняется по длинной стороне изображения.",
+    "Select image models first, then configure their supported resolution tiers.": "Сначала выберите модели изображений, затем настройте поддерживаемые уровни разрешения.",
+    "Responses item ID compatibility": "Совместимость ID элементов Responses",
+    "Retry invalid item ID prefixes once without changing call IDs": "Один раз повторить запрос с недопустимыми префиксами ID элементов, не меняя ID вызовов",
     "Responses WebSocket": "Responses WebSocket",
     "Cross-group retry": "Повтор между группами",
-    "Request policy decisions": "Решения политики запросов"
+    "Request policy decisions": "Решения политики запросов",
+    "Quota ratio (USD per unit)": "Коэффициент квоты (USD за единицу)",
+    "e.g., 6.77 for USDT": "например, 6,77 для USDT",
+    "Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.": "Необязательно: квота USD за одну единицу этого способа оплаты. Оставьте пустым, чтобы использовать прежнюю настройку Price.",
+    "USD per unit": "USD за единицу",
+    "USD per unit:": "USD за единицу:"
   }
 }

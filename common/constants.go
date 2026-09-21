@@ -162,6 +162,11 @@ var BatchUpdateInterval int
 
 var RelayTimeout int // unit is second
 
+var TextRelayTimeout int
+var TextAdaptiveRoutingEnabled bool
+var TextSlowFirstContentSeconds = 15
+var LocalVerificationMode bool
+
 var RelayIdleConnTimeout int // unit is second
 
 // RelayResponseHeaderTimeout limits how long the relay transport waits for the

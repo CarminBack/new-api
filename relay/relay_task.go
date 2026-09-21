@@ -204,7 +204,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if platform == "" {
 		platform = GetTaskPlatform(c)
 	}
-	platform, adaptor := getTaskAdaptorForRequest(c, platform)
+	platform, adaptor := getTaskAdaptorForRequest(c, platform, info.ChannelBaseUrl)
 	if adaptor == nil {
 		code, message := TaskPlatformUnavailableError(platform)
 		return nil, service.TaskErrorWrapperLocal(errors.New(message), code, http.StatusBadRequest)

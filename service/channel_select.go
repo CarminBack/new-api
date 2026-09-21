@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -116,7 +117,6 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	var err error
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
-	filters := GetChannelConstraints(param.Ctx).Filters
 
 	if param.TokenGroup == "auto" {
 		autoGroups := GetRequestAutoGroups(param.Ctx, userGroup)
@@ -147,12 +147,10 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(
-				autoGroup,
-				param.ModelName,
-				priorityRetry,
-				filters,
-			)
+			channel, err = selectHealthyChannel(param, autoGroup, priorityRetry)
+			if err != nil {
+				return nil, autoGroup, err
+			}
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -190,17 +188,59 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(
-			param.TokenGroup,
-			param.ModelName,
-			param.GetRetry(),
-			filters,
-		)
+		channel, err = selectHealthyChannel(param, param.TokenGroup, param.GetRetry())
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
 	}
 	return channel, selectGroup, nil
+}
+
+func UsesChannelHealth(c *gin.Context, path string) bool {
+	return ChannelHealthProbeSupportsPath(path) && (IsTextRelayRequest(c) || IsImageGenerationPath(path))
+}
+
+func ExcludeChannelForRequest(c *gin.Context, channelID int) {
+	for _, filter := range GetChannelConstraints(c).Filters {
+		if filter.Kind == dto.FilterExcludedChannels {
+			filter.ExcludedChannelIDs[channelID] = struct{}{}
+			return
+		}
+	}
+	GetChannelConstraints(c).AddFilter(dto.ChannelFilter{Kind: dto.FilterExcludedChannels, ExcludedChannelIDs: map[int]struct{}{channelID: {}}})
+}
+
+func EnsureChannelHealthReservation(c *gin.Context, channel *model.Channel, modelName, path string) bool {
+	if !UsesChannelHealth(c, path) {
+		return true
+	}
+	if value, ok := c.Get(ginKeyChannelHealthReservation); ok {
+		if current, ok := value.(channelHealthReservation); ok && current.Identity.ChannelID == channel.Id {
+			return true
+		}
+	}
+	return AllowChannelHealthAttempt(c, channel, modelName, path)
+}
+
+func selectHealthyChannel(param *RetryParam, group string, retry int) (*model.Channel, error) {
+	managed := UsesChannelHealth(param.Ctx, param.RequestPath)
+	var factor func(int) float64
+	if !strings.EqualFold(group, "Image") {
+		factor = textChannelWeightFactor(param)
+	}
+	if managed {
+		retry = 0
+	}
+	for {
+		channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, retry, GetChannelConstraints(param.Ctx).Filters, factor)
+		if err != nil || channel == nil || !managed {
+			return channel, err
+		}
+		if EnsureChannelHealthReservation(param.Ctx, channel, param.ModelName, param.RequestPath) {
+			return channel, nil
+		}
+		ExcludeChannelForRequest(param.Ctx, channel.Id)
+	}
 }
 
 func pinnedTaskPluginIdentities(c *gin.Context, expected string) ([]int, []string) {
@@ -303,6 +343,9 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 				FilterKind: kind, Channel: channel,
 			}
 		}
+		if !EnsureChannelHealthReservation(c, channel, modelName, retry.RequestPath) {
+			return nil, "", &ChannelSelectError{StatusCode: http.StatusServiceUnavailable, Message: "pinned_channel_health_unavailable"}
+		}
 		return channel, "", nil
 	}
 
@@ -317,11 +360,14 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 			if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled {
 				affinitySatisfied, _ = model.ChannelSatisfiesFilters(preferred, modelName, constraints.Filters)
 			}
+			if affinitySatisfied && UsesChannelHealth(c, retry.RequestPath) {
+				affinitySatisfied = IsChannelHealthAvailable(preferred, modelName, retry.RequestPath) && IsChannelPriorityAffinityReady(preferred, modelName, retry.RequestPath)
+			}
 			if affinitySatisfied {
 				if usingGroup == "auto" {
 					userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 					for _, g := range GetRequestAutoGroups(c, userGroup) {
-						if model.IsChannelEnabledForGroupModel(g, modelName, preferred.Id) {
+						if channelEnabledForRequestGroup(g, modelName, preferred.Id, constraints.Filters) {
 							selectGroup = g
 							common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 							channel = preferred
@@ -330,7 +376,7 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 							break
 						}
 					}
-				} else if model.IsChannelEnabledForGroupModel(usingGroup, modelName, preferred.Id) {
+				} else if channelEnabledForRequestGroup(usingGroup, modelName, preferred.Id, constraints.Filters) {
 					channel = preferred
 					selectGroup = usingGroup
 					affinityUsable = true
@@ -346,6 +392,12 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 		}
 	}
 
+	if channel != nil && !EnsureChannelHealthReservation(c, channel, modelName, retry.RequestPath) {
+		if RequestPolicy(c).SessionMode == "strict" {
+			return nil, "", &ChannelSelectError{StatusCode: http.StatusServiceUnavailable, Message: "strict_session_binding_unavailable"}
+		}
+		channel = nil
+	}
 	if channel == nil {
 		var err error
 		channel, selectGroup, err = CacheGetRandomSatisfiedChannel(retry)
@@ -374,6 +426,15 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 		}
 	}
 	return channel, selectGroup, nil
+}
+
+func channelEnabledForRequestGroup(group, modelName string, channelID int, filters []dto.ChannelFilter) bool {
+	for _, filter := range filters {
+		if filter.Kind == dto.FilterImageResolution && filter.ImageResolutionTier != "" {
+			return model.IsChannelEnabledForGroupModelWithImageResolution(group, modelName, filter.ImageResolutionTier, channelID)
+		}
+	}
+	return model.IsChannelEnabledForGroupModel(group, modelName, channelID)
 }
 
 // Origin-task pins report a fixed code so task polling can tell a retired

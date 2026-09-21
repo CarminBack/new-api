@@ -156,6 +156,13 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		}
 	}
 
+	var responseCapture *imageResponseCaptureWriter
+	if !info.IsStream {
+		originalWriter := c.Writer
+		responseCapture = &imageResponseCaptureWriter{ResponseWriter: originalWriter}
+		c.Writer = responseCapture
+		defer func() { c.Writer = originalWriter }()
+	}
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
 	if newAPIError != nil {
 		// reset status code 重置状态码
@@ -192,6 +199,34 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		logContent = append(logContent, fmt.Sprintf("生成数量 %d", imageN))
 	}
 
-	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
+	quota := service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
+	if responseCapture != nil && !responseCapture.overflow {
+		service.SaveImageGenerationResponse(c, info, request, responseCapture.body.Bytes(), quota)
+	}
 	return nil
+}
+
+// Archiving is best effort; oversized responses still reach the client in full.
+// Streaming responses are never buffered for the history archive.
+type imageResponseCaptureWriter struct {
+	gin.ResponseWriter
+	body     bytes.Buffer
+	overflow bool
+}
+
+func (w *imageResponseCaptureWriter) Write(data []byte) (int, error) {
+	const maxArchiveResponseBytes = 64 << 20
+	if !w.overflow {
+		if len(data) > maxArchiveResponseBytes-w.body.Len() {
+			w.body.Reset()
+			w.overflow = true
+		} else {
+			_, _ = w.body.Write(data)
+		}
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *imageResponseCaptureWriter) WriteString(data string) (int, error) {
+	return w.Write([]byte(data))
 }

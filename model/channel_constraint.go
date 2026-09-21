@@ -2,13 +2,16 @@ package model
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 )
 
 var filterEvalOrder = []dto.ChannelFilterKind{
+	dto.FilterExcludedChannels,
 	dto.FilterRequestPath,
+	dto.FilterImageResolution,
 	dto.FilterTaskPluginIdentity,
 	dto.FilterResponsesWebSocket,
 }
@@ -47,6 +50,13 @@ func filterCandidateIDs(ids []int, modelName string, filters []dto.ChannelFilter
 		if len(kindFilters) == 0 {
 			continue
 		}
+		if kind == dto.FilterImageResolution {
+			kept = filterCandidateIDsByImageResolution(kept, modelName, kindFilters)
+			if len(kept) == 0 {
+				return kept, kind
+			}
+			continue
+		}
 		next := make([]int, 0, len(kept))
 		for _, id := range kept {
 			channel, exists := channelsIDM[id]
@@ -60,6 +70,35 @@ func filterCandidateIDs(ids []int, modelName string, filters []dto.ChannelFilter
 		kept = next
 	}
 	return kept, ""
+}
+
+func filterCandidateIDsByImageResolution(ids []int, modelName string, filters []dto.ChannelFilter) []int {
+	if len(ids) == 0 || len(filters) == 0 {
+		return ids
+	}
+	tier := filters[0].ImageResolutionTier
+	if tier == "" {
+		return ids
+	}
+	declared := false
+	for _, id := range ids {
+		if channel, ok := channelsIDM[id]; ok && channel != nil {
+			_, hasDeclaration := channel.GetSetting().ImageResolutionTierSupport(modelName, tier)
+			declared = declared || hasDeclaration
+		}
+	}
+	if !declared {
+		return ids
+	}
+	filtered := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if channel, ok := channelsIDM[id]; ok && channel != nil {
+			if supported, hasDeclaration := channel.GetSetting().ImageResolutionTierSupport(modelName, tier); hasDeclaration && supported {
+				filtered = append(filtered, id)
+			}
+		}
+	}
+	return filtered
 }
 
 func filtersByKind(filters []dto.ChannelFilter, kind dto.ChannelFilterKind) []dto.ChannelFilter {
@@ -89,6 +128,9 @@ func candidatePassesKindFilters(ch *Channel, exists bool, modelName string, kind
 
 func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilter) bool {
 	switch filter.Kind {
+	case dto.FilterExcludedChannels:
+		_, excluded := filter.ExcludedChannelIDs[ch.Id]
+		return !excluded
 	case dto.FilterRequestPath:
 		if filter.RequestPath == "" {
 			return true
@@ -98,6 +140,16 @@ func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilte
 		}
 		config := ch.GetOtherSettings().AdvancedCustom
 		return config != nil && config.SupportsPathForModel(filter.RequestPath, modelName)
+	case dto.FilterImageResolution:
+		// Undeclared channels remain eligible here. Candidate-pool filtering
+		// activates this constraint only when at least one candidate declares
+		// capabilities, preserving legacy routing for unconfigured groups.
+		if tier := strings.TrimSpace(filter.ImageResolutionTier); tier != "" {
+			if supported, declared := ch.GetSetting().ImageResolutionTierSupport(modelName, tier); declared {
+				return supported
+			}
+		}
+		return true
 	case dto.FilterTaskPluginIdentity:
 		if ch.Type == constant.ChannelTypeTaskPlugin {
 			key := ch.GetSetting().TaskPluginKey

@@ -6702,8 +6702,18 @@
     "Correct the invalid settings before saving.": "Corrigez les paramètres invalides avant de les enregistrer.",
     "Upstream connection": "Connexion amont",
     "Local check": "Vérification locale",
+    "Image Resolution Capabilities": "Capacités de résolution d’image",
+    "Only enable tiers verified with actual output dimensions. Requests are routed by the longest image edge.": "N’activez que les niveaux vérifiés avec les dimensions réelles de sortie. Les requêtes sont acheminées selon le côté le plus long de l’image.",
+    "Select image models first, then configure their supported resolution tiers.": "Sélectionnez d’abord les modèles d’image, puis configurez les niveaux de résolution pris en charge.",
+    "Responses item ID compatibility": "Compatibilité des ID d'éléments Responses",
+    "Retry invalid item ID prefixes once without changing call IDs": "Réessayer une fois les préfixes d'ID d'élément invalides sans modifier les ID d'appel",
     "Responses WebSocket": "Responses WebSocket",
     "Cross-group retry": "Nouvelle tentative inter-groupes",
-    "Request policy decisions": "Décisions de la politique de requête"
+    "Request policy decisions": "Décisions de la politique de requête",
+    "Quota ratio (USD per unit)": "Ratio de quota (USD par unité)",
+    "e.g., 6.77 for USDT": "p. ex. 6,77 pour USDT",
+    "Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.": "Quota USD facultatif accordé pour une unité de ce moyen de paiement. Laissez vide pour utiliser l'ancien paramètre Price.",
+    "USD per unit": "USD par unité",
+    "USD per unit:": "USD par unité :"
   }
 }

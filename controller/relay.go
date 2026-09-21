@@ -123,6 +123,22 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	if helper.IsGovernedImageModel(relayInfo.OriginModelName) {
+		bodyStorage, bodyErr := common.GetBodyStorage(c)
+		if bodyErr != nil {
+			newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			return
+		}
+		body, bodyErr := bodyStorage.Bytes()
+		if bodyErr != nil {
+			newAPIError = types.NewErrorWithStatusCode(bodyErr, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			return
+		}
+		if validationErr := helper.ValidateImageModelRequest(relayInfo.OriginModelName, relayInfo.RelayMode, body); validationErr != nil {
+			newAPIError = types.NewErrorWithStatusCode(validationErr, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			return
+		}
+	}
 
 	defer func() {
 		recovered := recover()
@@ -137,6 +153,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			panic(recovered)
 		}
 	}()
+
+	cancelTextRelay := service.PrepareTextRelayContext(c, time.Duration(common.TextRelayTimeout)*time.Second)
+	defer cancelTextRelay()
+	defer service.ReleaseCurrentChannelHealthReservation(c)
+	managedHealth := service.UsesChannelHealth(c, c.Request.URL.Path)
+	if managedHealth {
+		service.RecordChannelPrimaryRequestFor(c, relayInfo.OriginModelName, c.Request.URL.Path)
+	}
 
 	if newAPIError = relay.PrepareRequestBilling(c, relayInfo); newAPIError != nil {
 		return
@@ -155,7 +179,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	for attempts := 0; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		if service.IsTextRelayRequest(c) {
+			if c.Request.Context().Err() != nil {
+				newAPIError = types.NewErrorWithStatusCode(c.Request.Context().Err(), types.ErrorCodeDoRequestFailed, http.StatusGatewayTimeout, types.ErrOptionWithSkipRetry())
+				break
+			}
+			if attempts > common.RetryTimes {
+				break
+			}
+		}
+		attempts++
 		relayInfo.StreamStatus = nil
 		relayInfo.PerformanceBusinessRejection = false
 		relayInfo.PerformanceOutputTokens = 0
@@ -196,6 +230,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			if managedHealth {
+				if c.Request.Context().Err() != nil {
+					service.ReleaseCurrentChannelHealthReservation(c)
+				} else if relayInfo.StreamStatus == nil || relayInfo.StreamStatus.IsNormalEnd() && !relayInfo.StreamStatus.HasErrors() {
+					service.RecordTextChannelLatency(c, relayInfo, channel.Id)
+					service.RecordChannelCircuitSuccess(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
+				} else {
+					service.RecordChannelCircuitFailure(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path, service.ChannelFailureUncertain)
+				}
+			}
 			service.MarkRequestPolicySuccess(c, relayInfo.StreamStatus)
 			relayInfo.LastError = nil
 			return
@@ -205,6 +249,26 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		relayInfo.LastError = newAPIError
 
 		decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		if managedHealth {
+			failure := service.DecideChannelFailureForModel(c, newAPIError, relayInfo.OriginModelName, common.RetryTimes+1-attempts, service.GetChannelConstraints(c).SuppressesRetry(), service.IsTextRelayRequest(c))
+			if failure.CountForCircuit {
+				service.RecordChannelCircuitFailureDecision(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path, failure, newAPIError.StatusCode)
+			} else {
+				service.ReleaseCurrentChannelHealthReservation(c)
+			}
+			if failure.EvictAffinity && !service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+				service.ClearCurrentChannelAffinityCache(c)
+			}
+			if !failure.Retry {
+				decision = service.PolicyDecision{Action: "stop", Reason: failure.Reason, Source: "channel_health"}
+			}
+			if decision.Action == "retry" && !service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, failure.Class, channel.Id) {
+				decision = service.PolicyDecision{Action: "stop", Reason: "shared_retry_budget_exhausted", Source: "channel_health"}
+			}
+			if decision.Action == "retry" {
+				service.ExcludeChannelForRequest(c, channel.Id)
+			}
+		}
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
 
@@ -275,9 +339,13 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 		service.RequestPolicy(c).BeginAttempt(channel, info.UsingGroup)
 		return channel, nil
 	}
-	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
-	if err != nil {
-		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	channel, selectGroup, selectErr := service.SelectChannelForRequest(c, info.OriginModelName, retryParam)
+	if selectErr != nil {
+		message := selectErr.Message
+		if message == "" {
+			message = selectErr.MessageID
+		}
+		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, message), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 	if channel == nil {
 		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())

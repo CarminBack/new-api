@@ -188,6 +188,11 @@ function isVertexJsonKey(value: string | undefined): boolean {
   }
 }
 
+const imageResolutionTiersSchema = z.record(
+  z.string(),
+  z.array(z.enum(['1k', '2k', '4k']))
+)
+
 function addRequiredIssue(
   ctx: z.RefinementCtx,
   path: string,
@@ -267,7 +272,9 @@ export const channelFormSchema = z
     http_protocol: z.enum(['auto', 'http1']).optional(),
     http2_connection_shards: z.number().int().optional(),
     pass_through_body_enabled: z.boolean().optional(),
+    responses_item_id_compatibility_enabled: z.boolean().optional(),
     responses_websocket_enabled: z.boolean().optional(),
+    image_resolution_tiers: imageResolutionTiersSchema.optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
     // Type-specific settings (stored in settings JSON)
@@ -457,7 +464,9 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   http_protocol: HTTP_PROTOCOL_AUTO,
   http2_connection_shards: 1,
   pass_through_body_enabled: false,
+  responses_item_id_compatibility_enabled: false,
   responses_websocket_enabled: false,
+  image_resolution_tiers: {},
   system_prompt: '',
   system_prompt_override: false,
   // Type-specific settings
@@ -500,7 +509,9 @@ export function transformChannelToFormDefaults(
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
     http2_connection_shards: 1,
     pass_through_body_enabled: false,
+    responses_item_id_compatibility_enabled: false,
     responses_websocket_enabled: false,
+    image_resolution_tiers: {} as Record<string, Array<'1k' | '2k' | '4k'>>,
     system_prompt: '',
     system_prompt_override: false,
   }
@@ -508,6 +519,9 @@ export function transformChannelToFormDefaults(
   if (channel.setting) {
     try {
       const parsed = JSON.parse(channel.setting)
+      const parsedImageResolutionTiers = imageResolutionTiersSchema.safeParse(
+        parsed.image_resolution_tiers
+      )
       const protocol = normalizeHttpProtocol(parsed.http_protocol)
       const shards = normalizeHttp2ConnectionShards(
         parsed.http2_connection_shards
@@ -520,8 +534,13 @@ export function transformChannelToFormDefaults(
         http_protocol: protocol,
         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
+        responses_item_id_compatibility_enabled:
+          parsed.responses_item_id_compatibility_enabled === true,
         responses_websocket_enabled:
           parsed.responses_websocket_enabled === true,
+        image_resolution_tiers: parsedImageResolutionTiers.success
+          ? parsedImageResolutionTiers.data
+          : {},
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
       }
@@ -637,6 +656,11 @@ export function transformChannelToFormDefaults(
  * Build the setting JSON string from form extra settings
  */
 export function buildSettingJSON(formData: ChannelFormValues): string {
+  const imageResolutionTiers = Object.fromEntries(
+    Object.entries(formData.image_resolution_tiers || {}).filter(
+      ([model, tiers]) => model.trim() && tiers.length > 0
+    )
+  )
   const settingObj: Record<string, unknown> = {
     task_plugin_key:
       formData.type === CHANNEL_TYPE_TASK_PLUGIN
@@ -648,9 +672,15 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     pass_through_body_enabled:
       formData.type !== CHANNEL_TYPE_ADVANCED_CUSTOM &&
       formData.pass_through_body_enabled === true,
+    responses_item_id_compatibility_enabled:
+      formData.responses_item_id_compatibility_enabled === true,
     responses_websocket_enabled:
       (formData.type === 1 || formData.type === 57) &&
       formData.responses_websocket_enabled === true,
+    image_resolution_tiers:
+      Object.keys(imageResolutionTiers).length > 0
+        ? imageResolutionTiers
+        : undefined,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
   }

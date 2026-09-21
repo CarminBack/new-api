@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strings"
 	"sync"
@@ -518,6 +519,21 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	var releaseTextContext func()
+	if service.IsTextRelayRequest(c) {
+		ctx, cancel := context.WithCancel(req.Context())
+		stop := context.AfterFunc(c.Request.Context(), cancel)
+		if c.Request.Context().Err() != nil {
+			cancel()
+		}
+		req = req.WithContext(ctx)
+		releaseTextContext = func() { stop(); cancel() }
+		defer func() {
+			if releaseTextContext != nil {
+				releaseTextContext()
+			}
+		}()
+	}
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
@@ -559,7 +575,13 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		}
 	}
 
+	timing := common.NewUpstreamTiming(info.StartTime)
+	info.UpstreamTimings = append(info.UpstreamTimings, timing)
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), timing.Trace()))
 	resp, err := relayClient.Do(req)
+	if resp != nil {
+		timing.ResponseHeaders(resp.Header)
+	}
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
@@ -583,7 +605,13 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 
-	_ = req.Body.Close()
+	if releaseTextContext != nil {
+		resp.Body = &textRelayResponseBody{ReadCloser: resp.Body, release: releaseTextContext}
+		releaseTextContext = nil
+	}
+	if req.Body != nil {
+		_ = req.Body.Close()
+	}
 	_ = c.Request.Body.Close()
 	return resp, nil
 }

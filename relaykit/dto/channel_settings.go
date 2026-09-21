@@ -11,20 +11,74 @@ import (
 )
 
 type ChannelSettings struct {
-	TaskPluginKey             string `json:"task_plugin_key,omitempty"`
-	ForceFormat               bool   `json:"force_format,omitempty"`
-	ThinkingToContent         bool   `json:"thinking_to_content,omitempty"`
-	Proxy                     string `json:"proxy"`
-	PassThroughBodyEnabled    bool   `json:"pass_through_body_enabled,omitempty"`
-	ResponsesWebSocketEnabled bool   `json:"responses_websocket_enabled,omitempty"`
-	SystemPrompt              string `json:"system_prompt,omitempty"`
-	SystemPromptOverride      bool   `json:"system_prompt_override,omitempty"`
+	TaskPluginKey                       string              `json:"task_plugin_key,omitempty"`
+	ForceFormat                         bool                `json:"force_format,omitempty"`
+	ThinkingToContent                   bool                `json:"thinking_to_content,omitempty"`
+	Proxy                               string              `json:"proxy"`
+	PassThroughBodyEnabled              bool                `json:"pass_through_body_enabled,omitempty"`
+	ResponsesItemIDCompatibilityEnabled bool                `json:"responses_item_id_compatibility_enabled,omitempty"`
+	ResponsesWebSocketEnabled           bool                `json:"responses_websocket_enabled,omitempty"`
+	SystemPrompt                        string              `json:"system_prompt,omitempty"`
+	ImageResolutionTiers                map[string][]string `json:"image_resolution_tiers,omitempty"`
+	SystemPromptOverride                bool                `json:"system_prompt_override,omitempty"`
 	// HTTPProtocol controls outbound HTTP version negotiation for this channel.
 	// Accepted values: "", "auto" (default), "http1".
 	HTTPProtocol string `json:"http_protocol,omitempty"`
 	// HTTP2ConnectionShards spreads HTTP/2 traffic across N independent transports
 	// (1-8). Zero/unset means 1. Ignored when HTTPProtocol is "http1".
 	HTTP2ConnectionShards int `json:"http2_connection_shards,omitempty"`
+}
+
+// ImageResolutionTierSupport reports whether the channel explicitly declares
+// support for a requested image resolution tier for the model.
+func (s ChannelSettings) ImageResolutionTierSupport(model string, tier string) (supported bool, declared bool) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	tier = strings.ToLower(strings.TrimSpace(tier))
+	if model == "" || tier == "" {
+		return false, false
+	}
+	for configuredModel, configuredTiers := range s.ImageResolutionTiers {
+		if strings.ToLower(strings.TrimSpace(configuredModel)) != model {
+			continue
+		}
+		declared = true
+		for _, configuredTier := range configuredTiers {
+			if strings.ToLower(strings.TrimSpace(configuredTier)) == tier {
+				return true, true
+			}
+		}
+	}
+	return false, declared
+}
+
+func (s ChannelSettings) ValidateImageResolutionTiers() error {
+	validTiers := map[string]bool{"1k": true, "2k": true, "4k": true}
+	seenModels := make(map[string]bool, len(s.ImageResolutionTiers))
+	for model, tiers := range s.ImageResolutionTiers {
+		normalizedModel := strings.ToLower(strings.TrimSpace(model))
+		if normalizedModel == "" {
+			return fmt.Errorf("image_resolution_tiers model must not be empty")
+		}
+		if seenModels[normalizedModel] {
+			return fmt.Errorf("duplicate image_resolution_tiers model %q", model)
+		}
+		seenModels[normalizedModel] = true
+		if len(tiers) == 0 {
+			return fmt.Errorf("image_resolution_tiers for model %s must not be empty", model)
+		}
+		seenTiers := make(map[string]bool, len(tiers))
+		for _, tier := range tiers {
+			normalizedTier := strings.ToLower(strings.TrimSpace(tier))
+			if !validTiers[normalizedTier] {
+				return fmt.Errorf("unsupported image resolution tier %q for model %s", tier, model)
+			}
+			if seenTiers[normalizedTier] {
+				return fmt.Errorf("duplicate image resolution tier %q for model %s", tier, model)
+			}
+			seenTiers[normalizedTier] = true
+		}
+	}
+	return nil
 }
 
 const (

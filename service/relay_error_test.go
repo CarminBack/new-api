@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -162,6 +163,27 @@ func TestDecideRelayRetryReasons(t *testing.T) {
 			assert.Equal(t, tc.want.Action == "retry", ShouldRetryRelayError(c, tc.err, tc.retries))
 		})
 	}
+}
+
+func TestAppendRelayLogAdminInfoIncludesUpstreamTimings(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	timing1 := relaycommon.NewUpstreamTiming(time.Now())
+	timing1.ResponseHeaders(http.Header{"Server-Timing": []string{"queue;dur=12"}})
+	timing2 := relaycommon.NewUpstreamTiming(time.Now())
+	timing2.FirstSSEData()
+	other := model.NewLogOther()
+
+	AppendRelayLogAdminInfo(c, &relaycommon.RelayInfo{
+		UpstreamTimings: []*relaycommon.UpstreamTiming{timing1, timing2},
+	}, other)
+
+	adminInfo, ok := other.Snapshot()["admin_info"].(map[string]any)
+	require.True(t, ok)
+	timings, ok := adminInfo["upstream_timings"].([]map[string]any)
+	require.True(t, ok)
+	require.Len(t, timings, 2)
+	assert.Equal(t, "queue;dur=12", timings[0]["response_header_server_timing"])
+	assert.Contains(t, timings[1], "first_sse_data_ms")
 }
 
 func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {

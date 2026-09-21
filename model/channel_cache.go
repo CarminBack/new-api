@@ -119,10 +119,11 @@ func GetRandomSatisfiedChannel(
 	model string,
 	retry int,
 	filters []dto.ChannelFilter,
+	weightFactor ...func(int) float64,
 ) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannel(group, model, retry, filters)
+		return GetChannel(group, model, retry, filters, weightFactor...)
 	}
 
 	channelSyncLock.RLock()
@@ -197,6 +198,22 @@ func GetRandomSatisfiedChannel(
 	} else if sumWeight/len(targetChannels) < 10 {
 		// when the average weight is less than 10, set smoothing factor to 100
 		smoothingFactor = 100
+	}
+
+	if len(weightFactor) > 0 && weightFactor[0] != nil {
+		weights := make([]float64, len(targetChannels))
+		total := 0.0
+		for i, candidate := range targetChannels {
+			weights[i] = float64(candidate.GetWeight()*smoothingFactor+smoothingAdjustment) * weightFactor[0](candidate.Id)
+			total += weights[i]
+		}
+		draw := rand.Float64() * total
+		for i, candidate := range targetChannels {
+			draw -= weights[i]
+			if draw < 0 {
+				return candidate, nil
+			}
+		}
 	}
 
 	// Calculate the total weight of all channels up to endIdx
