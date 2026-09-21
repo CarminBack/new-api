@@ -114,6 +114,57 @@ func SyncChannelCache(frequency int) {
 	}
 }
 
+// GetSatisfiedChannels returns enabled channels for a group/model after applying
+// request filters, ordered from highest to lowest priority.
+func GetSatisfiedChannels(group string, model string, filters []dto.ChannelFilter) []*Channel {
+	if !common.MemoryCacheEnabled {
+		var abilities []Ability
+		DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Find(&abilities)
+		abilities = filterAbilitiesByConstraints(abilities, model, filters)
+		if len(abilities) == 0 {
+			normalizedModel := ratio_setting.RoutingMatchModelName(model)
+			DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, normalizedModel, true).Find(&abilities)
+			abilities = filterAbilitiesByConstraints(abilities, model, filters)
+		}
+		result := make([]*Channel, 0, len(abilities))
+		for _, ability := range abilities {
+			var channel Channel
+			if DB.First(&channel, ability.ChannelId).Error == nil && channel.Status == common.ChannelStatusEnabled {
+				result = append(result, &channel)
+			}
+		}
+		sort.SliceStable(result, func(i, j int) bool {
+			if result[i].GetPriority() != result[j].GetPriority() {
+				return result[i].GetPriority() > result[j].GetPriority()
+			}
+			return result[i].GetWeight() > result[j].GetWeight()
+		})
+		return result
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	channels, _ := filterCandidateIDs(group2model2channels[group][model], model, filters)
+	if len(channels) == 0 {
+		normalizedModel := ratio_setting.RoutingMatchModelName(model)
+		channels, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], model, filters)
+	}
+	result := make([]*Channel, 0, len(channels))
+	for _, channelID := range channels {
+		if channel, ok := channelsIDM[channelID]; ok && channel != nil {
+			result = append(result, channel)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].GetPriority() != result[j].GetPriority() {
+			return result[i].GetPriority() > result[j].GetPriority()
+		}
+		return result[i].GetWeight() > result[j].GetWeight()
+	})
+	return result
+}
+
 func GetRandomSatisfiedChannel(
 	group string,
 	model string,

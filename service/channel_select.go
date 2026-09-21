@@ -320,6 +320,28 @@ type ChannelSelectError struct {
 // eligible channel; every candidate must satisfy the request's channel
 // filters. The group the channel was chosen from is returned for auto-group
 // callers. The caller still applies SetupContextForSelectedChannel.
+func highestHealthyPriority(c *gin.Context, group, modelName string, filters []dto.ChannelFilter, requestPath string) (int64, bool) {
+	candidates := model.GetSatisfiedChannels(group, modelName, filters)
+	for _, candidate := range candidates {
+		if candidate == nil || candidate.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		if UsesChannelHealth(c, requestPath) && !IsChannelHealthAvailable(candidate, modelName, requestPath) {
+			continue
+		}
+		return candidate.GetPriority(), true
+	}
+	return 0, false
+}
+
+func preferredAffinitySuperseded(c *gin.Context, preferred *model.Channel, modelName, group, requestPath string, filters []dto.ChannelFilter) bool {
+	if preferred == nil || group == "" || RequestPolicy(c).SessionMode == "strict" || IsImageGenerationPath(requestPath) {
+		return false
+	}
+	highest, found := highestHealthyPriority(c, group, modelName, filters, requestPath)
+	return found && highest > preferred.GetPriority()
+}
+
 func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam) (*model.Channel, string, *ChannelSelectError) {
 	constraints := GetChannelConstraints(c)
 	if pin, found, overridden := constraints.ResolvedPin(); found {
@@ -367,7 +389,7 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 				if usingGroup == "auto" {
 					userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 					for _, g := range GetRequestAutoGroups(c, userGroup) {
-						if channelEnabledForRequestGroup(g, modelName, preferred.Id, constraints.Filters) {
+						if channelEnabledForRequestGroup(g, modelName, preferred.Id, constraints.Filters) && !preferredAffinitySuperseded(c, preferred, modelName, g, retry.RequestPath, constraints.Filters) {
 							selectGroup = g
 							common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
 							channel = preferred
@@ -376,7 +398,7 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 							break
 						}
 					}
-				} else if channelEnabledForRequestGroup(usingGroup, modelName, preferred.Id, constraints.Filters) {
+				} else if channelEnabledForRequestGroup(usingGroup, modelName, preferred.Id, constraints.Filters) && !preferredAffinitySuperseded(c, preferred, modelName, usingGroup, retry.RequestPath, constraints.Filters) {
 					channel = preferred
 					selectGroup = usingGroup
 					affinityUsable = true

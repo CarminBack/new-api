@@ -1798,6 +1798,57 @@ func TestChannelSelectionSkipsOpenRoute(t *testing.T) {
 	require.Equal(t, fallback.Id, selected.Id)
 }
 
+func TestPreferredAffinityYieldsToHigherHealthyPriority(t *testing.T) {
+	setupChannelHealthTest(t)
+	originalDB := model.DB
+	originalLogDB := model.LOG_DB
+	originalMainDatabaseType := common.MainDatabaseType()
+	originalLogDatabaseType := common.LogDatabaseType()
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		model.DB = originalDB
+		model.LOG_DB = originalLogDB
+		common.SetMainDatabaseType(originalMainDatabaseType)
+		common.SetLogDatabaseType(originalLogDatabaseType)
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+	})
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	model.DB = db
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+	require.NoError(t, model.InitLogDB())
+
+	highPriority := int64(10)
+	lowPriority := int64(1)
+	weight := uint(1)
+	high := &model.Channel{Id: 61, Key: "high", Group: "default", Models: "gpt-test", Status: common.ChannelStatusEnabled, Priority: &highPriority, Weight: &weight}
+	preferred := &model.Channel{Id: 62, Key: "preferred", Group: "default", Models: "gpt-test", Status: common.ChannelStatusEnabled, Priority: &lowPriority, Weight: &weight}
+	for _, channel := range []*model.Channel{high, preferred} {
+		require.NoError(t, db.Create(channel).Error)
+		require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "gpt-test", ChannelId: channel.Id, Enabled: true, Priority: channel.Priority, Weight: weight}).Error)
+	}
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{}`))
+	RequestPolicy(ctx).SessionMode = "prefer"
+	require.True(t, preferredAffinitySuperseded(ctx, preferred, "gpt-test", "default", "/v1/responses", nil))
+
+	RequestPolicy(ctx).SessionMode = "strict"
+	require.False(t, preferredAffinitySuperseded(ctx, preferred, "gpt-test", "default", "/v1/responses", nil))
+	RequestPolicy(ctx).SessionMode = "prefer"
+	require.False(t, preferredAffinitySuperseded(ctx, preferred, "gpt-test", "default", "/v1/images/generations", nil))
+
+	scheduleRouteProbeForTest(t, high, 0, "gpt-test", "/v1/responses", ChannelFailureTransient)
+	targets := ClaimDueChannelHealthProbes(1)
+	require.Len(t, targets, 1)
+	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
+	require.False(t, preferredAffinitySuperseded(ctx, preferred, "gpt-test", "default", "/v1/responses", nil))
+}
+
 func BenchmarkChannelHealthSuccessfulRequest(b *testing.B) {
 	gin.SetMode(gin.TestMode)
 	resetMemoryChannelHealth()
