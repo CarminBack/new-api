@@ -20,6 +20,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDistributeRejectsGovernedImageModelBeforeChannelSelection(t *testing.T) {
+	router := gin.New()
+	router.POST("/v1/chat/completions", Distribute(), func(c *gin.Context) {
+		t.Error("invalid image requests must stop before channel selection")
+		c.Status(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-image-2.5","messages":[]}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	assert.Contains(t, response.Body.String(), "/v1/images/generations")
+}
+
 func TestChannelMatchesExpectedTaskPluginUsesGenericChannelSetting(t *testing.T) {
 	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin}
 	channel.SetSetting(dto.ChannelSettings{TaskPluginKey: "generic-alpha"})

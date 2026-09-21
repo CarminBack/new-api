@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
@@ -104,6 +105,22 @@ func Distribute() func(c *gin.Context) {
 						common.SetContextKey(c, constant.ContextKeyUsingGroup, playgroundRequest.Group)
 					}
 				}
+			}
+		}
+		if c.Request.Method == http.MethodPost && relayhelper.IsGovernedImageModel(modelRequest.Model) {
+			storage, bodyErr := common.GetBodyStorage(c)
+			if bodyErr != nil {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, bodyErr.Error(), types.ErrorCodeReadRequestBodyFailed)
+				return
+			}
+			body, bodyErr := storage.Bytes()
+			if bodyErr != nil {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, bodyErr.Error(), types.ErrorCodeReadRequestBodyFailed)
+				return
+			}
+			if validationErr := relayhelper.ValidateImageModelRequest(modelRequest.Model, relayconstant.Path2RelayMode(c.Request.URL.Path), body); validationErr != nil {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, validationErr.Error(), types.ErrorCodeInvalidRequest)
+				return
 			}
 		}
 		if pinned || shouldSelectChannel {
