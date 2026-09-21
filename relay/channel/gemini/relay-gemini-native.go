@@ -37,6 +37,7 @@ func GeminiTextGenerationHandler(c *gin.Context, info *relaycommon.RelayInfo, re
 	}
 	info.ObserveResponseModel(gjson.GetBytes(responseBody, "modelVersion").Str)
 	countGeminiBillableFunctionCalls(info, &geminiResponse)
+	service.CaptureGeminiImageGeneration(c, &geminiResponse)
 
 	if len(geminiResponse.Candidates) == 0 && geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
 		info.PerformanceBusinessRejection = true

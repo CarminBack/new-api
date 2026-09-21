@@ -20,7 +20,47 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
+
+const imageArchivePromptMaxRunes = 4096
+
+func truncateImageArchivePrompt(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	runes := []rune(prompt)
+	if len(runes) <= imageArchivePromptMaxRunes {
+		return prompt
+	}
+	return strings.TrimSpace(string(runes[:imageArchivePromptMaxRunes]))
+}
+
+func openAIImageArchiveRequest(request *dto.GeneralOpenAIRequest) *dto.ImageRequest {
+	if request == nil {
+		return nil
+	}
+	prompt := ""
+	for i := len(request.Messages) - 1; i >= 0; i-- {
+		if !strings.EqualFold(strings.TrimSpace(request.Messages[i].Role), "user") {
+			continue
+		}
+		prompt = truncateImageArchivePrompt(request.Messages[i].StringContent())
+		if prompt != "" {
+			break
+		}
+	}
+	size := strings.TrimSpace(request.Size)
+	if size == "" {
+		size = strings.TrimSpace(gjson.GetBytes(request.ExtraBody, "google.image_config.image_size").String())
+	}
+	if size == "" {
+		size = strings.TrimSpace(gjson.GetBytes(request.ExtraBody, "google.image_config.imageSize").String())
+	}
+	return &dto.ImageRequest{
+		Prompt:  prompt,
+		Size:    size,
+		Quality: "standard",
+	}
+}
 
 func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
@@ -90,7 +130,9 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		if containAudioTokens && containsAudioRatios {
 			service.PostAudioConsumeQuota(c, info, usage, "")
 		} else {
-			service.PostTextConsumeQuota(c, info, usage, nil)
+			info.UpdateImageCount(int64(service.CapturedGeminiImageGenerationCount(c)))
+			quota := service.PostTextConsumeQuota(c, info, usage, nil)
+			service.SavePendingGeminiImageGeneration(c, info, openAIImageArchiveRequest(request), quota)
 		}
 		return nil
 	}
@@ -181,7 +223,9 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	if containAudioTokens && containsAudioRatios {
 		service.PostAudioConsumeQuota(c, info, usage.(*dto.Usage), "")
 	} else {
-		service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+		info.UpdateImageCount(int64(service.CapturedGeminiImageGenerationCount(c)))
+		quota := service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+		service.SavePendingGeminiImageGeneration(c, info, openAIImageArchiveRequest(request), quota)
 	}
 	return nil
 }

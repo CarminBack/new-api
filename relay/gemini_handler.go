@@ -19,6 +19,46 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func geminiImageArchiveRequest(request *dto.GeminiChatRequest) *dto.ImageRequest {
+	if request == nil {
+		return nil
+	}
+	prompt := ""
+	for i := len(request.Contents) - 1; i >= 0; i-- {
+		if !strings.EqualFold(strings.TrimSpace(request.Contents[i].Role), "user") {
+			continue
+		}
+		var texts []string
+		for _, part := range request.Contents[i].Parts {
+			if text := strings.TrimSpace(part.Text); text != "" {
+				texts = append(texts, text)
+			}
+		}
+		prompt = truncateImageArchivePrompt(strings.Join(texts, "\n"))
+		if prompt != "" {
+			break
+		}
+	}
+	size := ""
+	if len(request.GenerationConfig.ImageConfig) > 0 {
+		var imageConfig struct {
+			ImageSize      string `json:"imageSize"`
+			ImageSizeSnake string `json:"image_size"`
+		}
+		if err := common.Unmarshal(request.GenerationConfig.ImageConfig, &imageConfig); err == nil {
+			size = imageConfig.ImageSize
+			if size == "" {
+				size = imageConfig.ImageSizeSnake
+			}
+		}
+	}
+	return &dto.ImageRequest{
+		Prompt:  prompt,
+		Size:    size,
+		Quality: "standard",
+	}
+}
+
 func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 
@@ -152,7 +192,9 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return openaiErr
 	}
 
-	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+	info.UpdateImageCount(int64(service.CapturedGeminiImageGenerationCount(c)))
+	quota := service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+	service.SavePendingGeminiImageGeneration(c, info, geminiImageArchiveRequest(request), quota)
 	return nil
 }
 

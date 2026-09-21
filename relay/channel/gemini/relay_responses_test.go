@@ -20,6 +20,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGeminiResponsesHandlerCapturesInlineImage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+	payload := dto.GeminiChatResponse{
+		Candidates: []dto.GeminiChatCandidate{{Content: dto.GeminiChatContent{
+			Role:  "model",
+			Parts: []dto.GeminiPart{{InlineData: &dto.GeminiInlineData{MimeType: "image/png", Data: png}}},
+		}}},
+		UsageMetadata: dto.GeminiUsageMetadata{PromptTokenCount: 1, CandidatesTokenCount: 1, TotalTokenCount: 2},
+	}
+	body, err := common.Marshal(payload)
+	require.NoError(t, err)
+	usage, newAPIError := GeminiResponsesHandler(c, newGeminiResponsesRelayInfo(false), &http.Response{
+		Body: io.NopCloser(bytes.NewReader(body)),
+	})
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	_, exists := c.Get("pending_gemini_image_generation")
+	require.True(t, exists)
+}
+
 func TestGeminiResponsesHandlerReturnsOpenAIResponsesJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

@@ -190,6 +190,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 		}
 		attempts++
+		service.ResetPendingGeminiImageGeneration(c)
 		relayInfo.StreamStatus = nil
 		relayInfo.PerformanceBusinessRejection = false
 		relayInfo.PerformanceOutputTokens = 0

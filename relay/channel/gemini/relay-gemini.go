@@ -113,27 +113,12 @@ func buildUsageFromGeminiResponse(c *gin.Context, info *relaycommon.RelayInfo, r
 	metadata := response.GetUsageMetadata()
 	if dto.HasGeminiUsageMetadataTokens(metadata) {
 		usage := buildUsageFromGeminiMetadata(metadata, info.GetEstimatePromptTokens())
-		patchGeminiZeroCompletionUsage(c, info, &usage, geminiResponseUsageText(response), geminiResponseInlineImageCount(response))
+		patchGeminiZeroCompletionUsage(c, info, &usage, geminiResponseUsageText(response), service.CapturedGeminiImageGenerationCount(c))
 		return usage
 	}
 	usage := service.ResponseText2Usage(c, geminiResponseUsageText(response), info.UpstreamModelName, info.GetEstimatePromptTokens())
 	attachEstimatedGeminiBillingUsage(usage)
 	return *usage
-}
-
-func geminiResponseInlineImageCount(response *dto.GeminiChatResponse) int {
-	if response == nil {
-		return 0
-	}
-	count := 0
-	for _, candidate := range response.Candidates {
-		for _, part := range candidate.Content.Parts {
-			if part.InlineData != nil && part.InlineData.MimeType != "" {
-				count++
-			}
-		}
-	}
-	return count
 }
 
 func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse) *dto.OpenAITextResponse {
@@ -167,7 +152,6 @@ func handleFinalStream(c *gin.Context, info *relaycommon.RelayInfo, resp *dto.Ch
 
 func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response, callback func(data string, geminiResponse *dto.GeminiChatResponse) bool) (*dto.Usage, *types.NewAPIError) {
 	var usage = &dto.Usage{}
-	var imageCount int
 	var hasBillableUsageMetadata bool
 	var streamErr error
 	var accumulatedUsageMetadata *dto.GeminiUsageMetadata
@@ -199,13 +183,12 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 		markGeminiGoogleSearchCall(c, &geminiResponse)
 		countGeminiBillableFunctionCalls(info, &geminiResponse)
+		service.CaptureGeminiImageGeneration(c, &geminiResponse)
 
-		// 统计图片数量
+		// Only validated images retained by CaptureGeminiImageGeneration may
+		// influence usage estimation and final quantity billing.
 		for _, candidate := range geminiResponse.Candidates {
 			for _, part := range candidate.Content.Parts {
-				if part.InlineData != nil && part.InlineData.MimeType != "" {
-					imageCount++
-				}
 				if part.Text != "" {
 					responseText.WriteString(part.Text)
 				}
@@ -231,20 +214,21 @@ func geminiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	})
 	info.StreamStatus.RequireTerminal()
 
+	validatedImageCount := service.CapturedGeminiImageGenerationCount(c)
 	if !hasBillableUsageMetadata {
 		if info.ReceivedResponseCount > 0 {
 			usage = service.ResponseText2Usage(c, responseText.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		} else {
 			usage = &dto.Usage{}
 		}
-		if imageCount != 0 && usage.CompletionTokens == 0 {
-			usage.CompletionTokens = imageCount * 1400
+		if validatedImageCount != 0 && usage.CompletionTokens == 0 {
+			usage.CompletionTokens = validatedImageCount * 1400
 			usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 			common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
 		}
 		attachEstimatedGeminiBillingUsage(usage)
 	} else {
-		patchGeminiZeroCompletionUsage(c, info, usage, responseText.String(), imageCount)
+		patchGeminiZeroCompletionUsage(c, info, usage, responseText.String(), validatedImageCount)
 	}
 
 	if streamErr != nil {
@@ -387,6 +371,7 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	info.ObserveResponseModel(gjson.GetBytes(responseBody, "modelVersion").Str)
 	markGeminiGoogleSearchCall(c, &geminiResponse)
 	countGeminiBillableFunctionCalls(info, &geminiResponse)
+	service.CaptureGeminiImageGeneration(c, &geminiResponse)
 	if len(geminiResponse.Candidates) == 0 {
 		usage := buildUsageFromGeminiResponse(c, info, &geminiResponse)
 

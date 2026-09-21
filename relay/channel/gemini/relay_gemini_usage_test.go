@@ -13,9 +13,37 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGeminiUsageImageFallbackUsesOnlyValidatedImages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+	for _, tc := range []struct {
+		name       string
+		data       string
+		wantImages int
+		wantTokens int
+	}{
+		{name: "invalid base64", data: "not-base64"},
+		{name: "valid image", data: png, wantImages: 1, wantTokens: 1400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			response := &dto.GeminiChatResponse{
+				Candidates:       []dto.GeminiChatCandidate{{Content: dto.GeminiChatContent{Parts: []dto.GeminiPart{{InlineData: &dto.GeminiInlineData{MimeType: "image/png", Data: tc.data}}}}}},
+				UsageMetadata:    dto.GeminiUsageMetadata{PromptTokenCount: 1, TotalTokenCount: 1},
+				HasUsageMetadata: true,
+			}
+			service.CaptureGeminiImageGeneration(c, response)
+			usage := buildUsageFromGeminiResponse(c, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3-pro-image"}}, response)
+			require.Equal(t, tc.wantImages, service.CapturedGeminiImageGenerationCount(c))
+			require.Equal(t, tc.wantTokens, usage.CompletionTokens)
+		})
+	}
+}
 
 func TestStreamResponseGeminiChat2OpenAIAttachesUsageMetadata(t *testing.T) {
 	t.Parallel()
@@ -139,6 +167,76 @@ func TestGeminiChatStreamHandlerClaudeFirstFrameUsesUpstreamUsage(t *testing.T) 
 	require.Equal(t, dto.BillingUsageSemanticGemini, deltaUsage.BillingUsage.Semantic)
 	require.NotNil(t, deltaUsage.BillingUsage.GeminiUsageMetadata)
 	require.Equal(t, 3868, deltaUsage.BillingUsage.GeminiUsageMetadata.PromptTokenCount)
+}
+
+func TestGeminiHandlersCaptureInlineImagesForFinalArchiving(t *testing.T) {
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+	for _, tc := range []struct {
+		name    string
+		handler func(*gin.Context, *relaycommon.RelayInfo, *http.Response) (*dto.Usage, *types.NewAPIError)
+	}{
+		{name: "openai compatible chat", handler: GeminiChatHandler},
+		{name: "gemini native", handler: GeminiTextGenerationHandler},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/generate", nil)
+			info := &relaycommon.RelayInfo{
+				OriginModelName: "gemini-3-pro-image",
+				ChannelMeta:     &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3-pro-image"},
+			}
+			body := []byte(`{"candidates":[{"content":{"role":"model","parts":[{"inline_data":{"mime_type":"image/png","data":"` + png + `"}}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`)
+			usage, newAPIError := tc.handler(c, info, &http.Response{Body: io.NopCloser(bytes.NewReader(body))})
+			require.Nil(t, newAPIError)
+			require.NotNil(t, usage)
+
+			pending, exists := c.Get("pending_gemini_image_generation")
+			require.True(t, exists)
+			require.NotNil(t, pending)
+		})
+	}
+}
+
+func TestGeminiHandlerDoesNotCaptureTextOnlyResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gemini-3-pro-image",
+		ChannelMeta:     &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3-pro-image"},
+	}
+	body := []byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"no image"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`)
+	usage, newAPIError := GeminiChatHandler(c, info, &http.Response{Body: io.NopCloser(bytes.NewReader(body))})
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	_, exists := c.Get("pending_gemini_image_generation")
+	require.False(t, exists)
+}
+
+func TestGeminiStreamHandlerCapturesInlineImagesOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 300
+	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gemini-3-pro-image",
+		ChannelMeta:     &relaycommon.ChannelMeta{UpstreamModelName: "gemini-3-pro-image"},
+	}
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+	chunk := `{"candidates":[{"content":{"role":"model","parts":[{"inlineData":{"mimeType":"image/png","data":"` + png + `"}}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`
+	streamBody := []byte("data: " + chunk + "\n" + "data: " + chunk + "\n" + "data: [DONE]\n")
+	usage, newAPIError := geminiStreamHandler(c, info, &http.Response{Body: io.NopCloser(bytes.NewReader(streamBody))}, func(_ string, _ *dto.GeminiChatResponse) bool {
+		return true
+	})
+	require.Nil(t, newAPIError)
+	require.NotNil(t, usage)
+	pending, exists := c.Get("pending_gemini_image_generation")
+	require.True(t, exists)
+	require.NotNil(t, pending)
 }
 
 func TestGeminiChatHandlerCompletionTokensExcludeToolUsePromptTokens(t *testing.T) {
