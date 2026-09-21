@@ -36,7 +36,7 @@ jobs:
           context: .
           platforms: linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/new-api:test-parity11-image-endpoint-guard-20260921
+          tags: ghcr.io/carminback/new-api:test-parity11-image-endpoint-guard-20260921
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
@@ -47,7 +47,7 @@ jobs:
           {
             echo '### Isolated test image'
             echo '```'
-            echo 'ghcr.io/${{ github.repository_owner }}/new-api:test-parity11-image-endpoint-guard-20260921'
+            echo 'ghcr.io/carminback/new-api:test-parity11-image-endpoint-guard-20260921'
             echo '${{ steps.build.outputs.digest }}'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
