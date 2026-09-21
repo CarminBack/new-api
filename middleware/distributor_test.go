@@ -21,19 +21,29 @@ import (
 )
 
 func TestDistributeRejectsGovernedImageModelBeforeChannelSelection(t *testing.T) {
-	router := gin.New()
-	router.POST("/v1/chat/completions", Distribute(), func(c *gin.Context) {
-		t.Error("invalid image requests must stop before channel selection")
-		c.Status(http.StatusNoContent)
-	})
-	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-image-2.5","messages":[]}`))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
+	tests := []struct {
+		name, path, body, message string
+	}{
+		{"unsupported chat path", "/v1/chat/completions", `{"model":"gpt-image-2.5","messages":[]}`, "/v1/images/generations"},
+		{"image count overflow", "/v1/images/generations", fmt.Sprintf(`{"model":"gpt-image-2.5","prompt":"test","n":%d}`, dto.MaxImageN+1), "n must be an integer"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			router := gin.New()
+			router.POST(test.path, Distribute(), func(c *gin.Context) {
+				t.Error("invalid image requests must stop before channel selection")
+				c.Status(http.StatusNoContent)
+			})
+			request := httptest.NewRequest(http.MethodPost, test.path, bytes.NewBufferString(test.body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
 
-	router.ServeHTTP(response, request)
+			router.ServeHTTP(response, request)
 
-	require.Equal(t, http.StatusBadRequest, response.Code)
-	assert.Contains(t, response.Body.String(), "/v1/images/generations")
+			require.Equal(t, http.StatusBadRequest, response.Code)
+			assert.Contains(t, response.Body.String(), test.message)
+		})
+	}
 }
 
 func TestChannelMatchesExpectedTaskPluginUsesGenericChannelSetting(t *testing.T) {

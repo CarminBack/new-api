@@ -107,20 +107,29 @@ func Distribute() func(c *gin.Context) {
 				}
 			}
 		}
-		if c.Request.Method == http.MethodPost && relayhelper.IsGovernedImageModel(modelRequest.Model) {
-			storage, bodyErr := common.GetBodyStorage(c)
-			if bodyErr != nil {
-				abortWithOpenAiMessage(c, http.StatusBadRequest, bodyErr.Error(), types.ErrorCodeReadRequestBodyFailed)
-				return
+		if c.Request.Method == http.MethodPost {
+			relayMode := relayconstant.Path2RelayMode(c.Request.URL.Path)
+			if relayMode == relayconstant.RelayModeImagesGenerations || relayMode == relayconstant.RelayModeImagesEdits {
+				if _, validationErr := relayhelper.GetAndValidOpenAIImageRequest(c, relayMode); validationErr != nil {
+					abortWithOpenAiMessage(c, http.StatusBadRequest, validationErr.Error(), types.ErrorCodeInvalidRequest)
+					return
+				}
 			}
-			body, bodyErr := storage.Bytes()
-			if bodyErr != nil {
-				abortWithOpenAiMessage(c, http.StatusBadRequest, bodyErr.Error(), types.ErrorCodeReadRequestBodyFailed)
-				return
-			}
-			if validationErr := relayhelper.ValidateImageModelRequest(modelRequest.Model, relayconstant.Path2RelayMode(c.Request.URL.Path), body); validationErr != nil {
-				abortWithOpenAiMessage(c, http.StatusBadRequest, validationErr.Error(), types.ErrorCodeInvalidRequest)
-				return
+			if relayhelper.IsGovernedImageModel(modelRequest.Model) {
+				storage, bodyErr := common.GetBodyStorage(c)
+				if bodyErr != nil {
+					abortWithOpenAiMessage(c, http.StatusBadRequest, bodyErr.Error(), types.ErrorCodeReadRequestBodyFailed)
+					return
+				}
+				body, bodyErr := storage.Bytes()
+				if bodyErr != nil {
+					abortWithOpenAiMessage(c, http.StatusBadRequest, bodyErr.Error(), types.ErrorCodeReadRequestBodyFailed)
+					return
+				}
+				if validationErr := relayhelper.ValidateImageModelRequest(modelRequest.Model, relayMode, body); validationErr != nil {
+					abortWithOpenAiMessage(c, http.StatusBadRequest, validationErr.Error(), types.ErrorCodeInvalidRequest)
+					return
+				}
 			}
 		}
 		if pinned || shouldSelectChannel {
