@@ -38,12 +38,12 @@ const USAGE_SCHEMA = {
   seconds: {
     type: "number",
     unit: "second",
-    description: { en: "Generated video duration", zh: "生成视频时长" },
+    description: { en: "Video generation unit price", zh: "视频生成单价" },
   },
   videos: {
     type: "number",
     unit: "count",
-    description: { en: "Generated video count", zh: "生成视频数量" },
+    description: { en: "Video generation unit price", zh: "视频生成单价" },
   },
 };
 
@@ -56,7 +56,7 @@ export const meta = {
     en: "AistarsLab Seedance video generation",
     zh: "AistarsLab Seedance 视频生成",
   },
-  version: "1.0.0",
+  version: "1.0.1",
   author: { name: "Carmin" },
   models: MODELS,
   fetchMode: "per_task",
@@ -152,12 +152,12 @@ function staticCapability(model) {
     ratios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "2:3", "3:2"],
     resolution: "",
   };
-  if (channel === "50") {
-    capability.minSeconds = 5;
-    capability.maxImages = 4;
-    capability.maxAudios = 1;
+  if (["47", "48", "50"].includes(channel)) {
     capability.modes = ["text2video", "image2video"];
-    capability.ratios = ["16:9", "9:16", "1:1"];
+    capability.ratios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+  }
+  if (channel === "50") {
+    capability.ratios = ["16:9", "9:16", "1:1", "4:3", "3:4"];
     capability.resolution = "720p";
     return capability;
   }

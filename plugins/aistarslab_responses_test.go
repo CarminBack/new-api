@@ -48,7 +48,7 @@ func TestAistarsLabBuildSubmitRequestUsesProviderContract(t *testing.T) {
 				"https://cdn.example/last.png",
 			},
 			"metadata": map[string]any{
-				"mode_type": "frames2video",
+				"mode_type": "image2video",
 				"ignored":   "must-not-pass-through",
 			},
 		},
@@ -63,7 +63,7 @@ func TestAistarsLabBuildSubmitRequestUsesProviderContract(t *testing.T) {
 	assert.Equal(t, "7", body["seconds"])
 	assert.Equal(t, float64(1), body["n"])
 	metadata := body["metadata"].(map[string]any)
-	assert.Equal(t, "frames2video", metadata["mode_type"])
+	assert.Equal(t, "image2video", metadata["mode_type"])
 	assert.Equal(t, "720p", metadata["resolution"])
 	assert.NotContains(t, metadata, "ignored")
 }
@@ -89,12 +89,12 @@ func TestAistarsLabRejectsUnsupportedInputs(t *testing.T) {
 			body: map[string]any{
 				"model":   "seedance-720p-c50",
 				"prompt":  "animate",
-				"seconds": 4,
+				"seconds": 3,
 			},
-			message: "seconds must be between 5 and 15",
+			message: "seconds must be between 4 and 15",
 		},
 		{
-			name: "frames require two images",
+			name: "channel 47 rejects frames mode",
 			body: map[string]any{
 				"model":  "seedance-720p-c47",
 				"prompt": "animate",
@@ -103,7 +103,7 @@ func TestAistarsLabRejectsUnsupportedInputs(t *testing.T) {
 					"mode_type": "frames2video",
 				},
 			},
-			message: "frames2video requires exactly two images",
+			message: "mode is not supported by the selected model",
 		},
 	}
 	for _, testCase := range tests {
@@ -116,6 +116,39 @@ func TestAistarsLabRejectsUnsupportedInputs(t *testing.T) {
 			})
 			require.ErrorContains(t, err, testCase.message)
 		})
+	}
+}
+
+func TestAistarsLabChannel50CurrentCapabilities(t *testing.T) {
+	plugin := compileAistarsLabPlugin(t)
+	for _, model := range []string{"seedance-720p-c50", "seedance-720p-fast-c50"} {
+		for _, ratio := range []string{"16:9", "9:16", "1:1", "4:3", "3:4"} {
+			t.Run(model+"/"+ratio, func(t *testing.T) {
+				images := make([]string, 9)
+				for i := range images {
+					images[i] = "https://cdn.example/image" + string(rune('a'+i)) + ".png"
+				}
+				value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+					"baseUrl":       "https://api.video.aistarslab.com/openai",
+					"upstreamModel": "50:seedance-2.0",
+					"requestBody": map[string]any{
+						"model": model, "prompt": "animate references", "seconds": 4, "size": ratio,
+						"images": images,
+						"videos": []string{"https://cdn.example/a.mp4", "https://cdn.example/b.mp4", "https://cdn.example/c.mp4"},
+						"audios": []string{"https://cdn.example/a.mp3", "https://cdn.example/b.mp3", "https://cdn.example/c.mp3"},
+					},
+				})
+				require.NoError(t, err)
+				body := decodePluginMap(t, value)["body"].(map[string]any)
+				assert.Equal(t, "4", body["seconds"])
+				assert.Equal(t, ratio, body["size"])
+				metadata := body["metadata"].(map[string]any)
+				assert.Equal(t, "720p", metadata["resolution"])
+				assert.Len(t, metadata["images"], 9)
+				assert.Len(t, metadata["videos"], 3)
+				assert.Len(t, metadata["audios"], 3)
+			})
+		}
 	}
 }
 
