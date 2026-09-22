@@ -37,9 +37,10 @@ type HybridCache[V any] struct {
 	redisCodec   ValueCodec[V]
 	redisEnabled func() bool
 
-	memOnce sync.Once
-	memInit func() *hot.HotCache[string, V]
-	mem     *hot.HotCache[string, V]
+	memOnce   sync.Once
+	memInit   func() *hot.HotCache[string, V]
+	mem       *hot.HotCache[string, V]
+	compareMu sync.Mutex
 }
 
 func NewHybridCache[V any](cfg HybridCacheConfig[V]) *HybridCache[V] {
@@ -124,6 +125,8 @@ func (c *HybridCache[V]) SetWithTTL(key string, v V, ttl time.Duration) error {
 		return c.redis.Set(ctx, full, raw, ttl).Err()
 	}
 
+	c.compareMu.Lock()
+	defer c.compareMu.Unlock()
 	c.memCache().SetWithTTL(full, v, ttl)
 	return nil
 }
@@ -169,6 +172,8 @@ func (c *HybridCache[V]) Purge() error {
 		return err
 	}
 
+	c.compareMu.Lock()
+	defer c.compareMu.Unlock()
 	c.memCache().Purge()
 	return nil
 }
@@ -267,6 +272,8 @@ func (c *HybridCache[V]) DeleteMany(keys []string) (map[string]bool, error) {
 		return res, nil
 	}
 
+	c.compareMu.Lock()
+	defer c.compareMu.Unlock()
 	return c.memCache().DeleteMany(fullKeys), nil
 }
 

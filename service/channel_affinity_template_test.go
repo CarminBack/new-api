@@ -254,10 +254,11 @@ func TestClearCurrentChannelAffinityCache(t *testing.T) {
 	})
 
 	ctx := buildChannelAffinityTemplateContextForTest(channelAffinityMeta{
-		CacheKey:   cacheKeyFull,
-		TTLSeconds: 60,
-		RuleName:   "codex cli trace",
-		SkipRetry:  true,
+		CacheKey:          cacheKeyFull,
+		OriginalChannelID: 9527,
+		TTLSeconds:        60,
+		RuleName:          "codex cli trace",
+		SkipRetry:         true,
 	})
 	require.True(t, ShouldSkipRetryAfterChannelAffinityFailure(ctx))
 

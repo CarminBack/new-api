@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -43,19 +44,20 @@ var (
 )
 
 type channelAffinityMeta struct {
-	CacheKey       string
-	TTLSeconds     int
-	RuleName       string
-	SkipRetry      bool
-	ParamTemplate  map[string]any
-	KeySourceType  string
-	KeySourceKey   string
-	KeySourcePath  string
-	KeyHint        string
-	KeyFingerprint string
-	UsingGroup     string
-	ModelName      string
-	RequestPath    string
+	CacheKey          string
+	TTLSeconds        int
+	RuleName          string
+	SkipRetry         bool
+	ParamTemplate     map[string]any
+	KeySourceType     string
+	KeySourceKey      string
+	KeySourcePath     string
+	KeyHint           string
+	KeyFingerprint    string
+	UsingGroup        string
+	ModelName         string
+	RequestPath       string
+	OriginalChannelID int
 }
 
 type ChannelAffinityStatsContext struct {
@@ -623,6 +625,9 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 			return 0, false
 		}
 		if found {
+			meta, _ := getChannelAffinityMeta(c)
+			meta.OriginalChannelID = channelID
+			setChannelAffinityContext(c, meta)
 			return channelID, true
 		}
 		return 0, false
@@ -657,19 +662,19 @@ func ClearCurrentChannelAffinityCache(c *gin.Context) bool {
 		return false
 	}
 
+	meta, hasMeta := getChannelAffinityMeta(c)
+	if !hasMeta || meta.OriginalChannelID <= 0 {
+		c.Set(ginKeyChannelAffinitySkipRetry, false)
+		return false
+	}
 	cache := getChannelAffinityCache()
-	deleted, err := cache.DeleteMany([]string{cacheKey})
+	deleted, err := cache.DeleteIfUnchanged(cacheKey, meta.OriginalChannelID)
 	if err != nil {
-		common.SysError(fmt.Sprintf("channel affinity cache delete current failed: err=%v", err))
+		common.SysError("channel affinity conditional delete failed: " + err.Error())
 		return false
 	}
 	c.Set(ginKeyChannelAffinitySkipRetry, false)
-	for _, ok := range deleted {
-		if ok {
-			return true
-		}
-	}
-	return false
+	return deleted
 }
 
 func ShouldKeepChannelAffinityOnChannelDisabled() bool {
@@ -760,8 +765,36 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 		ttlSeconds = 3600
 	}
 	cache := getChannelAffinityCache()
-	if err := cache.SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
-		common.SysError(fmt.Sprintf("channel affinity cache set failed: key=%s, err=%v", cacheKey, err))
+	meta, _ := getChannelAffinityMeta(c)
+	group := meta.UsingGroup
+	if group == "auto" {
+		group = common.GetContextKeyString(c, constant.ContextKeyAutoGroup)
+	}
+	// Conditional updates also work across processes. A late fallback must
+	// not overwrite a higher-priority binding written since this request began.
+	for range 4 {
+		current, found, err := cache.Get(cacheKey)
+		if err != nil {
+			return
+		}
+		if found && current != channelID && meta.OriginalChannelID != current && group != "" {
+			bound, boundErr := model.CacheGetChannel(current)
+			incoming, incomingErr := model.CacheGetChannel(channelID)
+			if boundErr == nil && incomingErr == nil && bound != nil && incoming != nil &&
+				model.IsChannelEnabledForGroupModel(group, meta.ModelName, current) &&
+				bound.GetPriority() > incoming.GetPriority() &&
+				IsChannelHealthCircuitClosed(bound, meta.ModelName, meta.RequestPath) {
+				return
+			}
+		}
+		updated, err := cache.SetIfUnchangedWithTTL(cacheKey, current, found, channelID, time.Duration(ttlSeconds)*time.Second)
+		if err != nil {
+			common.SysError("channel affinity conditional set failed: " + err.Error())
+			return
+		}
+		if updated {
+			return
+		}
 	}
 }
 

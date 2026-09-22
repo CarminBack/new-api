@@ -525,8 +525,13 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		service.CaptureTextRetryAfter(c, nil)
 		ctx, cancel := context.WithCancel(req.Context())
 		var firstResponseTimer *time.Timer
-		if common2.TextFirstResponseTimeout > 0 {
-			firstResponseTimer = time.AfterFunc(time.Duration(common2.TextFirstResponseTimeout)*time.Second, cancel)
+		modelName := c.GetString("original_model")
+		if info != nil && info.OriginModelName != "" {
+			modelName = info.OriginModelName
+		}
+		firstResponseSeconds := common2.TextFirstResponseSeconds(modelName, c.Request.URL.Path)
+		if firstResponseSeconds > 0 {
+			firstResponseTimer = time.AfterFunc(time.Duration(firstResponseSeconds)*time.Second, cancel)
 		}
 		firstTextByte = func() {
 			if firstResponseTimer != nil {

@@ -5,6 +5,9 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
 
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -98,6 +101,12 @@ func DecideChannelFailureForModel(c *gin.Context, err *types.NewAPIError, modelN
 	if specificChannel {
 		decision.Retry = false
 		decision.Reason += ":specific_channel"
+	}
+	if decision.Retry && IsTextRelayRequest(c) && common.TextRetryMinRemainingSeconds > 0 {
+		if deadline, ok := c.Request.Context().Deadline(); ok && time.Until(deadline) < time.Duration(common.TextRetryMinRemainingSeconds)*time.Second {
+			decision.Retry = false
+			decision.Reason += ":insufficient_time_remaining"
+		}
 	}
 	return decision
 }
