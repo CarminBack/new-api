@@ -1,4 +1,41 @@
-# parity10 本地上线前验收（2026-09-19）
+# new-api 上线前验收
+
+## 2026-09-22 测试站正式升级验收：未通过
+
+本轮只修改隔离测试站；正式站保持只读。候选的支付、OAuth、视频账本和重复启动检查通过，但复制正式视频渠道配置后出现可复现的路由不兼容，且正式现有两个模型无法迁移定价，因此当前不能直接同步正式站，也没有请求正式部署确认。
+
+### 版本与环境
+
+- 正式：revision `672f3da30286d790fad4a8c8ed5c603ffadfe888`，镜像 digest `68f712d0e6856d7394719a141be66b62ec520f309c10e490b3bd75c23074e503`。
+- 候选：revision `3e86fa0c0da4558e4551925daf42d8f984ca5aea`，GitHub Actions `35697234070` 构建，镜像 digest `dc015eb6d0462e3826b84f16faccce3b9f75d5538c1dee81d435d109c2b2c227`；再次核对运行镜像为 ARM64、OCI revision 相符。
+- 隔离环境：`oracle:/opt/docker/new-api-rc20-test`，MySQL 8.4.9 的 `new_api_rc20_test`，独立测试 Redis。生产与测试数据源不同。
+- 完整差异为 1669 个文件，不能用调度验收替代整个升级版本验收。本次未修改业务源码。
+- 备份：`backups/release-gate-20260922-02955c03`，含 compose、runtime.env、40 张表一致快照；`mysqldump --no-tablespaces --single-transaction --quick --skip-lock-tables --set-gtid-purged=OFF`，建表数量、gzip 和 SHA256 验证通过。
+
+### 明确阻塞
+
+1. **正式 Seedance 渠道的旧类型不兼容。** 正式 Video 渠道为 type=1。保留实际正式 Seedance 渠道的类型、setting、model_mapping，使用临时渠道及无真实供应商连接的地址，在候选请求 `seedance-720p-c47` 的 `/v1/videos` 返回 **503 / model_not_found**，提示模型由任务插件声明但没有可用渠道。余额未变化。源码 `middleware/distributor.go` 要求任务插件与渠道类型/显式绑定相符；AistarsLab 插件没有 type=1 绑定，不能靠换镜像自动延续旧选渠。需针对实际供应商接口评审渠道插件绑定及类型迁移，并在测试站复验。
+2. **正式新增模型没有候选用量定义。** 正式当前 35 个 Video 模型中，`seedance-480p-c49`、`seedance-480p-fast-c49` 不在候选插件声明中。按正式 `/api/pricing` 的价格和按秒/按次单位生成只读迁移预览，整批及这两个模型逐项均返回 **400 / has no task plugin usage schema**。旧 2026-09-18 的 34 模型静态清单已不能作为当前正式迁移输入，必须按最新正式集合生成并验证，不得直接套用旧价格文件或测试站配置。
+
+### 已通过及验证边界
+
+| 检查 | 本轮证据 |
+| --- | --- |
+| 后端与前端 | `go test -count=1 ./...` 通过；relaykit 的 `GOWORK=off go test -count=1 ./...`、独立 build 通过；controller/service/model/middleware/router/relay 定向 vet 通过。前端 typecheck、170 文件 / 2105 个 Vitest 测试、生产 build 通过。未改源码，不重复此前已通过的调度 Race。 |
+| MySQL 重复启动与完整性 | 临时 OAuth 配置重建及恢复原配置重建后，核心表选定字段和完整列定义哈希均与测试前相同：45 用户、62 令牌、29 充值订单、12 图片记录、82 视频任务。用户钱包字段均为 BIGINT。覆盖当前已升级 MySQL 的重复启动，不声称本轮重新完成正式旧库首次迁移或三库完整矩阵。 |
+| Epay HTTP 通知 | 隔离测试库临时订单，16 次并发有效签名通知均正常响应，只入账一次、增加 3,385,000 quota，仅一条充值日志；无效签名和错误支付供应商订单均拒绝且不加余额。未创建真实付款订单，也未由外部支付平台发起通知。支付渠道 type 的变化与跨供应商订单混用不同，旧逻辑允许同一 Epay 订单记录平台返回的实际支付方式。 |
+| OAuth | 临时独立 Canvas/Video 客户端经测试站 HTTPS 授权302、换码200；错误PKCE、重复兑换及错误回调地址400。Canvas能力为image/video/text/audio，Video为video。未访问正式客户端回调，也未验证真实浏览器应用回跳；后续重复授权测试触发现有429限流，未清除限流器。 |
+| 视频完整链路 | 使用匹配 Sora 插件的临时 type=55 渠道和受控模拟上游，真实 HTTP 提交→后台轮询→终态持久化。成功4秒视频用户和Token各扣20,000 quota；失败视频退款后两者净扣费0；重复读取不重复结算。仅两次模拟上游提交，无真实付费供应商调用。不能据此宣称正式旧 type=1 Seedance 渠道兼容。 |
+| 历史视频与图片读取 | 既有成功/失败视频均HTTP200，状态completed/failed。受控临时图片归档行引用既有PNG，签名读取200、篡改401、nosniff正确。测试库既有SUCCESS记录指向的文件缺失，而旧PNG归档行已过期，因此没有将本次签名测试误报成既有归档数据完全一致；既有媒体文件未改动。 |
+| 清理与健康 | 临时用户、Token、授权码、会话、订单、日志、视频任务、渠道/ability、图片记录、用量统计和夹具缓存清理；测试定价恢复，管理审计保留。runtime.env及compose与备份逐字节一致。38991无监听，测试公网status200、healthy、restart=0。正式digest及启动时间 `2026-09-15T03:24:47.586858135Z` 未变化，healthy、restart=0。 |
+
+证据：服务器 `verification/release-gate-20260922/final-report.json` 的 `release_ready=false`；同目录含视频路由、价格预览、支付、模拟视频、历史视频、签名图片和重启完整性报告。本地脱敏汇总位于 `~/.local/share/new-api-github-main/release-gate-20260922/final-report.json`。
+
+下一步先补齐当前正式模型的插件支持，准备渠道绑定和保持原单价/单位的价格迁移，再在测试站按正式配置重验。通过后才能完成具体生产变更和回滚方案，并按用户要求询问是否同步正式站。正式授权仍未获得。本次保持MySQL；SQLite/PostgreSQL矩阵不作为仅MySQL发布的直接前置条件。
+
+以下为历史验收记录，其中旧版本、180秒超时建议及“源码未冻结”等结论不代表当前候选状态；当前默认总时限600秒、首字节90秒、最小重试剩余5秒。
+
+## parity10 本地上线前验收（2026-09-19）
 
 结论：本地功能、生产模式后台运行、Linux ARM64 容器、反向代理和小规模并发回归均通过，未发现新的应用功能失败；尚不能直接放行正式上线。剩余门槛是源码冻结、真实外部服务联调及正式变更授权。本轮没有修改业务源码或正式服务。
 
