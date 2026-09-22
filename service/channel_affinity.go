@@ -741,7 +741,7 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 		}
 	}
 	if c != nil && c.Request != nil && UsesChannelHealth(c, c.Request.URL.Path) {
-		if c.Request.Context().Err() != nil {
+		if c.Request.Context().Err() != nil && !RequestPolicy(c).Successful {
 			return
 		}
 		channel, err := model.CacheGetChannel(channelID)

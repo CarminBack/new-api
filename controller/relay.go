@@ -231,17 +231,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			service.MarkRequestPolicySuccess(c, relayInfo.StreamStatus)
 			if managedHealth {
-				if c.Request.Context().Err() != nil {
+				if c.Request.Context().Err() != nil && !service.RequestPolicy(c).Successful {
 					service.ReleaseCurrentChannelHealthReservation(c)
-				} else if relayInfo.StreamStatus == nil || relayInfo.StreamStatus.IsNormalEnd() && !relayInfo.StreamStatus.HasErrors() {
+				} else if service.RequestPolicy(c).Successful {
 					service.RecordTextChannelLatency(c, relayInfo, channel.Id)
 					service.RecordChannelCircuitSuccess(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path)
 				} else {
 					service.RecordChannelCircuitFailure(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path, service.ChannelFailureUncertain)
 				}
 			}
-			service.MarkRequestPolicySuccess(c, relayInfo.StreamStatus)
 			relayInfo.LastError = nil
 			return
 		}

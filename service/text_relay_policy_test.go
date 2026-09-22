@@ -92,7 +92,9 @@ func TestTextRelayCompletionRecordsAffinityButCancellationDoesNot(t *testing.T) 
 			} else if outcome == "client_cancel" {
 				cancelParent()
 			}
-			// Controller defers finish; distributor writes affinity after c.Next().
+			if outcome == "success" {
+				MarkRequestPolicySuccess(c, nil)
+			}
 			finish()
 			RecordChannelAffinity(c, high.Id)
 			cached, found, err := getChannelAffinityCache().Get(key)
