@@ -1366,7 +1366,7 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 	if channelID <= 0 {
 		return
 	}
-	if IsTextRelayRequest(c) && c.Request.Context().Err() != nil {
+	if IsTextRelayRequest(c) && c.Request.Context().Err() != nil && !RequestPolicy(c).Successful {
 		ReleaseCurrentChannelHealthReservation(c)
 		return
 	}

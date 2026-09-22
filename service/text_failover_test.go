@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +58,42 @@ func failoverChannels(t *testing.T) (*model.Channel, *model.Channel) {
 		channels = append(channels, channel)
 	}
 	return channels[0], channels[1]
+}
+
+func TestTextCompletedResponseCountsRecoveryAfterClientCloses(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		t.Run(fmt.Sprint(completed), func(t *testing.T) {
+			now := setupChannelHealthTest(t)
+			high, _ := failoverChannels(t)
+			identity := buildChannelHealthIdentity(high, 0, "gpt-test", "/v1/responses", *now)
+			shard := channelHealthShardFor(identity.RouteKey)
+			shard.Lock()
+			state := getRouteHealthStateLocked(shard, identity, *now)
+			startRouteRecoveryLocked(state, *now)
+			shard.Unlock()
+			for range 3 {
+				c := failoverContext()
+				ctx, cancel := context.WithCancel(c.Request.Context())
+				c.Request = c.Request.WithContext(ctx)
+				require.True(t, AllowChannelHealthAttempt(c, high, "gpt-test", "/v1/responses"))
+				if completed {
+					MarkRequestPolicySuccess(c, nil)
+				}
+				cancel()
+				*now = now.Add(5 * time.Second)
+				RecordChannelCircuitSuccess(c, high.Id, "gpt-test", "/v1/responses")
+			}
+			shard.Lock()
+			capacity, inFlight := state.Capacity, state.InFlight
+			shard.Unlock()
+			require.Zero(t, inFlight)
+			if completed {
+				require.Equal(t, 2, capacity)
+			} else {
+				require.Equal(t, 1, capacity)
+			}
+		})
+	}
 }
 
 func TestTextFailoverSuspectRouteYieldsBeforeCircuitOpens(t *testing.T) {
