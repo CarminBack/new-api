@@ -1114,6 +1114,15 @@ func (channel *Channel) GetHeaderOverride() map[string]any {
 	return headerOverride
 }
 
+func GetChannelHealthMetadata() ([]*Channel, error) {
+	var channels []*Channel
+	err := DB.
+		Select("id", "type", "name", "status", "test_model", "other_info", "channel_info").
+		Order("id asc").
+		Find(&channels).Error
+	return channels, err
+}
+
 func GetChannelsByIds(ids []int) ([]*Channel, error) {
 	var channels []*Channel
 	err := DB.Where("id in (?)", ids).Find(&channels).Error

@@ -231,8 +231,45 @@ func selectHealthyChannel(param *RetryParam, group string, retry int) (*model.Ch
 	if managed {
 		retry = 0
 	}
+	// On failover prefer another upstream host, while preserving priority and
+	// weight within that pool. Host identity is never an eligibility override.
+	filters := GetChannelConstraints(param.Ctx).Filters
+	var sameDomain map[int]struct{}
+	if managed && IsTextRelayRequest(param.Ctx) && param.Ctx.GetBool("text_first_failover_checked") {
+		failed, _ := model.CacheGetChannel(param.Ctx.GetInt("channel_id"))
+		domain := channelFaultDomain(failed)
+		candidates := model.GetSatisfiedChannels(group, param.ModelName, filters)
+		hasIndependent := false
+		for _, candidate := range candidates {
+			if candidate.Id != param.Ctx.GetInt("channel_id") && domain != "" && channelFaultDomain(candidate) != "" && channelFaultDomain(candidate) != domain &&
+				IsChannelPriorityAffinityReady(candidate, param.ModelName, param.RequestPath) {
+				hasIndependent = true
+				break
+			}
+		}
+		excluded := make(map[int]struct{})
+		sameDomain = make(map[int]struct{})
+		for _, candidate := range candidates {
+			if hasIndependent && channelFaultDomain(candidate) == domain {
+				sameDomain[candidate.Id] = struct{}{}
+			}
+			if param.Ctx.GetBool("text_first_failover_reserved") && !IsChannelPriorityAffinityReady(candidate, param.ModelName, param.RequestPath) {
+				excluded[candidate.Id] = struct{}{}
+			}
+		}
+		filters = append(append([]dto.ChannelFilter(nil), filters...),
+			dto.ChannelFilter{Kind: dto.FilterExcludedChannels, ExcludedChannelIDs: excluded},
+			dto.ChannelFilter{Kind: dto.FilterExcludedChannels, ExcludedChannelIDs: sameDomain})
+		param.Ctx.Set("text_first_failover_reserved", false)
+	}
 	for {
-		channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, retry, GetChannelConstraints(param.Ctx).Filters, factor)
+		channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, retry, filters, factor)
+		if err == nil && channel == nil && len(sameDomain) > 0 {
+			// An independent candidate can become full between checking and
+			// reserving. Keep eligible same-host alternatives as a fallback.
+			clear(sameDomain)
+			continue
+		}
 		if err != nil || channel == nil || !managed {
 			return channel, err
 		}
@@ -240,6 +277,8 @@ func selectHealthyChannel(param *RetryParam, group string, retry int) (*model.Ch
 			return channel, nil
 		}
 		ExcludeChannelForRequest(param.Ctx, channel.Id)
+		// Keep the local filter list in sync even if exclusion created a new filter.
+		filters = append(filters, dto.ChannelFilter{Kind: dto.FilterExcludedChannels, ExcludedChannelIDs: map[int]struct{}{channel.Id: {}}})
 	}
 }
 
@@ -326,7 +365,7 @@ func highestHealthyPriority(c *gin.Context, group, modelName string, filters []d
 		if candidate == nil || candidate.Status != common.ChannelStatusEnabled {
 			continue
 		}
-		if UsesChannelHealth(c, requestPath) && !IsChannelHealthAvailable(candidate, modelName, requestPath) {
+		if UsesChannelHealth(c, requestPath) && !IsChannelPriorityAffinityReady(candidate, modelName, requestPath) {
 			continue
 		}
 		return candidate.GetPriority(), true
@@ -343,6 +382,8 @@ func preferredAffinitySuperseded(c *gin.Context, preferred *model.Channel, model
 }
 
 func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam) (*model.Channel, string, *ChannelSelectError) {
+	// Canary affinity protection belongs to one attempt, not the entire retry chain.
+	c.Set(textRecoveryCanaryKey, false)
 	constraints := GetChannelConstraints(c)
 	if pin, found, overridden := constraints.ResolvedPin(); found {
 		for _, lost := range overridden {
@@ -414,6 +455,14 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 		}
 	}
 
+	if channel != nil && RequestPolicy(c).SessionMode != "strict" && UsesChannelHealth(c, retry.RequestPath) && IsTextRelayRequest(c) {
+		for _, candidate := range model.GetSatisfiedChannels(selectGroup, modelName, constraints.Filters) {
+			if candidate.GetPriority() > channel.GetPriority() && reserveRecoveryCanary(c, candidate, modelName, retry.RequestPath) {
+				channel = candidate
+				break
+			}
+		}
+	}
 	if channel != nil && !EnsureChannelHealthReservation(c, channel, modelName, retry.RequestPath) {
 		if RequestPolicy(c).SessionMode == "strict" {
 			return nil, "", &ChannelSelectError{StatusCode: http.StatusServiceUnavailable, Message: "strict_session_binding_unavailable"}

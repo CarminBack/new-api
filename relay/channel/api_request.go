@@ -520,14 +520,25 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	var releaseTextContext func()
+	var firstTextByte func()
 	if service.IsTextRelayRequest(c) {
+		service.CaptureTextRetryAfter(c, nil)
 		ctx, cancel := context.WithCancel(req.Context())
+		var firstResponseTimer *time.Timer
+		if common2.TextFirstResponseTimeout > 0 {
+			firstResponseTimer = time.AfterFunc(time.Duration(common2.TextFirstResponseTimeout)*time.Second, cancel)
+		}
+		firstTextByte = func() {
+			if firstResponseTimer != nil {
+				firstResponseTimer.Stop()
+			}
+		}
 		stop := context.AfterFunc(c.Request.Context(), cancel)
 		if c.Request.Context().Err() != nil {
 			cancel()
 		}
 		req = req.WithContext(ctx)
-		releaseTextContext = func() { stop(); cancel() }
+		releaseTextContext = func() { firstTextByte(); stop(); cancel() }
 		defer func() {
 			if releaseTextContext != nil {
 				releaseTextContext()
@@ -581,6 +592,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	resp, err := relayClient.Do(req)
 	if resp != nil {
 		timing.ResponseHeaders(resp.Header)
+		if releaseTextContext != nil {
+			service.CaptureTextRetryAfter(c, resp.Header)
+		}
 	}
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
@@ -606,7 +620,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 
 	if releaseTextContext != nil {
-		resp.Body = &textRelayResponseBody{ReadCloser: resp.Body, release: releaseTextContext}
+		resp.Body = &textRelayResponseBody{ReadCloser: resp.Body, release: releaseTextContext, firstByte: firstTextByte}
 		releaseTextContext = nil
 	}
 	if req.Body != nil {

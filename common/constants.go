@@ -166,6 +166,10 @@ var BatchUpdateInterval int
 var RelayTimeout int // unit is second
 
 var TextRelayTimeout int
+
+// TextFirstResponseTimeout bounds each text attempt until the first response body byte.
+// It does not limit the duration of a stream once output has begun.
+var TextFirstResponseTimeout = 90
 var TextAdaptiveRoutingEnabled bool
 var TextSlowFirstContentSeconds = 15
 var LocalVerificationMode bool

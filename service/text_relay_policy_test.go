@@ -27,6 +27,15 @@ func TestTextRelayPolicyExcludesImagesAndHostedTools(t *testing.T) {
 		{"image tool", "/v1/responses", `{"tools":[{"type":"image_generation"}]}`, "default", false},
 		{"hosted tool", "/v1/responses", `{"tools":[{"type":"mcp"}]}`, "default", false},
 		{"background", "/v1/responses", `{"background":true}`, "default", false},
+		{"embeddings", "/v1/embeddings", `{"input":"hello"}`, "default", true},
+		{"compact", "/v1/responses/compact", `{"input":[]}`, "default", true},
+		{"gemini invalid tools", "/v1beta/models/gemini-test:generateContent", `{"tools":{}}`, "default", false},
+		{"gemini invalid modality", "/v1beta/models/gemini-test:generateContent", `{"generationConfig":{"responseModalities":"IMAGE"}}`, "default", false},
+		{"gemini native", "/v1beta/models/gemini-test:generateContent", `{}`, "default", true},
+		{"gemini stream", "/v1beta/models/gemini-test:streamGenerateContent", `{"generationConfig":{"responseModalities":["TEXT"]}}`, "default", true},
+		{"gemini image", "/v1beta/models/gemini-test:generateContent", `{"generationConfig":{"responseModalities":["TEXT","IMAGE"]}}`, "default", false},
+		{"gemini hosted tool", "/v1beta/models/gemini-test:generateContent", `{"tools":[{"googleSearch":{}}]}`, "default", false},
+		{"gemini function", "/v1beta/models/gemini-test:generateContent", `{"tools":[{"functionDeclarations":[{"name":"lookup"}]}]}`, "default", true},
 		{"malformed", "/v1/responses", `broken`, "default", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

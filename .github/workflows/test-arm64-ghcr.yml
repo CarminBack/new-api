@@ -36,7 +36,8 @@ jobs:
           context: .
           platforms: linux/arm64
           push: true
-          tags: ghcr.io/carminback/new-api:test-parity11-image-endpoint-guard-20260921
+          tags: ghcr.io/carminback/new-api:test-token-failover-20260922
+          labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
@@ -47,7 +48,7 @@ jobs:
           {
             echo '### Isolated test image'
             echo '```'
-            echo 'ghcr.io/carminback/new-api:test-parity11-image-endpoint-guard-20260921'
+            echo 'ghcr.io/carminback/new-api:test-token-failover-20260922'
             echo '${{ steps.build.outputs.digest }}'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

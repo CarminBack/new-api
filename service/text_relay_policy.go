@@ -37,9 +37,11 @@ func IsTextRelayRequest(c *gin.Context) bool {
 	eligible := false
 	defer func() { c.Set(textRelayEligibilityKey, eligible) }()
 	switch strings.TrimSuffix(c.Request.URL.Path, "/") {
-	case "/v1/chat/completions", "/v1/completions", "/v1/messages", "/v1/responses":
+	case "/v1/chat/completions", "/v1/completions", "/v1/messages", "/v1/responses", "/v1/responses/compact", "/v1/embeddings", "/v1/rerank", "/rerank":
 	default:
-		return false
+		if !IsGeminiTextPath(c.Request.URL.Path) {
+			return false
+		}
 	}
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
@@ -52,6 +54,37 @@ func IsTextRelayRequest(c *gin.Context) bool {
 	root := gjson.ParseBytes(body)
 	if !root.IsObject() {
 		return false
+	}
+	if IsGeminiTextPath(c.Request.URL.Path) {
+		// Native Gemini images and hosted tools must keep their media semantics.
+		geminiModalities := root.Get("generationConfig.responseModalities")
+		if geminiModalities.Exists() && !geminiModalities.IsArray() {
+			return false
+		}
+		for _, modality := range geminiModalities.Array() {
+			if !strings.EqualFold(modality.String(), "text") {
+				return false
+			}
+		}
+		if root.Get("generationConfig.imageConfig").Exists() {
+			return false
+		}
+		geminiTools := root.Get("tools")
+		if geminiTools.Exists() && geminiTools.Type != gjson.Null && !geminiTools.IsArray() {
+			return false
+		}
+		for _, tool := range geminiTools.Array() {
+			if !tool.IsObject() {
+				return false
+			}
+			for key := range tool.Map() {
+				if key != "functionDeclarations" {
+					return false
+				}
+			}
+		}
+		eligible = true
+		return true
 	}
 	modalities := root.Get("modalities")
 	if modalities.Exists() {

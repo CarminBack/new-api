@@ -106,6 +106,11 @@ type channelRouteHealthState struct {
 	ProbeFailures          int
 	CapacityBeforeOpen     int
 	RateLimitSince         time.Time
+	CooldownUntil          time.Time
+	RateLimitStreak        int
+	TrialNextAt            time.Time
+	AffinityReadyAt        time.Time
+	AffinityTrials         uint64
 	LastFailureClass       ChannelFailureClass
 	LastFailureReason      string
 	LastFailureStatusCode  int
@@ -503,6 +508,9 @@ func shouldScheduleChannelProbeLocked(state *channelRouteHealthState, now time.T
 }
 
 func ChannelHealthProbeSupportsPath(requestPath string) bool {
+	if IsGeminiTextPath(requestPath) {
+		return true
+	}
 	switch requestPath {
 	case "/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/responses/compact",
 		"/v1/messages", "/v1/embeddings", "/v1/images/generations", "/v1/images/edits",
@@ -630,7 +638,10 @@ func IsChannelHealthAvailable(channel *model.Channel, modelName string, requestP
 	shard.Lock()
 	defer shard.Unlock()
 	state := getRouteHealthStateLocked(shard, identity, now)
-	return state.OpenUntil.IsZero() && (state.Capacity <= 0 || state.InFlight < state.Capacity)
+	textSuspect := state.Suspect && !identity.ImageGroup && !isImageGenerationPath(requestPath)
+	return state.OpenUntil.IsZero() && !now.Before(state.CooldownUntil) &&
+		(!textSuspect || (!state.ProbeInFlight && state.InFlight == 0 && !now.Before(state.TrialNextAt))) &&
+		(state.Capacity <= 0 || state.InFlight < state.Capacity)
 }
 
 // IsChannelHealthCircuitClosed ignores transient capacity saturation and only
@@ -667,7 +678,7 @@ func IsChannelPriorityAffinityReady(channel *model.Channel, modelName string, re
 	shard.Lock()
 	defer shard.Unlock()
 	state := getRouteHealthStateLocked(shard, identity, now)
-	return state.RecoveryTargetCapacity == 0
+	return state.RecoveryTargetCapacity == 0 && !state.Suspect && !now.Before(state.AffinityReadyAt)
 }
 
 func IsChannelPriorityAffinityReadyForID(channelID int, modelName string, requestPath string) bool {
@@ -1150,7 +1161,9 @@ func allowChannelHealthAttempt(c *gin.Context, channel *model.Channel, channelID
 	shard := channelHealthShardFor(identity.RouteKey)
 	shard.Lock()
 	state := getRouteHealthStateLocked(shard, identity, now)
-	if !state.OpenUntil.IsZero() {
+	textSuspect := state.Suspect && !identity.ImageGroup && !isImageGenerationPath(requestPath)
+	if !state.OpenUntil.IsZero() || now.Before(state.CooldownUntil) ||
+		(textSuspect && (state.ProbeInFlight || state.InFlight > 0 || now.Before(state.TrialNextAt))) {
 		shard.Unlock()
 		return false
 	}
@@ -1159,6 +1172,9 @@ func allowChannelHealthAttempt(c *gin.Context, channel *model.Channel, channelID
 		return false
 	}
 	state.InFlight++
+	if textSuspect {
+		state.TrialNextAt = now.Add(5 * time.Second)
+	}
 	stage := state.LastRecoveryAt
 	shard.Unlock()
 	if c != nil {
@@ -1270,6 +1286,35 @@ func recordChannelCircuitFailure(c *gin.Context, channelID int, modelName string
 		}
 		state.FailuresSinceSuccess++
 	}
+	// Early isolation is temporary; only a verification probe opens the circuit.
+	if IsTextRelayRequest(c) {
+		if aggregateEligible && !state.AffinityReadyAt.IsZero() {
+			state.AffinityReadyAt = now.Add(30 * time.Second)
+		}
+		if class == ChannelFailureRateLimited {
+			state.RateLimitStreak = min(state.RateLimitStreak+1, 6)
+			cooldown := time.Second * time.Duration(1<<state.RateLimitStreak)
+			if hint, ok := c.Get(textRetryAfterKey); ok {
+				if duration, ok := hint.(time.Duration); ok && duration > cooldown {
+					cooldown = duration
+				}
+			}
+			if until := now.Add(min(cooldown, 2*time.Minute)); until.After(state.CooldownUntil) {
+				state.CooldownUntil = until
+			}
+		}
+		if (class == ChannelFailureTransient || class == ChannelFailureUncertain) &&
+			state.FailuresSinceSuccess >= 3 && now.Sub(previousFailureAt) <= 30*time.Second &&
+			state.OpenUntil.IsZero() && !state.Suspect && state.RecoveryTargetCapacity == 0 {
+			state.Suspect = true
+			state.TrialNextAt = now.Add(5 * time.Second)
+			state.ProbeDue = now
+			state.ProbeType = ChannelHealthProbeTypeInitial
+			state.ProbeTriggerClass = class
+			persistRouteHealthStateLocked(identity, state, persistentChannelHealthSuspect)
+			suspected = true
+		}
+	}
 	if state.RecoveryTargetCapacity > 0 && aggregateEligible {
 		state.CapacityBeforeOpen = state.RecoveryTargetCapacity
 		state.Suspect = false
@@ -1350,6 +1395,8 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 	}
 	recordRouteHealthSuccessLocked(state, now)
 	state.LastSuccessAt = now
+	state.RateLimitStreak = 0
+	// A late success must not cancel Retry-After from a newer concurrent request.
 	state.NoSuccessFailureAt = time.Time{}
 	state.FailuresSinceSuccess = 0
 	state.ProbeFailures = 0
@@ -1395,6 +1442,7 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 		if state.Capacity >= state.RecoveryTargetCapacity {
 			state.RecoveryTargetCapacity = 0
 			state.RecoverySuccesses = 0
+			state.AffinityReadyAt = now.Add(30 * time.Second)
 		}
 	} else if !recovered {
 		increaseRouteCapacityLocked(state)

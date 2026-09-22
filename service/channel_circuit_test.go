@@ -344,6 +344,10 @@ func TestTerminalRequestErrorsNeverScheduleHealthProbe(t *testing.T) {
 
 func TestLateProbeResultFailsTripleValidationAfterRealSuccess(t *testing.T) {
 	now := setupChannelHealthTest(t)
+	// The successful request was already in flight before the route became
+	// suspect. New traffic is now throttled while verification is running.
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-test", "/v1/responses"))
 	for i := 0; i < channelHealthSuspectMinimumSamples-1; i++ {
 		recordLegacyRouteOutcome(t, 37, "gpt-test", "/v1/responses", ChannelFailureTransient)
 	}
@@ -356,8 +360,6 @@ func TestLateProbeResultFailsTripleValidationAfterRealSuccess(t *testing.T) {
 	require.NotZero(t, target.ProbeID)
 	require.Equal(t, ChannelHealthProbeTypeInitial, target.ProbeType)
 
-	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-test", "/v1/responses"))
 	RecordChannelCircuitSuccess(ctx, 37, "gpt-test", "/v1/responses")
 	CompleteChannelHealthProbe(target, ChannelHealthProbeResult{Class: ChannelFailureTransient})
 

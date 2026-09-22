@@ -649,7 +649,7 @@ func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context) bool {
 }
 
 func ClearCurrentChannelAffinityCache(c *gin.Context) bool {
-	if c == nil {
+	if c == nil || c.GetBool(textRecoveryCanaryKey) {
 		return false
 	}
 	cacheKey, _, ok := getChannelAffinityContext(c)
@@ -725,7 +725,7 @@ func AppendChannelAffinityAdminInfo(c *gin.Context, other *model.LogOther) {
 }
 
 func RecordChannelAffinity(c *gin.Context, channelID int) {
-	if channelID <= 0 {
+	if channelID <= 0 || (c != nil && c.GetBool(textRecoveryCanaryKey)) {
 		return
 	}
 	setting := operation_setting.GetChannelAffinitySetting()

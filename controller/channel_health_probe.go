@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,6 +54,9 @@ func (channelHealthProbeHandler) Interval() time.Duration { return 15 * time.Sec
 func (channelHealthProbeHandler) NewPayload() any { return nil }
 
 func channelHealthProbeEndpointType(requestPath string) string {
+	if service.IsGeminiTextPath(requestPath) {
+		return string(constant.EndpointTypeGemini)
+	}
 	switch requestPath {
 	case "/v1/responses":
 		return string(constant.EndpointTypeOpenAIResponse)
@@ -161,7 +165,7 @@ func runChannelHealthProbe(ctx context.Context, testUserID int, target service.C
 	}
 
 	probeCtx, cancelProbe := context.WithTimeout(ctx, channelHealthProbeTimeoutForPath(target.RequestPath))
-	result := testChannel(probeCtx, channel, testUserID, target.ModelName, channelHealthProbeEndpointType(target.RequestPath), false)
+	result := testChannel(probeCtx, channel, testUserID, target.ModelName, channelHealthProbeEndpointType(target.RequestPath), service.IsGeminiTextPath(target.RequestPath) && strings.HasSuffix(target.RequestPath, ":streamGenerateContent"))
 	probeTimedOut := errors.Is(probeCtx.Err(), context.DeadlineExceeded)
 	cancelProbe()
 	if ctx.Err() != nil {
