@@ -122,7 +122,17 @@ func PrepareTextRelayContext(c *gin.Context, budget time.Duration) context.Cance
 	if !IsTextRelayRequest(c) || budget <= 0 {
 		return func() {}
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), budget)
+	parent := c.Request.Context()
+	ctx, cancel := context.WithTimeout(parent, budget)
 	c.Request = c.Request.WithContext(ctx)
-	return cancel
+	return func() {
+		completed := ctx.Err() == nil
+		cancel()
+		// Relay owns this deadline. Successful cleanup must not look like a
+		// client cancellation to outer middleware that records affinity.
+		// Preserve a real timeout/cancellation so it still prevents binding.
+		if completed {
+			c.Request = c.Request.WithContext(parent)
+		}
+	}
 }

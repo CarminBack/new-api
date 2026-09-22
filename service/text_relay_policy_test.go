@@ -68,6 +68,45 @@ func TestTextRelayDeadlinePreservesParentAndStopsRetryWithoutHealthPenalty(t *te
 	assert.Equal(t, "text_request_context_done", decision.Reason)
 }
 
+func TestTextRelayCompletionRecordsAffinityButCancellationDoesNot(t *testing.T) {
+	for _, outcome := range []string{"success", "deadline", "client_cancel"} {
+		t.Run(outcome, func(t *testing.T) {
+			setupChannelHealthTest(t)
+			high, _ := failoverChannels(t)
+			c := failoverContext()
+			parent, cancelParent := context.WithCancel(c.Request.Context())
+			defer cancelParent()
+			c.Request = c.Request.WithContext(parent)
+			c.Set("channel_id", high.Id)
+			key := t.Name()
+			setChannelAffinityContext(c, channelAffinityMeta{CacheKey: key, TTLSeconds: 60})
+			t.Cleanup(func() { _, _ = getChannelAffinityCache().DeleteMany([]string{key}) })
+			budget := time.Minute
+			if outcome == "deadline" {
+				budget = time.Nanosecond
+			}
+			finish := PrepareTextRelayContext(c, budget)
+			relayCtx := c.Request.Context()
+			if outcome == "deadline" {
+				<-relayCtx.Done()
+			} else if outcome == "client_cancel" {
+				cancelParent()
+			}
+			// Controller defers finish; distributor writes affinity after c.Next().
+			finish()
+			RecordChannelAffinity(c, high.Id)
+			cached, found, err := getChannelAffinityCache().Get(key)
+			require.NoError(t, err)
+			require.Equal(t, outcome == "success", found)
+			if outcome == "success" {
+				require.Equal(t, high.Id, cached)
+				require.NoError(t, c.Request.Context().Err())
+			}
+			require.Error(t, relayCtx.Err(), "relay deadline resources must be released")
+		})
+	}
+}
+
 func TestTextAdaptiveWeightNeedsSamplesPreservesFloorAndExpires(t *testing.T) {
 	now := setupChannelHealthTest(t)
 	enabled := common.TextAdaptiveRoutingEnabled
