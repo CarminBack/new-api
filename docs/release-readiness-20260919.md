@@ -1,5 +1,18 @@
 # new-api 上线前验收
 
+## 2026-09-22 续验：按正式站接入 AistarsLab 测试渠道
+
+- 只读核对正式渠道17：Base URL `https://api.video.aistarslab.com/openai`，Bearer鉴权，34个去重Seedance别名映射到 `<线路号>:seedance-2.0[-fast]` / `seedance-2.5`，分辨率由公开模型别名及metadata传递；Grok为独立渠道19，不在本轮范围。
+- 测试旧Key读取供应商配置得到业务401，正式当前Key得到code0。已仅在测试渠道17更新为当前Key，凭据不输出。实际供应商 `/openai/v1/models` GET返回200，共40个原始模型条目；没有提交真实付费视频。
+- 当前供应商配置不列出49线路。正式的 `seedance-480p-c49`、`seedance-480p-fast-c49`、`seedance-720p-c49`、`seedance-720p-fast-c49` 均暂不启用，不能仅添加两个插件声明就认定可用。其余30个别名的上游模型和分辨率在当前配置中均存在。
+- 测试渠道17已通过管理API改为type61，绑定 `setting.task_plugin_key=aistarslab`，名称 `AistarsLab-Seedance`，Video分组，保留正式30个模型的映射和各自按秒/按次单价。价格转换为 `tier("base", u("seconds") * price)` 或 `tier("base", u("videos") * price)`，没有应用供应商同步重新定价；重复迁移dry-run变更0。没有修改运行镜像或重启应用。
+- 备份：`/opt/docker/new-api-rc20-test/backups/aistarslab-integration-20260922-a3edd6a8`，compose/runtime.env/渠道配置/逐模型旧价格及40表SQL，gzip/SHA256检查通过。回退时通过管理API恢复渠道17及保存的逐模型配置，并从私有备份恢复旧Key；不覆盖整个测试库。首次PUT误带status被接口拒绝，渠道未变，已先恢复价格并核对健康，再移除status重试成功。
+- HTTP模拟验收：独立临时用户与分组、type61渠道，复用测试渠道17的完整30模型列表/mapping/setting。30模型各提交5秒请求，逐一确认上游映射、分辨率、字符串seconds、n=1及metadata；后台轮询均SUCCESS，另1请求FAILURE退款。用户和Token汇总扣费均79,130,000 quota，逐任务按正式单价/单位一致；重复查询不重复扣费，超长时长400。私网模拟结果URL被下载保护拒绝（502/artifact_request_rejected），未将其误报成视频供应商失败，也不声称公网CDN下载已验收。
+- 历史兼容：原渠道17的platform=1既有成功任务，变更渠道类型后读取仍200/completed。该渠道不存在未完成任务。插件AistarsLab与TaskPricingMigration定向Go测试通过。
+- 清理：临时用户/Token/渠道/任务/日志/用量统计/缓存已清理，额外清理延迟写入的30条夹具统计；既有用户/Token/充值/图片/任务选定字段与schema哈希均与本轮前相同。mock38991已关闭，compose/runtime.env字节未变，测试healthy/公网200，正式原镜像及启动时间不变。
+- 限制：当前插件对c50仍使用旧的较保守限制（如最短5秒，部分输入数量和宽高比更窄）；本轮覆盖文生视频，未完整验证图片/音频/视频参考输入，也未提交真实收费任务或验证公网视频下载。c49去留及外部链路仍未关闭，所以本轮不代表全版本正式发布获准。
+- 证据：`verification/aistarslab-integration-20260922/final-report.json`；本地副本 `~/.local/share/new-api-github-main/aistarslab-integration-20260922/final-report.json`。本轮无需修改插件源码，通过现有任务插件绑定完成当前可列出模型的接入。
+
 ## 2026-09-22 测试站正式升级验收：未通过
 
 本轮只修改隔离测试站；正式站保持只读。候选的支付、OAuth、视频账本和重复启动检查通过，但复制正式视频渠道配置后出现可复现的路由不兼容，且正式现有两个模型无法迁移定价，因此当前不能直接同步正式站，也没有请求正式部署确认。
