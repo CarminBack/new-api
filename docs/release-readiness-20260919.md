@@ -1,5 +1,14 @@
 # new-api 上线前验收
 
+## 2026-09-23 最终候选集中终验：验收通过，未执行正式同步
+
+- GitHub Actions 35751632277 构建并核验 ARM64 OCI 镜像：`ghcr.io/carminback/new-api@sha256:e3fb524fb6ab98f02780917a41ccb32fbe1be563394fdb150f522873a9740238`，源码 revision `33b297783252056ea133ad31b562e0d83a360d38`；测试站已按 digest 运行并 healthy，正式站未修改、未重启。
+- 最低成本真实视频单已在该候选前一运行镜像完成：4 秒 Seedance 视频 HTTP 200 下载、MP4签名有效、用户与Token各扣600,000 quota且重复查询不重复扣费；没有再次提交付费单。最终候选的 AistarsLab c50 HTTP模拟覆盖4秒、2个c50模型、失败退款、超长时长400及清理，报告通过；当前供应商缺失的4个c49仍未启用。
+- 正式数据库37表副本在隔离 internal Docker 网络完成六阶段演练：旧镜像启动、候选首次迁移、候选重复启动、仅镜像回滚、数据库恢复+旧镜像、候选OAuth准备均HTTP 200；核心 users/tokens/top_ups/tasks/image_generations 哈希一致，索引约束语义保留，恢复后schema精确一致。候选镜像与副本报告：`verification/final-release-20260922/migration-report.json`。
+- 使用正式 Canvas 镜像 `ghcr.io/carminback/infinite-canvas:31ba972` 与 Video 镜像 `ghcr.io/carminback/video:sha-0a7f3de` 的隔离容器，连接副本 issuer/数据库，在本地SSH隧道上用Playwright完成真实浏览器OAuth：Canvas、Video均authorize 302、callback 302、客户端会话接口200、HTTP-only会话cookie及authenticated均通过。范围是HTTP隔离环境，不包含正式HTTPS入口；报告：`verification/final-release-20260922/browser-report.json`。
+- 仓库全量 `go test -count=1 ./...`、定向vet、diff检查及最终回归均通过；AistarsLab c50定向测试通过。真实/模拟夹具、OAuth用户和隔离客户端已清理，延迟用量统计复核完成。
+- 结论：测试验收所需项目已通过，但正式同步仍未执行；正式部署需另行确认发布范围（尤其c49四模型暂禁用、亲和prefer迁移及中断/回滚窗口）。
+
 ## 2026-09-22 续验：按正式站接入 AistarsLab 测试渠道
 
 - 只读核对正式渠道17：Base URL `https://api.video.aistarslab.com/openai`，Bearer鉴权，34个去重Seedance别名映射到 `<线路号>:seedance-2.0[-fast]` / `seedance-2.5`，分辨率由公开模型别名及metadata传递；Grok为独立渠道19，不在本轮范围。
