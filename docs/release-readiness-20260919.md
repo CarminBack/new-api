@@ -124,3 +124,48 @@
 - AistarsLab `/v1/models` 鉴权成功；来源渠道 17 的同步 dry-run解析 32 个模型，检测 removed=1、表达式变化33、映射变化0。未 apply、未提交付费视频，避免共享余额影响。
 - 清理后临时实体和媒体文件无残留，核心表哈希、用户/token额度及日志汇总均恢复一致；sandbox 恢复 deny，代理变量清空，3010为200，正式容器启动时间未变且healthy。
 - 仍需：审阅图片像素能力与AistarsLab价格变化、真实支付通知、真实客户端OAuth回跳、视频完整提交/轮询、源码冻结和上线授权。
+
+## 2026-09-23 正式版渠道熔断与切换只读复核
+
+- 复核对象为正式运行 digest `sha256:68f712d0e6856d7394719a141be66b62ec520f309c10e490b3bd75c23074e503`、revision `672f3da30286d790fad4a8c8ed5c603ffadfe888`；容器 healthy、restart 0。本次仅检查源码、容器环境和 options，未修改或重启正式服务。
+- 正式显式配置 `RetryTimes=3`，即普通中继最多初始1次加3次重试；图片最多2次 fallback，任务提交另限最多1次。正式使用内存渠道缓存；自动重试状态码、自动禁用和亲和开关未存覆盖值，沿用该revision默认值。
+- 选渠先处理Codex/Claude会话亲和，再按当前最高优先级、同优先级权重随机；重试通过请求内渠道/多Key排除集合选择最高优先级的未尝试候选。指定渠道不切换，已向客户端输出响应后不切换，视频/MJ/Suno/Jimeng等非幂等路径不自动切换；图片仅在明确安全错误下切换。
+- 熔断按“渠道配置指纹 + 模型 + 请求路径”维护路由状态，并有渠道聚合和多Key状态。普通错误先累计为suspect并由15秒周期主动探测确认，suspect期间仍可接流量；确认后open。标准open/探测退避2分钟，图片从5分钟指数退避至1小时；显式网关凭据错误会把对应Key隔离10分钟。
+- 恢复时标准路由从并发容量1开始，成功后逐步放大至熔断前目标；图片探测成功后直接恢复原容量。suspect/open/probing/recovery_pending持久化到 `channel_health_states` 并在启动时恢复，普通滚动统计和容量仍是单进程内存状态。
+- 正式Codex/Claude规则仍为旧字段 `skip_retry_on_failure=true`，但revision 672的主relay链路没有调用该判断；实际可重试故障仍会清除当前亲和并切换，不能把旧字段解释成严格不切换。这也是候选发布时迁移为显式 `prefer` 而非 `strict` 的依据。
+- 正式版尚无候选版新增的首响应/总时限、最少剩余重试时间、首个fallback独立储备、不同hostname备用优先及并发亲和CAS增强；因此本次说明不能用候选行为反推正式行为。
+
+## 2026-09-23 正式站与测试站 Token 渠道切换、熔断、恢复对照
+
+- 正式站运行 revision `672f3da30286d790fad4a8c8ed5c603ffadfe888`、digest `sha256:68f712d0e6856d7394719a141be66b62ec520f309c10e490b3bd75c23074e503`，`RetryTimes=3`；测试站最终候选运行 revision `33b297783252056ea133ad31b562e0d83a360d38`、digest `sha256:e3fb524fb6ab98f02780917a41ccb32fbe1be563394fdb150f522873a9740238`，`RetryTimes=5`。理论重试次数不等于实际切换次数，仍受错误分类、响应状态、候选数量、容量、总时限和预算约束。
+- 两站基础选渠都按分组/模型/路径/能力/健康/容量、优先级、同优先级权重执行。正式仅有请求级渠道/Key排除和基础亲和；测试候选额外有首次fallback独立预算、不同主机优先、Retry-After冷却、90秒首响应/600秒总时限、5秒最小剩余时间和恢复亲和试流量。
+- 正式单次500/429/连接失败不会立即熔断；允许重试时排除当前渠道并选最高优先级未尝试候选。指定渠道、已实际输出、非幂等任务和不安全图片错误不自动切换；正式图片最多2次安全fallback。正式未解析Retry-After，也没有测试候选的首次fallback独立预算或不同hostname优先。
+- 正式路由健康按渠道配置指纹+模型+路径维护，叠加渠道聚合和多Key状态。持续异常先进入 `suspect`，由约15秒系统任务主动探测；确定性探测失败才进入 `open`。普通Token路由熔断约2分钟，图片探测按5/10/20/40/60分钟退避，上限1小时，多Key明确凭据错误约隔离10分钟。
+- 测试候选安全文本路径在连续至少3次基础设施失败、相邻失败不超过30秒时提前进入 `suspect`，同时保留30秒至少20样本、失败率90%、失败跨度10秒及至少5次失败且连续2分钟无成功的标准/慢故障门。suspect期间每5秒最多放行一个真实试流量，探测在途时暂停新试流量，真实成功可以使迟到探测失效。
+- 测试确认探测失败后进入 `open`；首次切换使用 `first_failover_reserve`，每请求最多一次且无可用健康备用时不消耗，后续切换受2分钟20%普通+5%应急共享预算和最低突发额度限制。备用优先不同Base URL主机，主机不可用时回退同主机健康候选；主机只是故障域近似。
+- 测试429解析Retry-After秒数或HTTP日期，单次最多2分钟；无提示时按模型/路径2/4/8/16/32/64秒递增冷却。普通测试文本总时限默认600秒、每次首响应默认90秒，剩余时间不足5秒不再启动新尝试。短期冷却和稳定等待是进程内状态，不增加数据库字段。
+- 正式恢复从容量1逐步放大到熔断前容量，但没有测试候选的每阶段至少10秒、每阶段3次成功、稳定等待30秒和约10%亲和试流量增强。测试恢复中失败会重新熔断；恢复中约每10次机会提供一次亲和试流量、每秒最多一次，试流量不改变原亲和；渐进恢复完成并稳定约30秒后，`prefer`亲和才正式抢回，`strict`不参与跨渠道试流量。图片探测/真实成功则直接恢复原容量。
+- 测试站故障注入已验证：连续500切备用、探测熔断、恢复容量1→2→4→8→16、恢复中再次失败保留亲和、Retry-After=8冷却、约90秒无响应切备用，报告 `/opt/docker/new-api-rc20-test/verification/token-failover-20260922-r11/report.json` 为 `passed=true`。该验证使用隔离测试站和模拟上游，不等同于真实供应商长期负载验证。
+- 边界：请求内切换、跨请求熔断、会话亲和和数据库自动禁用是四套不同机制；测试站逻辑、亲和迁移、图片价格、视频插件和配置不能在没有正式发布授权的情况下同步到正式站。
+
+## 2026-09-23 测试候选补齐正式版流式输出跟踪（移植第1项，未提交未部署）
+
+- 背景：核对发现测试候选的 `service/` 治理内核是正式 672 的超集，但 8 项 relay 集成层保护未随 parity 移植一起带过来（`maxImageFallbacks`、`relayRetriesRemaining`、`shouldEnforceChannelRetryBudget`、`uncertainRetryUsed`、`taskRetryCount`、`shouldExcludeChannelForRetry`、`hydrateInitialChannel`、`ContextKeyStreamActualOutputStarted` 全部 0 命中）。本次先做风险最高的第 1 项：流式输出跟踪。
+- 问题：测试候选的 `channelResponseStarted()` 只有 `c.Writer.Written()`；gin 的 `Flush()` 会经 `WriteHeaderNow()` 置位 `Written`，而 `ResponseChunkData` 直接 `c.Render` 写出。结果只要 `response.created` 元数据发出过，任何后续失败都被标 `:response_started` 不再切换，把可恢复故障变成不可恢复。
+- 实现：`constant/context_key.go` 新增 `stream_response_tracking`、`stream_downstream_started`、`stream_actual_output_started`；`service/channel_failure.go` 的 `channelResponseStarted()` 在跟踪生效时改读 `stream_actual_output_started`；`relay/helper/common.go` 的 `ResponseChunkData` 改为真实写入并置位标记，新增 `responsesEventHasActualOutput`、`MarkActualStreamOutput`、`IsResponsesTerminalEvent`；`OaiResponsesStreamHandler` 缓存 `response.created/in_progress/queued` 直到真实内容到达再 flush，并在无内容时返回可重试错误；`RelayInfo` 新增 `StreamTerminalEvent`、`StreamUsagePresent`、`StreamDownstreamStarted` 并在 `InitChannelMeta` 重置；chat/Claude/Gemini 转换路径同样开启跟踪并调用 `MarkActualStreamOutput`；`controller/relay.go` deferred 错误路径加入已开始则不追加 JSON 错误体的保护；`service/log_info_generate.go` 补充 `terminal_event`、`usage_present`、`downstream_started`、`sent_event_count` 诊断字段。
+- 关键修正：缓存元数据时必须仍调用 `accumulator.Observe`，否则 `ObserveResponseModel` 与流终态观测丢失（已由 `TestResponseModelHandlersCaptureBeforeConversion` 回归捕获并修复）。
+- 验证：新增三个测试文件（`relay/helper/stream_tracking_test.go`、`relay/channel/openai/stream_tracking_test.go`、`service/channel_failure_stream_test.go`）覆盖元数据不置位、内容置位、缓存顺序、无内容可重试、有内容不重试、terminal 事件无 `[DONE]` 仍正常。全仓库 `go test ./... -count=1` 44 包全通过；目标包定向 `-race`、`go vet`、`git diff --check` 通过。`controller` 偶发的 `TestSecurityAccountDeletionConcurrentRequestsHaveOneWinner` 失败已在未改动代码上复现，属既有 SQLite 并发波动。
+- 状态：仅本地工作树，未提交、未推送、未构建镜像、未部署；测试站和正式站容器、数据库、Redis 均未修改。剩余 6 项集成层保护（图片 fallback 上限与预算豁免、`uncertainRetryUsed`、任务重试上限、`hydrateInitialChannel`、选择性排除、路由尝试记录）待后续逐项补齐。
+
+## 2026-09-23 测试候选补齐全部 relay 集成层保护（本地未提交）
+
+- 背景：在完成流式输出跟踪（第1项）后，继续补齐剩余 6 项正式 672 的 relay 集成层保护。目标是保留测试候选现有正向增强（首次fallback独立预算、90/600秒时限、429冷却、渐进恢复、亲和canary、Redis CAS）的同时，恢复正式版的非幂等与预算边界。
+- 第2项 图片上限：`controller/relay.go` 新增 `maxImageFallbacks = 2` 与 `relayRetriesRemaining()`；图片路径可用重试数被封顶为 2（与 `RetryTimes` 无关），`shouldEnforceChannelRetryBudget()` 对图片路径返回 false，使图片 fallback 不被文本共享预算阻断，且每个请求的首个 fallback 始终放行。
+- 第3项 不确定单次：新增 `allowsUncertainCrossChannelRetry()`（仅 Chat/Completions/Embeddings/Moderations/Rerank/Claude/Responses，且不含 `image_generation` 工具）与请求级 `uncertainRetryUsed`；504/524/流中断最多只能跨渠道重放一次。
+- 第4项 任务上限：`executeTaskSubmissionWith` 新增 `taskRetryCount`，任务提交最多重试 1 次；接入 `shouldEnforceChannelRetryBudget` 与 `AllowChannelRetryFor`。
+- 第5项 渠道补全：`getChannel` 在 `ChannelMeta` 为空时先按 `channel_id` 从缓存补全真实渠道对象，使排除与尝试记录获得完整 `ChannelInfo`（多Key、AutoBan）。
+- 第6项 选择性排除：新增 `shouldExcludeChannelForRetry()`，只对 transient/uncertain/rate_limited/key_capability/pool_account 排除渠道；`terminal` 与 `channel_fatal` 不再被无条件排除。
+- 第7项 路由尝试记录：新增 `service/channel_attempt.go`（`BeginChannelRouteAttempt`/`FinishChannelRouteAttempt`/`FinishSuccessfulChannelRouteAttempt`/`GetChannelRouteAttempts`/`AppendChannelRouteAttemptsAdminInfo`），上限 8 条；主 relay 循环与任务提交循环均接入，`service/log_info_generate.go` 以 admin-only 写入 `route_attempts`（仅渠道ID/状态码/耗时/失败分类/重试决定，不含 Key 或请求体）。
+- 关键修正：首次实现时误把 `relayRetriesRemaining` 当作循环条件，导致 `RetryTimes=0` 时第一轮即退出；已改为仅作为决策函数的“剩余重试数”输入，循环仍由 `RetryTimes` 控制。该回归由既有 `TestResponsesInterruptedStreamHealth` 捕获。
+- 验证：新增 4 个测试文件（`controller/relay_retry_policy_test.go`、`controller/relay_task_retry_cap_test.go`、`service/channel_attempt_test.go`，加上此前的流式测试）。全仓库 `go test ./... -count=1` 44 包全通过；`go vet ./...`、`gofmt -l`、`git diff --check` 均干净；新增代码定向 `-race` 通过。`controller` 偶发的 `TestSecurityAccountDeletionConcurrentRequestsHaveOneWinner` 失败已在未改动代码上复现，属既有 SQLite 并发波动。
+- 状态：仅本地工作树，未提交、未推送、未构建镜像、未部署；测试站与正式站容器、数据库、Redis 均未修改。下一步：确定 `RetryTimes` 使用 3 还是 5，然后在测试站重跑故障注入（重点验证图片止于 2 次、任务止于 1 次、504 只切一次、流式元数据失败仍能切换），通过后再谈正式替换。
