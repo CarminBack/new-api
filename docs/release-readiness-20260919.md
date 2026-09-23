@@ -1,5 +1,18 @@
 # new-api 上线前验收
 
+## 2026-09-23 测试站 relay 保护实测：93e0579f3
+
+- Actions 35875322657 成功；仅替换隔离测试站应用，ARM64/OCI revision 核验为 `93e0579f3d94813724f959b578e668468db90a18`，index digest `sha256:052993474392ee2b00748fb4eb491dcd45a9a395f5fad79e7302b0f393927f9b`。测试站 healthy/restart0，HTTPS `/api/status` 200。
+- 备份：`/opt/docker/new-api-rc20-test/backups/guard-final-20260923T144647Z`，包含 compose、环境文件、测试库 dump；解压 SQL SHA256 `e086a204b87aabb4cb54bca4e9dcbb180f9a5f0c4a7af27d50f645d10fd8bd65`。仅应用镜像回滚使用备份 compose 中旧 digest a80ff9c2；本轮未做配置迁移，不需恢复整个数据库。
+- 实际 HTTP/mock 上游：图片 5 个 429 渠道恰好调用 3 个；Responses metadata-only EOF 切备用并返回 200；实际输出后 EOF 不调用备用；连续空流最多 2 次总尝试并返回 502；管理员 Token 指定渠道空流仅调用该渠道。
+- 两条已输出流按 `fixed(0.002)`、ChatGPT 分组倍率 0.3，各扣 300 quota、各一条消费记录，总计 600；用户、Token、日志一致，失败请求无消费记录。最初断言预期 1000 漏乘分组倍率，保留 report-original.json 并依据实际 GroupRatio 修正报告，未改运行配置。
+- 真实 `/v1/videos` AistarsLab 插件路径：隔离用户分组内 4 个模拟 429 渠道，总提交恰好 2 次，最终 429，任务行 0，用户/Token 扣费 0、预扣全退。初次 fixture token 显式未知 group 被 403 拒绝；修为继承隔离用户分组后验证通过，未涉及真实供应商调用。
+- 清理：本轮及旧 probe 用户 152–157 的 users/tokens/tasks/logs/quota_data 残留均 0；旧 6 个渠道及 5 个模型定价配置已删除；本轮临时定价逐模型经 API 恢复并核对。ModelPrice/ModelRatio/CompletionRatio/CreateCacheRatio/GroupRatio 与首次部署前备份逐值一致。
+- 报告：`/opt/docker/new-api-rc20-test/verification/guard-final-93e0579-fixed-billing/` 下 report.json、cleanup-report.json、residue-report.json；任务报告位于 `guard-final-93e0579-task-r2/report.json`。
+- 正式容器镜像仍 68f712d0 / 672f3da，healthy/restart0、启动 2026-09-15T03:24:47Z，本轮仅只读确认，无正式变更。
+- 范围：上述故障注入通过，不等同所有协议和配置的完整发布认证。strict-session、客户端取消、多协议转换和 auto 跨组的本镜像远端专项仍未覆盖；正式发布仍须配置清单审阅和单独批准。
+
+
 ## 2026-09-23 正式全量副本演练 v2：完成；正式未变更
 
 - 本节取代下方“最新快照未完成”的当前状态描述，旧记录仅为历史。单次只读一致性导出正式37表，包含 **3,822,043条完整历史日志**，未截断历史日志；备份759,827,987字节，gzip/表数及SHA256 `481fbcc8b9db9d68bb13eafe0c3b2689e6a23f714724dc7d4b7edea56c82a80d`核验通过。备份、检查点、脚本和报告保留在 `backups/prod-rehearsal-20260923-v2/`，不再因等待导入而重新导出或删除副本。
