@@ -248,6 +248,7 @@ export const MJ_TASK_TYPE_MAPPINGS: Record<string, StatusMapping> = {
   [MJ_TASK_TYPES.SWAP_FACE]: { label: 'Swap Face', variant: 'purple' },
   [MJ_TASK_TYPES.ZOOM]: { label: 'Zoom', variant: 'green' },
   [MJ_TASK_TYPES.CUSTOM_ZOOM]: { label: 'Custom Zoom', variant: 'green' },
+  IMAGE_GENERATION: { label: 'Image Generation', variant: 'blue' },
 }
 
 /**

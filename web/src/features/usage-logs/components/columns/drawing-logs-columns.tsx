@@ -226,6 +226,21 @@ export function useDrawingLogsColumns(
         },
       },
       {
+        accessorKey: 'prompt_en',
+        header: t('Model'),
+        cell: ({ row }) => {
+          const model = row.original.prompt_en
+          return model ? (
+            <span className='max-w-[180px] truncate font-mono text-xs' title={model}>
+              {model}
+            </span>
+          ) : (
+            <span className='text-muted-foreground/60 text-xs'>-</span>
+          )
+        },
+        size: 180,
+      },
+      {
         accessorKey: 'prompt',
         header: t('Prompt'),
         cell: function PromptCell({ row }) {
