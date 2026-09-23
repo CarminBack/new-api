@@ -1,6 +1,9 @@
 package controller
 
 import (
+	"context"
+	"errors"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,10 +34,10 @@ func TestRelayRetriesRemainingCapsImageFallback(t *testing.T) {
 	require.Equal(t, 1, relayRetriesRemaining("/v1/images/generations", 0, 1))
 }
 
-// The shared retry budget must not gate the first cross-channel fallback, and
-// must never gate image fallback at all.
+// First text fallback must consult the bounded reserve; image fallback uses
+// its independent safety gate.
 func TestShouldEnforceChannelRetryBudget(t *testing.T) {
-	assert.False(t, shouldEnforceChannelRetryBudget("/v1/chat/completions", 0), "the first fallback is always allowed")
+	assert.True(t, shouldEnforceChannelRetryBudget("/v1/chat/completions", 0), "first fallback must consult the reserve")
 	assert.True(t, shouldEnforceChannelRetryBudget("/v1/chat/completions", 1))
 	assert.True(t, shouldEnforceChannelRetryBudget("/v1/chat/completions", 2))
 	assert.False(t, shouldEnforceChannelRetryBudget("/v1/images/generations", 0), "image fallback has its own gate")
@@ -93,6 +96,42 @@ func TestAllowsUncertainCrossChannelRetryGatesImageTool(t *testing.T) {
 	assert.False(t, allowsUncertainCrossChannelRetry(nil, nil))
 }
 
+func TestManagedRetryPreservesStopGuards(t *testing.T) {
+	for _, name := range []string{"skip", "cancel", "committed", "exhausted", "timeout"} {
+		t.Run(name, func(t *testing.T) {
+			c := newRelayPolicyContext(t)
+			apiErr := types.NewOpenAIError(errors.New("empty stream"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+			remaining := 1
+			want := ""
+			switch name {
+			case "skip":
+				apiErr = types.NewErrorWithStatusCode(errors.New("stop"), types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+				want = "non_retryable_error"
+			case "cancel":
+				ctx, cancel := context.WithCancel(c.Request.Context())
+				cancel()
+				c.Request = c.Request.WithContext(ctx)
+				want = "request_context_done"
+			case "committed":
+				_, err := c.Writer.Write([]byte("event: response.created\n\n"))
+				require.NoError(t, err)
+				want = "response_started"
+			case "exhausted":
+				remaining = 0
+				want = "attempt_budget_exhausted"
+			case "timeout":
+				apiErr = types.NewOpenAIError(errors.New("timeout"), types.ErrorCodeBadResponseStatusCode, http.StatusGatewayTimeout)
+				want = "system_retry_exclusion"
+			}
+			got := resolveManagedRetryDecision(c, apiErr, remaining, service.ChannelFailureDecision{
+				Class: service.ChannelFailureUncertain, Reason: "responses_stream_failure", Retry: true,
+			})
+			assert.Equal(t, "stop", got.Action)
+			assert.Equal(t, want, got.Reason)
+		})
+	}
+}
+
 func newRelayPolicyContext(t *testing.T) *gin.Context {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -108,7 +147,8 @@ func TestResolveManagedRetryDecisionTrustsHealth(t *testing.T) {
 	c := newRelayPolicyContext(t)
 
 	// Health says retry; generic says stop. Health wins.
-	got := resolveManagedRetryDecision(c, service.ChannelFailureDecision{
+	apiErr := types.NewOpenAIError(errors.New("empty stream"), types.ErrorCodeBadResponseBody, http.StatusBadGateway)
+	got := resolveManagedRetryDecision(c, apiErr, 1, service.ChannelFailureDecision{
 		Class:  service.ChannelFailureUncertain,
 		Reason: "responses_stream_failure",
 		Retry:  true,
@@ -117,7 +157,7 @@ func TestResolveManagedRetryDecisionTrustsHealth(t *testing.T) {
 	assert.Equal(t, "channel_health", got.Source)
 
 	// Health says stop; the reason is preserved.
-	got = resolveManagedRetryDecision(c, service.ChannelFailureDecision{
+	got = resolveManagedRetryDecision(c, apiErr, 1, service.ChannelFailureDecision{
 		Class:  service.ChannelFailureTerminal,
 		Reason: "deterministic_request",
 		Retry:  false,
@@ -132,7 +172,8 @@ func TestResolveManagedRetryDecisionHonorsHardStops(t *testing.T) {
 	service.GetChannelConstraints(c).AddPin(hostdto.ChannelPin{
 		ChannelId: 1, Source: hostdto.PinSourceToken, Rank: hostdto.PinRankToken, RetryMode: hostdto.PinRetrySingleAttempt,
 	})
-	got := resolveManagedRetryDecision(c, service.ChannelFailureDecision{
+	apiErr := types.NewOpenAIError(errors.New("upstream"), types.ErrorCodeBadResponseStatusCode, http.StatusServiceUnavailable)
+	got := resolveManagedRetryDecision(c, apiErr, 1, service.ChannelFailureDecision{
 		Class: service.ChannelFailureTransient, Reason: "channel_error", Retry: true,
 	})
 	assert.Equal(t, "stop", got.Action)

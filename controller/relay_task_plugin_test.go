@@ -131,6 +131,25 @@ func TestPresentTaskSubmissionUsesHostOpenAIVideoCreateReceipt(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "task_id")
 }
 
+func TestExecuteTaskSubmissionLocalFailureDoesNotReplay(t *testing.T) {
+	previousRetries := common.RetryTimes
+	common.RetryTimes = 5
+	t.Cleanup(func() { common.RetryTimes = previousRetries })
+	events := []string{}
+	billing := &taskSubmissionTestBilling{events: &events}
+	calls := 0
+	outcome, taskErr := executeTaskSubmissionWith(taskSubmissionTestContext(), taskSubmissionRelayInfo(billing),
+		func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+			calls++
+			return nil, &dto.TaskError{LocalError: true, StatusCode: http.StatusInternalServerError, Code: "local_failure"}
+		})
+	require.Nil(t, outcome)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, 1, calls, "local 500 must not submit again")
+	assert.Equal(t, 1, billing.refunds)
+	assert.Equal(t, []string{"refund"}, events, "no persistence or settlement on rejected submission")
+}
+
 func TestExecuteTaskSubmissionRefundsWhenInsertFails(t *testing.T) {
 	events := make([]string, 0, 3)
 	database := setupTaskSubmissionDatabase(t, false, &events)

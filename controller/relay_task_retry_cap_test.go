@@ -54,11 +54,11 @@ func TestDecideTaskRetryClassifiesUpstreamFailures(t *testing.T) {
 			reason:  "attempt_budget_exhausted",
 		},
 		{
-			name:    "local 400 does not retry",
-			taskErr: &taskdto.TaskError{LocalError: true, StatusCode: http.StatusBadRequest},
+			name:    "local 500 does not retry",
+			taskErr: &taskdto.TaskError{LocalError: true, StatusCode: http.StatusInternalServerError},
 			retries: 3,
 			action:  "stop",
-			reason:  "status_not_retryable",
+			reason:  "local_rejection",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

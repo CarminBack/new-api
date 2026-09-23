@@ -190,10 +190,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
-	allowUncertainRetry := allowsUncertainCrossChannelRetry(relayInfo, relayInfo.Request)
+	allowUncertainRetry := service.IsTextRelayRequest(c) && allowsUncertainCrossChannelRetry(relayInfo, relayInfo.Request)
 	uncertainRetryUsed := false
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	for attempt := 0; attempt <= common.RetryTimes; attempt++ {
+		if attempt > 0 {
+			retryParam.IncreaseRetry()
+		}
 		if service.IsTextRelayRequest(c) && c.Request.Context().Err() != nil {
 			newAPIError = types.NewErrorWithStatusCode(c.Request.Context().Err(), types.ErrorCodeDoRequestFailed, http.StatusGatewayTimeout, types.ErrOptionWithSkipRetry())
 			break
@@ -261,7 +264,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		// Image paths are capped by maxImageFallbacks: the remaining count feeds the
 		// decision function, which refuses to retry once it reaches zero.
-		remainingRetries := relayRetriesRemaining(c.Request.URL.Path, retryParam.GetRetry(), common.RetryTimes)
+		remainingRetries := relayRetriesRemaining(c.Request.URL.Path, attempt, common.RetryTimes)
 		decision := service.DecideRelayRetry(c, newAPIError, remainingRetries)
 		if managedHealth {
 			failure := service.DecideChannelFailureForModel(c, newAPIError, relayInfo.OriginModelName, remainingRetries, service.GetChannelConstraints(c).SuppressesRetry(), allowUncertainRetry && !uncertainRetryUsed)
@@ -273,9 +276,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if failure.EvictAffinity && !service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 				service.ClearCurrentChannelAffinityCache(c)
 			}
-			decision = resolveManagedRetryDecision(c, failure)
-			// One cross-channel fallback is always allowed; the shared budget only
-			// gates later attempts and never gates image fallback.
+			decision = resolveManagedRetryDecision(c, newAPIError, remainingRetries, failure)
+			// Text retries use the shared budget, including its bounded first-failover
+			// reserve. Images retain their separate safety gate and fallback cap.
 			if decision.Action == "retry" && shouldEnforceChannelRetryBudget(c.Request.URL.Path, retryParam.GetRetry()) &&
 				!service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, failure.Class, channel.Id) {
 				decision = service.PolicyDecision{Action: "stop", Reason: "shared_retry_budget_exhausted", Source: "channel_health"}
@@ -287,6 +290,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					uncertainRetryUsed = true
 				}
 			}
+			failure.Retry = decision.Action == "retry"
+			failure.Reason = decision.Reason
 			service.FinishChannelRouteAttempt(c, newAPIError.StatusCode, failure)
 		}
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
@@ -522,15 +527,13 @@ func relayRetriesRemaining(path string, retryIndex int, configuredRetries int) i
 	return remaining
 }
 
-// shouldEnforceChannelRetryBudget decides whether the shared retry budget gates
-// this attempt. Image fallback has its own strict safety gate and must not be
-// blocked by the text-channel budget; one cross-channel fallback is always
-// preserved for every request.
-func shouldEnforceChannelRetryBudget(requestPath string, retryIndex int) bool {
+// Images have an independent safety gate; every text fallback must consult
+// the budget so its bounded first-failover reserve cannot be bypassed.
+func shouldEnforceChannelRetryBudget(requestPath string, _ int) bool {
 	if service.IsImageGenerationPath(requestPath) {
 		return false
 	}
-	return retryIndex > 0
+	return true
 }
 
 // shouldExcludeChannelForRetry reports whether the failed channel must be added
@@ -596,12 +599,22 @@ func responsesRequestHasImageGenerationTool(request *dto.OpenAIResponsesRequest)
 	return false
 }
 
-// resolveManagedRetryDecision reconciles the generic retry policy with the
-// channel-health verdict for an upstream attempt. Health is authoritative
-// because it knows the failure class and the image non-idempotency gate, while
-// the generic policy can refuse a safe fallback through the always-skip error
-// codes. Strict-session and pinned-channel remain hard stops.
-func resolveManagedRetryDecision(c *gin.Context, failure service.ChannelFailureDecision) service.PolicyDecision {
+// resolveManagedRetryDecision combines health safety gates with the generic
+// policy. Only the known pre-output Responses interruption gets an exception
+// to the bad-body exclusion; explicit stop conditions remain authoritative.
+func resolveManagedRetryDecision(c *gin.Context, apiErr *types.NewAPIError, remaining int, failure service.ChannelFailureDecision) service.PolicyDecision {
+	if c.Request.Context().Err() != nil {
+		return service.PolicyDecision{Action: "stop", Reason: "request_context_done", Source: "system"}
+	}
+	if c.Writer.Written() {
+		return service.PolicyDecision{Action: "stop", Reason: "response_started", Source: "system"}
+	}
+	if types.IsSkipRetryError(apiErr) {
+		return service.PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}
+	}
+	if remaining <= 0 {
+		return service.PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}
+	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return service.PolicyDecision{Action: "stop", Reason: "strict_session", Source: "session_rule"}
 	}
@@ -610,6 +623,13 @@ func resolveManagedRetryDecision(c *gin.Context, failure service.ChannelFailureD
 	}
 	if !failure.Retry {
 		return service.PolicyDecision{Action: "stop", Reason: failure.Reason, Source: "channel_health"}
+	}
+	generic := service.DecideRelayRetry(c, apiErr, remaining)
+	// Only an uncommitted, interrupted Responses stream may override the
+	// generic bad-body exclusion. Preserve all other generic stop policies.
+	if generic.Action != "retry" && !(generic.Reason == "system_retry_exclusion" &&
+		apiErr.GetErrorCode() == types.ErrorCodeBadResponseBody && failure.Reason == "responses_stream_failure") {
+		return generic
 	}
 	return service.PolicyDecision{Action: "retry", Reason: failure.Reason, Source: "channel_health"}
 }
@@ -1037,6 +1057,8 @@ func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int)
 		stop.Reason = "request_completed"
 	case taskErr.NoRetry:
 		stop.Reason = "task_accepted"
+	case taskErr.LocalError:
+		stop.Reason = "local_rejection"
 	case service.ShouldSkipRetryAfterChannelAffinityFailure(c):
 		stop.Reason, stop.Source = "strict_session", "session_rule"
 		if source := service.RequestPolicy(c).SessionModeSource; source != "" {
@@ -1058,8 +1080,6 @@ func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int)
 	case taskErr.StatusCode == http.StatusBadRequest, taskErr.StatusCode == 408:
 		// azure处理超时不重试
 		stop.Reason = "status_not_retryable"
-	case taskErr.LocalError:
-		stop.Reason = "local_rejection"
 	case taskErr.StatusCode/100 == 2:
 		stop.Reason = "system_retry_exclusion"
 	default:
