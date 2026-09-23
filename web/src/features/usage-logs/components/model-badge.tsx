@@ -42,6 +42,7 @@ interface ModelBadgeProps {
   className?: string
   wrapText?: boolean
   onInspect?: () => void
+  showMapping?: boolean
 }
 
 function ModelBadgeContent(props: ModelBadgeProps & { copyable: boolean }) {
@@ -92,25 +93,27 @@ function ModelBadgeContent(props: ModelBadgeProps & { copyable: boolean }) {
 
 export function ModelBadge(props: ModelBadgeProps) {
   const { t } = useTranslation()
-  const mismatch = isResponseModelMismatch(props.responseModel)
+  const mismatch =
+    props.showMapping !== false && isResponseModelMismatch(props.responseModel)
   const responseModelLabel =
-    mismatch && props.responseModel
+    props.showMapping !== false && mismatch && props.responseModel
       ? t('Response model: {{model}}', {
           model: props.responseModel.returned_model,
         })
       : ''
   const modelLabel = `${t('Model')}: ${props.modelName}${responseModelLabel ? `, ${responseModelLabel}` : ''}`
   const hasDetails =
-    !!props.actualModel ||
-    !!(
-      props.responseModel &&
-      (mismatch ||
-        props.responseModel.returned_model !==
-          props.responseModel.requested_model ||
-        (props.responseModel.upstream_model &&
-          props.responseModel.upstream_model !==
-            props.responseModel.requested_model))
-    )
+    props.showMapping !== false &&
+    (!!props.actualModel ||
+      !!(
+        props.responseModel &&
+        (mismatch ||
+          props.responseModel.returned_model !==
+            props.responseModel.requested_model ||
+          (props.responseModel.upstream_model &&
+            props.responseModel.upstream_model !==
+              props.responseModel.requested_model))
+      ))
 
   if (!hasDetails) {
     if (props.onInspect) {

@@ -150,6 +150,7 @@ export function CommonLogMobileCard<TData>(props: {
               modelName={model.name}
               actualModel={model.actualModel}
               responseModel={model.responseModel}
+              showMapping={false}
               wrapText
               onInspect={() => setSelectedField('model')}
             />
