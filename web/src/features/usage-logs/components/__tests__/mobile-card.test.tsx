@@ -97,7 +97,7 @@ function renderLogs(props: Parameters<typeof Fixture>[0] = {}) {
   )
 }
 
-it('shows model mismatch evidence when tapping the mobile model badge', async () => {
+it('does not show model mapping when tapping the mobile model badge', async () => {
   const user = userEvent.setup()
   renderLogs({
     logs: [
@@ -114,16 +114,9 @@ it('shows model mismatch evidence when tapping the mobile model badge', async ()
     ],
   })
   await user.click(
-    screen.getByRole('button', {
-      name: `Model: ${longName}, Response model: unexpected-model`,
-    })
+    screen.getByRole('button', { name: `Model: ${longName}` })
   )
-  const dialog = await screen.findByRole('dialog', { name: 'Model' })
-  expect(
-    within(dialog).getByText('Response model: unexpected-model')
-  ).toBeVisible()
-  expect(within(dialog).getByText('mapped-model')).toBeVisible()
-  expect(within(dialog).getByText('unexpected-model')).toBeVisible()
+  expect(screen.queryByRole('dialog', { name: 'Model' })).not.toBeInTheDocument()
 })
 
 it('opens long channel text on tap and copies the complete value', async () => {
@@ -296,7 +289,7 @@ it('labels a task whose result was returned in the response as synchronous', () 
   expect(screen.queryByText('Async')).not.toBeInTheDocument()
 })
 
-it('shows mapped model names in full when inspecting a mobile model badge', async () => {
+it('does not show mapped model names when inspecting a mobile model badge', async () => {
   const user = userEvent.setup()
   renderLogs({
     logs: [
@@ -311,13 +304,7 @@ it('shows mapped model names in full when inspecting a mobile model badge', asyn
     ],
   })
   await user.click(screen.getByRole('button', { name: `Model: ${longName}` }))
-  const dialog = await screen.findByRole('dialog', { name: 'Model' })
-  expect(within(dialog).getByText('Actual Model')).toBeVisible()
-  expect(
-    within(dialog).getByText(
-      'provider-production-mapped-model-with-a-long-name'
-    )
-  ).toBeVisible()
+  expect(screen.queryByRole('dialog', { name: 'Model' })).not.toBeInTheDocument()
 })
 
 it('shows loading placeholders without displaying stale log fields', () => {

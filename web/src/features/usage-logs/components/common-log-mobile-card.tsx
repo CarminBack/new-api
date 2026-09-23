@@ -352,10 +352,13 @@ export function CommonLogMobileCard<TData>(props: {
             <p className='bg-muted rounded-lg p-4 text-base [overflow-wrap:anywhere] whitespace-pre-wrap'>
               {activeField.value}
             </p>
-            {selectedField === 'model' && model.responseModel && (
-              <ResponseModelDetails observation={model.responseModel} />
-            )}
             {selectedField === 'model' &&
+              context.sensitiveVisible &&
+              model.responseModel && (
+                <ResponseModelDetails observation={model.responseModel} />
+              )}
+            {selectedField === 'model' &&
+              context.sensitiveVisible &&
               !model.responseModel &&
               model.actualModel && (
                 <div className='space-y-2'>
