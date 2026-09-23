@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -78,6 +79,10 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
+	// Opt this converted stream into confirmed-write tracking as well.
+	common.SetContextKey(c, constant.ContextKeyStreamResponseTracking, true)
+	common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, false)
+	common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, false)
 	streamErr := (*types.NewAPIError)(nil)
 
 	sendEvent := func(event relayconvert.ChatToResponsesStreamEvent) bool {

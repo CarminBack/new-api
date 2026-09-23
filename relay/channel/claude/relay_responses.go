@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -29,6 +30,10 @@ func ClaudeResponsesStreamHandler(c *gin.Context, resp *http.Response, info *rel
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	hostedBridge := relayconvert.NewClaudeHostedStreamBridge()
+	// Opt this converted stream into confirmed-write tracking as well.
+	common.SetContextKey(c, constant.ContextKeyStreamResponseTracking, true)
+	common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, false)
+	common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, false)
 
 	claudeInfo := &ClaudeResponseInfo{
 		ResponseId:   responseID,

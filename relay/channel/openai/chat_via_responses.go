@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -63,6 +64,10 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 
 	info.StreamStatus = relaycommon.NewStreamStatus()
 	info.StreamStatus.RequireTerminal()
+	// Track confirmed SSE writes so a prepared header cannot block a retry.
+	common.SetContextKey(c, constant.ContextKeyStreamResponseTracking, true)
+	common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, false)
+	common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, false)
 	accumulator := relayconvert.NewResponsesBufferedAccumulator()
 	var finalResponse *dto.OpenAIResponsesResponse
 	var streamErr *types.NewAPIError
@@ -212,6 +217,9 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			if len(value.Choices) == 0 && value.Usage == nil {
 				return true
 			}
+			if len(value.Choices) > 0 {
+				helper.MarkActualStreamOutput(c)
+			}
 			if err := helper.ObjectData(c, &value); err != nil {
 				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 				return false
@@ -221,12 +229,16 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			if value == nil || (len(value.Choices) == 0 && value.Usage == nil) {
 				return true
 			}
+			if len(value.Choices) > 0 {
+				helper.MarkActualStreamOutput(c)
+			}
 			if err := helper.ObjectData(c, value); err != nil {
 				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 				return false
 			}
 			return true
 		case dto.ClaudeResponse:
+			helper.MarkActualStreamOutput(c)
 			if err := helper.ClaudeData(c, value); err != nil {
 				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 				return false
@@ -236,14 +248,17 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			if value == nil {
 				return true
 			}
+			helper.MarkActualStreamOutput(c)
 			if err := helper.ClaudeData(c, *value); err != nil {
 				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 				return false
 			}
 			return true
 		case dto.GeminiChatResponse:
+			helper.MarkActualStreamOutput(c)
 			return sendGeminiResponse(&value)
 		case *dto.GeminiChatResponse:
+			helper.MarkActualStreamOutput(c)
 			return sendGeminiResponse(value)
 		default:
 			streamErr = types.NewOpenAIError(fmt.Errorf("unsupported converted stream response type %T", result.Value), types.ErrorCodeBadResponse, http.StatusInternalServerError)

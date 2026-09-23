@@ -92,6 +92,10 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	hostedBridge := relayconvert.NewGeminiHostedStreamBridge()
+	// Opt this converted stream into confirmed-write tracking as well.
+	common.SetContextKey(c, constant.ContextKeyStreamResponseTracking, true)
+	common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, false)
+	common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, false)
 	var streamErr *types.NewAPIError
 
 	sendEvent := func(event relayconvert.ChatToResponsesStreamEvent) bool {

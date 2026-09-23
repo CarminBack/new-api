@@ -127,6 +127,12 @@ type RelayInfo struct {
 	UserQuota           int
 	RelayFormat         types.RelayFormat
 	SendResponseCount   int
+	// StreamTerminalEvent / StreamUsagePresent / StreamDownstreamStarted record
+	// Responses stream progress so retry decisions can tell a prepared HTTP
+	// header apart from content the client has actually received.
+	StreamTerminalEvent     string
+	StreamUsagePresent      bool
+	StreamDownstreamStarted bool
 	// ClaudeToChatStreamState / ChatToGeminiStreamState hold per-attempt
 	// stream converters. InitChannelMeta nils them so a retry cannot resume a
 	// dirty converter (advanced tool index / finalized).
@@ -251,6 +257,9 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	// Per-attempt only. Do not clear StreamStatus, conversion diagnostics,
 	// LastError, or billing accumulators — those are request-scoped.
 	info.SendResponseCount = 0
+	info.StreamTerminalEvent = ""
+	info.StreamUsagePresent = false
+	info.StreamDownstreamStarted = false
 	info.ClaudeToChatStreamState = nil
 	info.ChatToGeminiStreamState = nil
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)

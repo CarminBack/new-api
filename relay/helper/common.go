@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -89,9 +90,62 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
-	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
+	payload := []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", resp.Type, data))
+	n, err := c.Writer.Write(payload)
+	if n > 0 {
+		common.SetContextKey(c, constant.ContextKeyStreamDownstreamStarted, true)
+		if responsesEventHasActualOutput(resp) {
+			common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, true)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("write responses stream data failed: %w", err)
+	}
+	if n != len(payload) {
+		return fmt.Errorf("write responses stream data failed: short write %d/%d", n, len(payload))
+	}
 	return FlushWriter(c)
+}
+
+// responsesEventHasActualOutput distinguishes response metadata from content
+// that may already have caused an upstream side effect. Metadata such as
+// response.created/in_progress is buffered and must remain retryable.
+func responsesEventHasActualOutput(resp dto.ResponsesStreamResponse) bool {
+	switch resp.Type {
+	case "response.output_text.delta",
+		"response.reasoning_summary_text.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.audio_transcript.delta",
+		"response.audio.delta",
+		"response.image_generation_call.partial_image",
+		"response.image_generation_call.completed":
+		return true
+	case dto.ResponsesOutputTypeItemAdded, dto.ResponsesOutputTypeItemDone:
+		return resp.Item != nil && len(resp.Item.Arguments) > 0
+	default:
+		return false
+	}
+}
+
+// MarkActualStreamOutput lets response converters that emit another protocol
+// (chat/Claude/Gemini) preserve the same retry boundary as native Responses.
+func MarkActualStreamOutput(c *gin.Context) {
+	if c != nil {
+		common.SetContextKey(c, constant.ContextKeyStreamActualOutputStarted, true)
+	}
+}
+
+// IsResponsesTerminalEvent reports whether an event ends a Responses stream.
+// A stream that ends without one was cut short upstream.
+func IsResponsesTerminalEvent(eventType string) bool {
+	switch eventType {
+	case "response.completed", "response.done", "response.failed", "response.incomplete",
+		"response.cancelled", "response.canceled", "response.error", "error":
+		return true
+	default:
+		return false
+	}
 }
 
 func StringData(c *gin.Context, str string) error {

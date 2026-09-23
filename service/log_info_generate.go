@@ -99,6 +99,11 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	}
 
 	AppendChannelAffinityAdminInfo(ctx, other)
+	// Route attempts are admin-only diagnostics: channel id, status, duration,
+	// failure class, and retry decision. No keys or bodies are included.
+	if attempts := GetChannelRouteAttempts(ctx, true); len(attempts) > 0 {
+		other.SetAdmin("route_attempts", attempts)
+	}
 	AppendResponsesItemIDCompatibilityAdminInfo(ctx, other)
 	if events := RequestPolicy(ctx).Events(); len(events) > 0 {
 		other.SetAdmin("request_policy", events)
@@ -188,6 +193,15 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other *model.LogOther)
 		}
 		streamInfo["errors"] = messages
 	}
+	// Downstream write progress distinguishes a prepared HTTP header from
+	// content the client actually received, which drives the retry decision.
+	if relayInfo.StreamTerminalEvent != "" || relayInfo.GetFinalRequestRelayFormat() == types.RelayFormatOpenAIResponses {
+		streamInfo["terminal_event"] = relayInfo.StreamTerminalEvent
+		streamInfo["usage_present"] = relayInfo.StreamUsagePresent
+		streamInfo["received_event_count"] = relayInfo.ReceivedResponseCount
+	}
+	streamInfo["downstream_started"] = relayInfo.StreamDownstreamStarted || relayInfo.SendResponseCount > 0
+	streamInfo["sent_event_count"] = relayInfo.SendResponseCount
 	other.SetPublic("stream_status", streamInfo)
 }
 

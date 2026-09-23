@@ -69,6 +69,14 @@ const (
 	ContextKeyLanguage             ContextKey = "language"
 	ContextKeyIsStream             ContextKey = "is_stream"
 	ContextKeyResponseStreamStatus ContextKey = "response_stream_status"
+	// ContextKeyStreamResponseTracking makes retry decisions use confirmed SSE
+	// body writes instead of HTTP headers that may have been prepared upstream.
+	ContextKeyStreamResponseTracking  ContextKey = "stream_response_tracking"
+	ContextKeyStreamDownstreamStarted ContextKey = "stream_downstream_started"
+	// ContextKeyStreamActualOutputStarted is set only after text, tool
+	// arguments, or generated image data has been sent downstream. Responses
+	// metadata events alone must not block a safe channel retry.
+	ContextKeyStreamActualOutputStarted ContextKey = "stream_actual_output_started"
 	// ContextKeyResponsesItemIDCompatibility stores a sanitized summary of an
 	// internal Responses item-ID compatibility retry.
 	ContextKeyResponsesItemIDCompatibility ContextKey = "responses_item_id_compatibility"

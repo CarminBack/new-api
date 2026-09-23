@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -17,6 +18,11 @@ import (
 func channelResponseStarted(c *gin.Context) bool {
 	if c == nil {
 		return false
+	}
+	// Streaming paths that write confirmed SSE bodies opt in to tracking so a
+	// prepared HTTP header alone cannot block a safe channel retry.
+	if _, tracked := common.GetContextKey(c, constant.ContextKeyStreamResponseTracking); tracked {
+		return common.GetContextKeyBool(c, constant.ContextKeyStreamActualOutputStarted)
 	}
 	return c.Writer != nil && c.Writer.Written()
 }

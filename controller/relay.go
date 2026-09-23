@@ -22,6 +22,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
+	dto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -91,6 +92,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			service.RecordRequestPolicyTermination(c, newAPIError)
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			// A stream may have already delivered bytes before the upstream
+			// failure was classified. Appending a JSON error body would corrupt
+			// the SSE protocol; route diagnostics and error logs still record it.
+			streamTracked, _ := common.GetContextKey(c, constant.ContextKeyStreamResponseTracking)
+			responseStarted := c.Writer != nil && c.Writer.Written()
+			if streamTracked != nil {
+				responseStarted = common.GetContextKeyBool(c, constant.ContextKeyStreamActualOutputStarted)
+			}
+			if responseStarted {
+				return
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -178,18 +190,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
+	allowUncertainRetry := allowsUncertainCrossChannelRetry(relayInfo, relayInfo.Request)
+	uncertainRetryUsed := false
 
-	for attempts := 0; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
-		if service.IsTextRelayRequest(c) {
-			if c.Request.Context().Err() != nil {
-				newAPIError = types.NewErrorWithStatusCode(c.Request.Context().Err(), types.ErrorCodeDoRequestFailed, http.StatusGatewayTimeout, types.ErrOptionWithSkipRetry())
-				break
-			}
-			if attempts > common.RetryTimes {
-				break
-			}
+	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		if service.IsTextRelayRequest(c) && c.Request.Context().Err() != nil {
+			newAPIError = types.NewErrorWithStatusCode(c.Request.Context().Err(), types.ErrorCodeDoRequestFailed, http.StatusGatewayTimeout, types.ErrOptionWithSkipRetry())
+			break
 		}
-		attempts++
 		service.ResetPendingGeminiImageGeneration(c)
 		relayInfo.StreamStatus = nil
 		relayInfo.PerformanceBusinessRejection = false
@@ -218,6 +226,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		service.BeginChannelRouteAttempt(c, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex))
 
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
@@ -232,6 +241,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		if newAPIError == nil {
 			service.MarkRequestPolicySuccess(c, relayInfo.StreamStatus)
+			service.FinishSuccessfulChannelRouteAttempt(c)
 			if managedHealth {
 				if c.Request.Context().Err() != nil && !service.RequestPolicy(c).Successful {
 					service.ReleaseCurrentChannelHealthReservation(c)
@@ -249,9 +259,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		// Image paths are capped by maxImageFallbacks: the remaining count feeds the
+		// decision function, which refuses to retry once it reaches zero.
+		remainingRetries := relayRetriesRemaining(c.Request.URL.Path, retryParam.GetRetry(), common.RetryTimes)
+		decision := service.DecideRelayRetry(c, newAPIError, remainingRetries)
 		if managedHealth {
-			failure := service.DecideChannelFailureForModel(c, newAPIError, relayInfo.OriginModelName, common.RetryTimes+1-attempts, service.GetChannelConstraints(c).SuppressesRetry(), service.IsTextRelayRequest(c))
+			failure := service.DecideChannelFailureForModel(c, newAPIError, relayInfo.OriginModelName, remainingRetries, service.GetChannelConstraints(c).SuppressesRetry(), allowUncertainRetry && !uncertainRetryUsed)
 			if failure.CountForCircuit {
 				service.RecordChannelCircuitFailureDecision(c, channel.Id, relayInfo.OriginModelName, c.Request.URL.Path, failure, newAPIError.StatusCode)
 			} else {
@@ -263,12 +276,20 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if !failure.Retry {
 				decision = service.PolicyDecision{Action: "stop", Reason: failure.Reason, Source: "channel_health"}
 			}
-			if decision.Action == "retry" && !service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, failure.Class, channel.Id) {
+			// One cross-channel fallback is always allowed; the shared budget only
+			// gates later attempts and never gates image fallback.
+			if decision.Action == "retry" && shouldEnforceChannelRetryBudget(c.Request.URL.Path, retryParam.GetRetry()) &&
+				!service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, failure.Class, channel.Id) {
 				decision = service.PolicyDecision{Action: "stop", Reason: "shared_retry_budget_exhausted", Source: "channel_health"}
 			}
-			if decision.Action == "retry" {
+			if decision.Action == "retry" && shouldExcludeChannelForRetry(failure.Class) {
 				service.ExcludeChannelForRequest(c, channel.Id)
+				if failure.Class == service.ChannelFailureUncertain {
+					// An uncertain replay is allowed once per request at most.
+					uncertainRetryUsed = true
+				}
 			}
+			service.FinishChannelRouteAttempt(c, newAPIError.StatusCode, failure)
 		}
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
@@ -326,13 +347,23 @@ var upgrader = websocket.Upgrader{
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
 	if info.ChannelMeta == nil {
+		channelID := c.GetInt("channel_id")
+		// Hydrate the initial channel from cache so exclusion and attempt
+		// bookkeeping see the real ChannelInfo (multi-key, auto-ban) instead of a
+		// shell carrying only the pinned identifiers.
+		if channelID > 0 {
+			if cached, err := model.CacheGetChannel(channelID); err == nil && cached != nil {
+				service.RequestPolicy(c).BeginAttempt(cached, info.UsingGroup)
+				return cached, nil
+			}
+		}
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
 		if !autoBan {
 			autoBanInt = 0
 		}
 		channel := &model.Channel{
-			Id:      c.GetInt("channel_id"),
+			Id:      channelID,
 			Type:    c.GetInt("channel_type"),
 			Name:    c.GetString("channel_name"),
 			AutoBan: &autoBanInt,
@@ -475,6 +506,98 @@ func RelayTaskPluginEndpoint(c *gin.Context, fallback gin.HandlerFunc) {
 	}
 }
 
+// maxImageFallbacks bounds how many extra channels an image request may try.
+// Image generation is non-idempotent and billed per image, so it gets a
+// stricter cap than text and must not be multiplied by RetryTimes.
+const maxImageFallbacks = 2
+
+// relayRetriesRemaining reports retries left for this attempt, applying the
+// image-specific cap.
+func relayRetriesRemaining(path string, retryIndex int, configuredRetries int) int {
+	if strings.HasPrefix(path, "/v1/images/") && configuredRetries > maxImageFallbacks {
+		configuredRetries = maxImageFallbacks
+	}
+	remaining := configuredRetries - retryIndex
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+// shouldEnforceChannelRetryBudget decides whether the shared retry budget gates
+// this attempt. Image fallback has its own strict safety gate and must not be
+// blocked by the text-channel budget; one cross-channel fallback is always
+// preserved for every request.
+func shouldEnforceChannelRetryBudget(requestPath string, retryIndex int) bool {
+	if service.IsImageGenerationPath(requestPath) {
+		return false
+	}
+	return retryIndex > 0
+}
+
+// shouldExcludeChannelForRetry reports whether the failed channel must be added
+// to the request-local exclusion set. Terminal errors stay eligible so a
+// transient local rejection does not permanently drop a healthy channel.
+func shouldExcludeChannelForRetry(class service.ChannelFailureClass) bool {
+	switch class {
+	case service.ChannelFailureTransient,
+		service.ChannelFailureUncertain,
+		service.ChannelFailureRateLimited,
+		service.ChannelFailureKeyCapability,
+		service.ChannelFailurePoolAccount:
+		return true
+	default:
+		return false
+	}
+}
+
+// allowsUncertainCrossChannelRetry limits which text shapes may be replayed on
+// another channel after a 504/524/interrupted stream. Hosted image generation
+// tools and non-text modalities are excluded because a replay could duplicate
+// upstream work.
+func allowsUncertainCrossChannelRetry(info *relaycommon.RelayInfo, request any) bool {
+	if info == nil {
+		return false
+	}
+	if info.RelayFormat == types.RelayFormatClaude {
+		return true
+	}
+	switch info.RelayMode {
+	case relayconstant.RelayModeChatCompletions,
+		relayconstant.RelayModeCompletions,
+		relayconstant.RelayModeEmbeddings,
+		relayconstant.RelayModeModerations,
+		relayconstant.RelayModeRerank:
+		return true
+	case relayconstant.RelayModeResponses:
+		responsesRequest, ok := request.(*dto.OpenAIResponsesRequest)
+		if !ok {
+			return false
+		}
+		return !responsesRequestHasImageGenerationTool(responsesRequest)
+	default:
+		return false
+	}
+}
+
+// responsesRequestHasImageGenerationTool reports whether a Responses request
+// asks the upstream to generate images, which must not be replayed.
+func responsesRequestHasImageGenerationTool(request *dto.OpenAIResponsesRequest) bool {
+	if request == nil || len(request.Tools) == 0 {
+		return false
+	}
+	var tools []map[string]any
+	if err := common.Unmarshal(request.Tools, &tools); err != nil {
+		return true
+	}
+	for _, tool := range tools {
+		if common.Interface2String(tool["type"]) == "image_generation" {
+			return true
+		}
+	}
+	return false
+}
+
 func RelayTaskFetch(c *gin.Context) {
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
@@ -569,6 +692,10 @@ func executeTaskSubmissionWith(
 		RequestPath: c.Request.URL.Path,
 		Retry:       common.GetPointer(0),
 	}
+	// taskRetryCount bounds task resubmissions. Task submission is not
+	// idempotent, so an upstream that already created the job must not receive a
+	// second submission just because RetryTimes is larger.
+	taskRetryCount := 0
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		stage = "select_channel"
@@ -611,6 +738,7 @@ func executeTaskSubmissionWith(
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		service.BeginChannelRouteAttempt(c, channel.Id, common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex))
 
 		stage = "submit"
 		result, taskErr = submit(c, relayInfo)
@@ -621,13 +749,30 @@ func executeTaskSubmissionWith(
 		}
 		if taskErr == nil {
 			diagnostics.attemptSucceeded(retryParam.GetRetry()+1, result)
+			service.FinishSuccessfulChannelRouteAttempt(c)
 			break
 		}
 
 		taskAPIError := taskSubmissionAPIError(taskErr)
 		relayInfo.LastError = taskAPIError
-		decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
+		decision := decideTaskRetry(c, taskErr, relayRetriesRemaining(c.Request.URL.Path, retryParam.GetRetry(), common.RetryTimes))
+		if decision.Action == "retry" {
+			if taskRetryCount >= 1 {
+				// At most one extra submission per request.
+				decision = service.PolicyDecision{Action: "stop", Reason: "general_retry_limit", Source: "system"}
+			} else if shouldEnforceChannelRetryBudget(c.Request.URL.Path, retryParam.GetRetry()) &&
+				!service.AllowChannelRetryFor(c, relayInfo.OriginModelName, c.Request.URL.Path, service.ChannelFailureTransient, channel.Id) {
+				decision = service.PolicyDecision{Action: "stop", Reason: "shared_retry_budget_exhausted", Source: "channel_health"}
+			} else {
+				taskRetryCount++
+			}
+		}
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
+		service.FinishChannelRouteAttempt(c, taskErr.StatusCode, service.ChannelFailureDecision{
+			Class:  taskFailureClassForAttempt(decision),
+			Reason: decision.Reason,
+			Retry:  decision.Action == "retry",
+		})
 		if !taskErr.LocalError {
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
@@ -854,6 +999,16 @@ func taskSubmissionAPIError(taskErr *taskdto.TaskError) *types.NewAPIError {
 		err = errors.New(taskErr.Message)
 	}
 	return types.NewOpenAIError(err, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
+}
+
+// taskFailureClassForAttempt maps a task policy decision onto the shared
+// failure class vocabulary used by route-attempt diagnostics. The mapping is
+// diagnostic only: a retried task attempt is transient, a stopped one is not.
+func taskFailureClassForAttempt(decision service.PolicyDecision) service.ChannelFailureClass {
+	if decision.Action == "retry" {
+		return service.ChannelFailureTransient
+	}
+	return service.ChannelFailureTerminal
 }
 
 // decideTaskRetry is the single retry decision for task submissions. The
