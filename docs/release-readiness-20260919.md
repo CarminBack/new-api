@@ -7,7 +7,7 @@
 - 正式数据库37表副本在隔离 internal Docker 网络完成六阶段演练：旧镜像启动、候选首次迁移、候选重复启动、仅镜像回滚、数据库恢复+旧镜像、候选OAuth准备均HTTP 200；核心 users/tokens/top_ups/tasks/image_generations 哈希一致，索引约束语义保留，恢复后schema精确一致。候选镜像与副本报告：`verification/final-release-20260922/migration-report.json`。
 - 使用正式 Canvas 镜像 `ghcr.io/carminback/infinite-canvas:31ba972` 与 Video 镜像 `ghcr.io/carminback/video:sha-0a7f3de` 的隔离容器，连接副本 issuer/数据库，在本地SSH隧道上用Playwright完成真实浏览器OAuth：Canvas、Video均authorize 302、callback 302、客户端会话接口200、HTTP-only会话cookie及authenticated均通过。范围是HTTP隔离环境，不包含正式HTTPS入口；报告：`verification/final-release-20260922/browser-report.json`。
 - 仓库全量 `go test -count=1 ./...`、定向vet、diff检查及最终回归均通过；AistarsLab c50定向测试通过。真实/模拟夹具、OAuth用户和隔离客户端已清理，延迟用量统计复核完成。
-- 结论：测试验收所需项目已通过，但正式同步仍未执行；正式部署需另行确认发布范围（尤其c49四模型暂禁用、亲和prefer迁移及中断/回滚窗口）。
+- 结论：已有隔离副本验收通过，但按用户要求重新建立“最新正式数据”副本时，生产导出在服务器侧耗时过长，随后导入/迁移脚本因大表导入等待未在本次窗口完成；该次副本已停止并清理，未影响正式站。不能把本次最新快照演练记为通过；正式发布仍应以已有已通过副本为依据，并保留最新快照复核项。
 
 ## 2026-09-22 续验：按正式站接入 AistarsLab 测试渠道
 
