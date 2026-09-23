@@ -122,10 +122,15 @@ export function useDrawingLogsColumns(
       accessorKey: 'action',
       header: t('Type'),
       cell: ({ row }) => {
+        const log = row.original
         const action = row.getValue('action') as string
+        const label =
+          action === 'IMAGE_GENERATION' && log.prompt_en
+            ? log.prompt_en
+            : t(mjTaskTypeMapper.getLabel(action))
         return (
           <StatusBadge
-            label={t(mjTaskTypeMapper.getLabel(action))}
+            label={label}
             variant={mjTaskTypeMapper.getVariant(action)}
             icon={getDrawingTypeIcon(action)}
             size='sm'
@@ -224,21 +229,6 @@ export function useDrawingLogsColumns(
             </>
           )
         },
-      },
-      {
-        accessorKey: 'prompt_en',
-        header: t('Model'),
-        cell: ({ row }) => {
-          const model = row.original.prompt_en
-          return model ? (
-            <span className='max-w-[180px] truncate font-mono text-xs' title={model}>
-              {model}
-            </span>
-          ) : (
-            <span className='text-muted-foreground/60 text-xs'>-</span>
-          )
-        },
-        size: 180,
       },
       {
         accessorKey: 'prompt',
