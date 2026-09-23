@@ -273,9 +273,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			if failure.EvictAffinity && !service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 				service.ClearCurrentChannelAffinityCache(c)
 			}
-			if !failure.Retry {
-				decision = service.PolicyDecision{Action: "stop", Reason: failure.Reason, Source: "channel_health"}
-			}
+			decision = resolveManagedRetryDecision(c, failure)
 			// One cross-channel fallback is always allowed; the shared budget only
 			// gates later attempts and never gates image fallback.
 			if decision.Action == "retry" && shouldEnforceChannelRetryBudget(c.Request.URL.Path, retryParam.GetRetry()) &&
@@ -596,6 +594,24 @@ func responsesRequestHasImageGenerationTool(request *dto.OpenAIResponsesRequest)
 		}
 	}
 	return false
+}
+
+// resolveManagedRetryDecision reconciles the generic retry policy with the
+// channel-health verdict for an upstream attempt. Health is authoritative
+// because it knows the failure class and the image non-idempotency gate, while
+// the generic policy can refuse a safe fallback through the always-skip error
+// codes. Strict-session and pinned-channel remain hard stops.
+func resolveManagedRetryDecision(c *gin.Context, failure service.ChannelFailureDecision) service.PolicyDecision {
+	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+		return service.PolicyDecision{Action: "stop", Reason: "strict_session", Source: "session_rule"}
+	}
+	if service.GetChannelConstraints(c).SuppressesRetry() {
+		return service.PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}
+	}
+	if !failure.Retry {
+		return service.PolicyDecision{Action: "stop", Reason: failure.Reason, Source: "channel_health"}
+	}
+	return service.PolicyDecision{Action: "retry", Reason: failure.Reason, Source: "channel_health"}
 }
 
 func RelayTaskFetch(c *gin.Context) {

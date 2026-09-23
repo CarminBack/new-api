@@ -1,8 +1,13 @@
 package controller
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
+	hostdto "github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	dto "github.com/QuantumNous/new-api/relaykit/dto"
@@ -86,4 +91,50 @@ func TestAllowsUncertainCrossChannelRetryGatesImageTool(t *testing.T) {
 	assert.False(t, allowsUncertainCrossChannelRetry(imageInfo, nil))
 
 	assert.False(t, allowsUncertainCrossChannelRetry(nil, nil))
+}
+
+func newRelayPolicyContext(t *testing.T) *gin.Context {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	return c
+}
+
+// Managed paths must follow the health verdict even when the generic policy
+// would refuse: ErrorCodeBadResponseBody is on the always-skip list, but an
+// empty Responses stream before any output is exactly what must fail over.
+func TestResolveManagedRetryDecisionTrustsHealth(t *testing.T) {
+	c := newRelayPolicyContext(t)
+
+	// Health says retry; generic says stop. Health wins.
+	got := resolveManagedRetryDecision(c, service.ChannelFailureDecision{
+		Class:  service.ChannelFailureUncertain,
+		Reason: "responses_stream_failure",
+		Retry:  true,
+	})
+	assert.Equal(t, "retry", got.Action)
+	assert.Equal(t, "channel_health", got.Source)
+
+	// Health says stop; the reason is preserved.
+	got = resolveManagedRetryDecision(c, service.ChannelFailureDecision{
+		Class:  service.ChannelFailureTerminal,
+		Reason: "deterministic_request",
+		Retry:  false,
+	})
+	assert.Equal(t, "stop", got.Action)
+	assert.Equal(t, "deterministic_request", got.Reason)
+}
+
+// Strict sessions and pinned channels stay hard stops regardless of health.
+func TestResolveManagedRetryDecisionHonorsHardStops(t *testing.T) {
+	c := newRelayPolicyContext(t)
+	service.GetChannelConstraints(c).AddPin(hostdto.ChannelPin{
+		ChannelId: 1, Source: hostdto.PinSourceToken, Rank: hostdto.PinRankToken, RetryMode: hostdto.PinRetrySingleAttempt,
+	})
+	got := resolveManagedRetryDecision(c, service.ChannelFailureDecision{
+		Class: service.ChannelFailureTransient, Reason: "channel_error", Retry: true,
+	})
+	assert.Equal(t, "stop", got.Action)
+	assert.Equal(t, "pinned_channel", got.Reason)
 }
