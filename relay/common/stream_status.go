@@ -206,6 +206,16 @@ func (s *StreamStatus) TotalErrorCount() int {
 	return s.ErrorCount
 }
 
+// IsCompletedSuccessfully reports a completed protocol response even when the
+// transport closes immediately afterward. The end reason remains available as
+// a transport diagnostic; errors and failed outcomes still invalidate it.
+func (s *StreamStatus) IsCompletedSuccessfully() bool {
+	if s == nil || s.ResponseOutcome() != string(ResponseOutcomeCompleted) {
+		return false
+	}
+	return !s.HasErrors() && !s.ResponseFailed()
+}
+
 func (s *StreamStatus) IsNormalEnd() bool {
 	if s == nil {
 		return true

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -126,6 +127,17 @@ func TestStreamStatus_HasErrors_NilSafe(t *testing.T) {
 	var s *StreamStatus
 	assert.False(t, s.HasErrors())
 	assert.Equal(t, 0, s.TotalErrorCount())
+}
+
+func TestStreamStatusCompletedTransportCloseIsSuccessful(t *testing.T) {
+	s := NewStreamStatus()
+	s.MarkCompleted()
+	s.SetEndReason(StreamEndReasonClientGone, context.Canceled)
+	assert.True(t, s.IsCompletedSuccessfully())
+	assert.False(t, s.IsNormalEnd())
+
+	s.MarkFailed("bad_response", "server_error", 502)
+	assert.False(t, s.IsCompletedSuccessfully())
 }
 
 func TestStreamStatus_IsNormalEnd(t *testing.T) {
