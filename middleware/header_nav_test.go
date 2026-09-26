@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -36,7 +37,7 @@ func withHeaderNavModules(t *testing.T, raw string) {
 	})
 }
 
-func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticated bool) *httptest.ResponseRecorder {
+func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticated bool, roles ...int) *httptest.ResponseRecorder {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
@@ -66,6 +67,9 @@ func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticate
 			Group:       "default",
 			AuthVersion: 1,
 		}
+		if len(roles) > 0 {
+			user.Role = roles[0]
+		}
 		user.SetAccessToken(accessToken)
 		require.NoError(t, db.Create(&user).Error)
 	}
@@ -94,6 +98,20 @@ func TestHeaderNavModuleAuthRejectsDisabledPricing(t *testing.T) {
 	recorder := performHeaderNavRequest(t, HeaderNavModuleAuth("pricing"), false)
 
 	require.Equal(t, http.StatusForbidden, recorder.Code)
+}
+
+func TestDisabledPricingAdminAccess(t *testing.T) {
+	for _, role := range []int{common.RoleCommonUser, common.RoleAdminUser, common.RoleRootUser} {
+		t.Run(fmt.Sprint(role), func(t *testing.T) {
+			withHeaderNavModules(t, `{"pricing":{"enabled":false,"requireAuth":false}}`)
+			response := performHeaderNavRequest(t, HeaderNavModuleAuth("pricing"), true, role)
+			want := http.StatusForbidden
+			if role >= common.RoleAdminUser {
+				want = http.StatusOK
+			}
+			require.Equal(t, want, response.Code, response.Body.String())
+		})
+	}
 }
 
 func TestHeaderNavModuleAuthRequiresLoginForPricing(t *testing.T) {

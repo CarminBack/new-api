@@ -105,6 +105,19 @@ func HeaderNavModuleAuth(module string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		access := getHeaderNavAccess(module)
 		if !access.Enabled {
+			// Pricing is also used by dashboard administrators. Authenticate via
+			// the standard admin guard; never trust a role supplied by the client.
+			if module == "pricing" {
+				user, _, kind, err := classifyDashboardCredential(c)
+				if err != nil {
+					writeDashboardAuthError(c, err)
+					return
+				}
+				if kind != dashboardCredentialUnmatched && user != nil && user.Role >= common.RoleAdminUser {
+					AdminAuth()(c)
+					return
+				}
+			}
 			c.JSON(http.StatusForbidden, gin.H{
 				"success": false,
 				"message": fmt.Sprintf("%s is disabled", module),
