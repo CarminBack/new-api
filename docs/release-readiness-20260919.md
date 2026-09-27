@@ -288,3 +288,4 @@
 - 任务扣费记录对含安全计费快照的新任务明确显示按秒或按次、单位价格、实际用量、分组倍率和计算金额，例如 `按秒收费: 单价 $0.7/秒; 10 秒 × $0.7/秒 × 0.4x 分组 = $2.8`；主金额仍读取最终quota，历史无快照记录继续显示通用规则，不以当前配置反推。
 - 恢复渠道17 AistarsLab利润同步管理区：按 `上游credits ÷ 100 × (1 + 利润率)` 生成两位小数模型单价，预览并确认后批量更新 `ModelPrice`、`billing_mode/billing_expr` 和利润率配置，并同步渠道模型映射。现代按秒/按次语义由 `u("seconds")`/`u("videos")` 表达式承担，不恢复已淘汰的 `TaskBillingUnit` 运行时依赖。
 - 主模块全量test/vet/build、relaykit全量test/vet/build、前端typecheck、生产构建及Vitest 172文件/2130用例通过；新增公式和同步定向测试最终14用例通过。全仓格式检查仅报告20个既有且未修改文件，本次修改文件未被报告。独立跨模型reviewer仍因当前会话不在Herdr环境无法启动。本次未部署、未修改测试或正式运行配置。
+- 代码提交 `582fb8c606df9911e4e4a55931d56f1822cda7d7` 已推送至 `fork/test/upstream-main-20260921-integration`。Actions `36303805238` 成功生成Linux ARM64候选 `sha256:65a13f952e2d0662c427162a655cab4e7a7be30d6b1c194cb802402193bb9011`，OCI revision匹配；候选尚未部署。
