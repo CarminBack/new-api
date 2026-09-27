@@ -208,5 +208,6 @@
 - 正式只读排查确认“upstream service temporarily unavailable”不是应用或代理重启：两者restart均为0。存在请求前无可用渠道的毫秒级503，以及上游在约45–48秒后仅发送response.failed的真实失败；后者主要见于gpt-6-astra渠道211，而渠道205同期可正常完成。
 - 原因：native Responses SSE会先把response.failed写给客户端，随后主relay看到下游已开始，不能重放，因此无正文失败也失去备用渠道切换机会。
 - 修复：当上游失败终态到达、下游尚未收到任何事件且失败不含usage时，丢弃缓冲元数据并返回结构化上游错误给主relay，由既有错误分类、预算、亲和及渠道健康策略决定是否切换。已有正文/下游事件或失败已带usage时仍原样发送且禁止重放，避免重复输出或忽略已发生的上游用量；业务拒绝仍由既有分类停止，不泛化重试。
-- 回归：真实controller链路首渠道发送created+failed(server_error)，第二渠道completed，客户端未看到failed、上游尝试2次、仅1次结算；单元覆盖嵌套失败、顶层错误和正文后失败。相关包race三轮、vet和build通过。正式部署尚未执行。
+- 回归：真实controller链路首渠道发送created+failed(server_error)，第二渠道completed，客户端未看到failed、上游尝试2次、仅1次结算；单元覆盖嵌套失败、顶层错误和正文后失败。全仓go test、go vet、build通过，相关race三轮通过。
+- 提交57bb863f1经Actions 36285438585构建ARM64镜像digest sha256:df9a612625b727a5326600a3ee120a63de0d001db6a9454425cbb93786357430并部署测试站。真实HTTPS代理故障注入：首渠道created+failed无usage，备用渠道completed；客户端200且不含failed，route_attempts=2（首个502/uncertain/retry、第二个success），仅1条消费日志，用户/Token/日志扣额均550，临时数据已清理。正式部署待用户按生产确认门明确确认。
 - 图片价格只读核对：ImageGroupPrice为1K=0.10、2K=0.16、4K=0.20；gpt-image-2基础价0.10，gpt-image-1.5为0.10，gpt-image-2-exact/2.5/sunburst为0.30，flare为0.20，gemini-3-pro-image为0.10，imagen fast为0.20。共18个匹配图片模型渠道、14个启用。价格配置无修改。
