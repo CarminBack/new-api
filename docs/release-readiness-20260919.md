@@ -218,4 +218,4 @@
 - 按用户选择改为 `ModelPrice × GroupRatio × ImageGroupResolutionRatio[tier] × image_count`，仅在实际使用 `Image` 分组且请求类型为图片时生效；默认倍率为1K=1、2K=1.6、4K=2。其他分组和非图片请求不变，无法识别的尺寸按4K倍率处理以避免少扣。
 - 新增独立动态选项 `ImageGroupResolutionRatio`，避免把旧的绝对美元价格配置误解释为倍率。后台分组设置页同时提供1K/2K/4K可视输入和JSON编辑；保存走现有Option API并即时更新内存，后续调价无需重建镜像或重启。
 - 回归覆盖Image分组2K、实际图片数量、未知尺寸4K兜底、其他分组和非图片请求；配置校验要求仅包含1k/2k/4k且均为有限正数。全仓 `go test ./...`、`go vet ./...`、`go build ./...`、前端typecheck/目标交互测试/生产构建、涉及文件定向lint及新增测试定向race通过。包级race仍触发既有全局logger及任务轮询并发基线，与本次路径无关。
-- 当前仅本地实现，尚未提交、推送、构建新镜像或部署；测试站与正式站运行状态、数据库和价格配置均未修改。正式仍运行17aed836e镜像，Responses失败切换仍仅在测试站候选中。
+- 提交 `5e86fa815a423cb8e58f8f6213c5df8b702ca166` 已推送至 fork 集成分支。Actions `36286767298` 构建成功；候选镜像 digest 为 `sha256:e2fd70cace495e65b4a693a3fd96131eca8d5d47a6b8a6588bc976df0bcf6a0f`，核对为 Linux ARM64 且 OCI revision 与提交一致。尚未部署；测试站与正式站运行状态、数据库和价格配置均未修改。正式仍运行17aed836e镜像，Responses失败切换仍仅在测试站旧候选中。
