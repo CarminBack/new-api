@@ -113,3 +113,61 @@ func TestImageGroupResolutionRatioUsesModelPrice(t *testing.T) {
 		})
 	}
 }
+
+func TestImageGroupResolutionRatioUsesDefaultTierForImageIntent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	savedGroups := ratio_setting.GroupRatio2JSONString()
+	savedResolutionRatios := ratio_setting.ImageGroupResolutionRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(savedGroups))
+		require.NoError(t, ratio_setting.UpdateImageGroupResolutionRatioByJSONString(savedResolutionRatios))
+	})
+
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"priced-image":0.1}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"Image":1,"default":1}`))
+	require.NoError(t, ratio_setting.UpdateImageGroupResolutionRatioByJSONString(`{"1k":1.25,"2k":1.6,"4k":2}`))
+
+	tests := []struct {
+		name    string
+		request dto.Request
+	}{
+		{
+			name: "OpenAI compatible image modality",
+			request: &dto.GeneralOpenAIRequest{
+				Modalities: json.RawMessage(`["image"]`),
+			},
+		},
+		{
+			name: "Google image config",
+			request: &dto.GeneralOpenAIRequest{
+				ExtraBody: json.RawMessage(`{"google":{"image_config":{}}}`),
+			},
+		},
+		{
+			name: "Gemini native image config",
+			request: &dto.GeminiChatRequest{GenerationConfig: dto.GeminiChatGenerationConfig{
+				ImageConfig: json.RawMessage(`{}`),
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			info := &relaycommon.RelayInfo{
+				OriginModelName: "priced-image",
+				UserGroup:       "Image",
+				UsingGroup:      "Image",
+				Request:         tt.request,
+			}
+
+			price, err := ModelPriceHelper(ctx, info, 0, &types.TokenCountMeta{})
+
+			require.NoError(t, err)
+			assert.Equal(t, 62500, price.QuotaToPreConsume)
+			assert.Equal(t, 1.25, price.OtherRatios()["image_resolution"])
+		})
+	}
+}

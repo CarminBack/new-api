@@ -14,16 +14,20 @@ import (
 )
 
 // PrepareImageBillingForRequest reserves the effective outbound image quantity
-// before each attempt, including channel retries and parameter overrides. The
-// client request body stays frozen; only the independent quantity is refreshed.
+// using the original request resolution.
 func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, count int) *types.NewAPIError {
+	return PrepareImageBillingForResolvedRequest(c, info, count, info.Request)
+}
+
+// PrepareImageBillingForResolvedRequest refreshes quantity and resolution from
+// the request that will actually be sent on this attempt.
+func PrepareImageBillingForResolvedRequest(c *gin.Context, info *relaycommon.RelayInfo, count int, request dto.Request) *types.NewAPIError {
 	if count < 1 || count > dto.MaxImageN {
 		return types.NewErrorWithStatusCode(fmt.Errorf("image_count must be an integer between 1 and %d", dto.MaxImageN), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	info.ImageRequestCount = count
-	if ratio, ok := relaycommon.ImageGroupResolutionRatio(info.Request, info.UsingGroup); ok {
-		// Refresh after channel selection so retries and final settlement use the
-		// same resolution multiplier as the actual image request.
+	info.PriceData.RemoveOtherRatio("image_resolution")
+	if ratio, ok := relaycommon.ImageGroupResolutionRatio(request, info.UsingGroup); ok {
 		info.PriceData.AddOtherRatio("image_resolution", ratio)
 	}
 	var quota int

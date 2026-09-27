@@ -50,6 +50,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
+	var billingRequest dto.Request = request
 
 	var requestBody io.Reader
 	var jsonData []byte
@@ -101,22 +102,15 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		}
 	}
 	if jsonData != nil {
-		// This is a different trust boundary from ingress: channel overrides
-		// and pass-through bodies can change the quantity actually submitted.
-		var outbound struct {
-			N *uint `json:"n"`
+		// Channel conversion and parameter overrides can change the quantity and
+		// resolution that are actually submitted upstream.
+		resolvedRequest, resolvedCount, resolveErr := resolveOutboundImageBilling(request, imageCount, jsonData)
+		if resolveErr != nil {
+			return types.NewErrorWithStatusCode(fmt.Errorf("invalid image billing parameters: %w", resolveErr), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
-		if err := common.Unmarshal(jsonData, &outbound); err != nil {
-			return types.NewErrorWithStatusCode(fmt.Errorf("invalid image billing parameters: %w", err), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		}
-		quantityRequest := dto.ImageRequest{N: outbound.N}
-		if quantityRequest.N == nil {
-			quantityRequest.N = common.GetPointer(uint(imageCount))
-		}
-		imageCount, err = quantityRequest.ImageCount(false)
-		if err != nil {
-			return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		}
+		request = resolvedRequest
+		billingRequest = resolvedRequest
+		imageCount = resolvedCount
 		logger.LogDebug(c, "image request body: %s", jsonData)
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
@@ -125,7 +119,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		defer closer.Close()
 		requestBody = body
 	}
-	if billingErr := service.PrepareImageBillingForRequest(c, info, imageCount); billingErr != nil {
+	if billingErr := service.PrepareImageBillingForResolvedRequest(c, info, imageCount, billingRequest); billingErr != nil {
 		return billingErr
 	}
 
@@ -204,6 +198,29 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		service.SaveImageGenerationResponse(c, info, request, responseCapture.body.Bytes(), quota)
 	}
 	return nil
+}
+
+func resolveOutboundImageBilling(request *dto.ImageRequest, fallbackCount int, jsonData []byte) (*dto.ImageRequest, int, error) {
+	var outbound struct {
+		N    *uint   `json:"n"`
+		Size *string `json:"size"`
+	}
+	if err := common.Unmarshal(jsonData, &outbound); err != nil {
+		return nil, 0, err
+	}
+	quantityRequest := dto.ImageRequest{N: outbound.N}
+	if quantityRequest.N == nil {
+		quantityRequest.N = common.GetPointer(uint(fallbackCount))
+	}
+	count, err := quantityRequest.ImageCount(false)
+	if err != nil {
+		return nil, 0, err
+	}
+	resolved := *request
+	if outbound.Size != nil {
+		resolved.Size = *outbound.Size
+	}
+	return &resolved, count, nil
 }
 
 // Archiving is best effort; oversized responses still reach the client in full.

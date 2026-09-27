@@ -37,10 +37,11 @@ func ImageResolutionTier(request dto.Request) (string, bool) {
 		if request == nil {
 			return "", false
 		}
+		imageIntent := generalRequestHasImageModality(request)
 		if len(request.ExtraBody) > 0 {
 			var extra struct {
 				Google struct {
-					ImageConfig struct {
+					ImageConfig *struct {
 						ImageSize      string `json:"imageSize"`
 						ImageSizeSnake string `json:"image_size"`
 					} `json:"image_config"`
@@ -49,26 +50,24 @@ func ImageResolutionTier(request dto.Request) (string, bool) {
 			if json.Unmarshal(request.ExtraBody, &extra) != nil {
 				return "", false
 			}
-			size = extra.Google.ImageConfig.ImageSize
-			if size == "" {
-				size = extra.Google.ImageConfig.ImageSizeSnake
+			if extra.Google.ImageConfig != nil {
+				imageIntent = true
+				size = extra.Google.ImageConfig.ImageSize
+				if size == "" {
+					size = extra.Google.ImageConfig.ImageSizeSnake
+				}
 			}
 		}
-		if strings.TrimSpace(size) == "" && generalRequestHasImageModality(request) {
+		if strings.TrimSpace(size) == "" && imageIntent {
 			size = request.Size
 		}
-		if strings.TrimSpace(size) == "" {
+		if !imageIntent {
 			return "", false
 		}
 	default:
 		return "", false
 	}
 
-	if strings.TrimSpace(size) == "" {
-		if _, ok := request.(*dto.ImageRequest); !ok {
-			return "", false
-		}
-	}
 	tier, valid := dto.ImageSizeTier(size)
 	if !valid {
 		// Explicit but unknown dimensions fail closed to the highest tier.
