@@ -280,4 +280,4 @@
 - 正式Video按秒回归根因是渠道17迁移任务插件后，旧 `TaskBillingUnit` 没有同步到真正执行的 `billing_setting.billing_mode/billing_expr`，导致 `ModelPrice` 被当作固定每次价格。迁移后4笔成功任务合计少扣15400000额度；按用户确认不追扣、不改历史记录。
 - 先测试后正式迁移全部33个启用Video模型：28个按秒表达式 `u("seconds") × price`，5个供应商固定总价模型按次表达式 `u("videos") × price`。正式备份与报告在 `/opt/docker/new-api/backups/release-20260927/video-billing-fix-20260927/`，权限0700/0600；配置即时刷新，无容器重启，测试/正式均healthy、restart0。
 - 绘图日志和任务日志列表将“任务ID”主列替换为“扣费记录”：显示最终quota和计算链；任务ID仍保留在详情及筛选。任务DTO增加只读安全计费快照，仅包含价格、倍率、表达式和usage facts；旧记录无快照时显示通用规则，避免以当前价格伪造历史计算。
-- 新增后端DTO及前端规则测试。主模块全量test/vet/build、relaykit全量test/vet/build、前端typecheck/build和Vitest 172文件/2127用例均通过。独立reviewer受非Herdr会话限制未启动。UI候选待构建并部署测试站浏览器验收，正式应用镜像尚未更新。
+- 新增后端DTO及前端规则、移动卡片测试。主模块全量test/vet/build、relaykit全量test/vet/build、前端typecheck/build和Vitest 172文件/2128用例均通过。测试站部署Linux ARM64候选 `sha256:3fa9bdfd9eab5fdd70baa0f8f025cd8c4fd9201cdc7c062e6d0b06284bfcb7ee`（revision `c84c66c5cc504d83d6af0377cd5ae9d8ba176513`）；Playwright在1440×1000及390×844验证绘图/任务日志均显示金额和规则且没有任务ID主列，截图检查无重叠。临时用户、会话、任务、绘图及审计记录全部清零；测试站healthy、restart0、状态接口200。独立reviewer受非Herdr会话限制未启动。正式应用镜像尚未更新，等待生产变更确认。
