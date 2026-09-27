@@ -9,7 +9,8 @@ the Free Software Foundation, either version 3 of the License, or
 import { ReceiptText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { StatusBadge } from '@/components/status-badge'
+import { Dialog } from '@/components/dialog'
+import { Button } from '@/components/ui/button'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota } from '@/lib/format'
 
@@ -101,23 +102,41 @@ export function BillingRecordCell(props: BillingRecordCellProps) {
   const rule = taskBillingRule(props.billing, props.fallbackRule, t)
 
   return (
-    <div className='flex max-w-[360px] flex-col items-start gap-1'>
-      <StatusBadge
-        type='badge'
-        variant='neutral'
-        size='lg'
-        copyable={false}
-        className='border-border/80 bg-muted/60 text-foreground rounded-md border font-semibold tabular-nums'
-      >
-        <ReceiptText className='size-3.5' aria-hidden='true' />
-        <span className='whitespace-nowrap'>{formatLogQuota(props.quota)}</span>
-      </StatusBadge>
-      <span
-        className='text-muted-foreground max-w-[360px] text-[11px] leading-4 break-words whitespace-normal'
-        title={rule}
-      >
-        {rule}
-      </span>
-    </div>
+    <Dialog
+      title={t('Billing details')}
+      description={t('View the final charge and detailed billing rule')}
+      contentClassName='sm:max-w-lg'
+      trigger={
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          className='bg-muted/60 h-8 gap-1.5 rounded-md font-semibold tabular-nums'
+          aria-label={t('View billing details')}
+        >
+          <ReceiptText className='size-3.5' aria-hidden='true' />
+          <span className='whitespace-nowrap'>
+            {formatLogQuota(props.quota)}
+          </span>
+        </Button>
+      }
+    >
+      <div className='space-y-4'>
+        <div className='space-y-1'>
+          <p className='text-muted-foreground text-xs font-medium'>
+            {t('Total charge')}
+          </p>
+          <p className='text-2xl font-semibold tabular-nums'>
+            {formatLogQuota(props.quota)}
+          </p>
+        </div>
+        <div className='space-y-2 border-t pt-4'>
+          <p className='text-sm font-medium'>{t('Detailed billing rule')}</p>
+          <p className='text-muted-foreground text-sm leading-6 break-words whitespace-normal'>
+            {rule}
+          </p>
+        </div>
+      </div>
+    </Dialog>
   )
 }

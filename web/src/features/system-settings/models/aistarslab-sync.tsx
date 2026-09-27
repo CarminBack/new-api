@@ -89,21 +89,21 @@ export function AistarsLabSync() {
     const value = (input: number | string | undefined) =>
       input == null || input === '' ? t('Not set') : String(input)
     return [
-      ...result.price_changes.map((item) => ({
+      ...(result.price_changes ?? []).map((item) => ({
         key: `price-${item.model}`,
         type: t('Unit price'),
         model: item.model,
         oldValue: value(item.old),
         newValue: value(item.new),
       })),
-      ...result.expression_changes.map((item) => ({
+      ...(result.expression_changes ?? []).map((item) => ({
         key: `expr-${item.model}`,
         type: t('Billing formula'),
         model: item.model,
         oldValue: value(item.old),
         newValue: value(item.new),
       })),
-      ...result.mapping_changes.map((item) => ({
+      ...(result.mapping_changes ?? []).map((item) => ({
         key: `mapping-${item.model}`,
         type: t('Channel mapping'),
         model: item.model,

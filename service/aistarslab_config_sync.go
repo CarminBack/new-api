@@ -362,7 +362,9 @@ func normalizeAistarsLabBillingUnit(value string) string {
 
 func buildAistarsLabSyncResult(request AistarsLabSyncRequest, models []AistarsLabSeedanceModel) *AistarsLabSyncResult {
 	result := &AistarsLabSyncResult{DryRun: request.DryRun, ChannelID: request.ChannelID, ConfigURL: request.ConfigURL,
-		CreditRate: request.CreditRate, MarkupRate: request.MarkupRate, TotalModels: len(models), Models: models}
+		CreditRate: request.CreditRate, MarkupRate: request.MarkupRate, TotalModels: len(models),
+		AddedModels: []string{}, RemovedModels: []string{}, ExpressionChanges: []AistarsLabExpressionChange{},
+		PriceChanges: []AistarsLabPriceChange{}, MappingChanges: []AistarsLabMappingChange{}, Models: models}
 	oldExpressions := billing_setting.GetConfiguredBillingExprCopy()
 	oldPrices := ratio_setting.GetModelPriceCopy()
 	oldMappings := getAistarsLabChannelMapping(request.ChannelID)
