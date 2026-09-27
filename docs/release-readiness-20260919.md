@@ -221,4 +221,7 @@
 - 提交 `5e86fa815a423cb8e58f8f6213c5df8b702ca166` 已推送至 fork 集成分支。Actions `36286767298` 构建成功；候选镜像 digest 为 `sha256:e2fd70cace495e65b4a693a3fd96131eca8d5d47a6b8a6588bc976df0bcf6a0f`，核对为 Linux ARM64 且 OCI revision 与提交一致。
 - 候选已部署隔离测试站，compose 回滚备份为 `/opt/docker/new-api-rc20-test/backups/compose-before-image-resolution-ratio-20260927.yml`，原测试镜像 digest 为 `sha256:df9a612625b727a5326600a3ee120a63de0d001db6a9454425cbb93786357430`。新容器 healthy、restart 0，测试域名 `/api/status` 返回200。
 - 真实HTTPS图片账本验收使用临时模型价0.10和隔离模拟上游：1K一张扣50000额度（$0.10）、2K两张扣160000（$0.32）、4K一张扣100000（$0.20），用户/Token/日志总扣额均310000。临时模型价已恢复，用户、Token、渠道、日志最终均零残留；报告位于 `/opt/docker/new-api-rc20-test/verification/image-resolution-ratio-20260927/report.json`。
-- 同一候选复跑 Responses 无正文失败切换：首渠道502 uncertain并允许重试，第二渠道成功，客户端不含failed；仅1条消费日志且三份账本均550，临时数据已清理。正式站仍运行17aed836e镜像，未修改正式容器、数据库或价格。
+- 同一候选在测试站复跑 Responses 无正文失败切换：首渠道502 uncertain并允许重试，第二渠道成功，客户端不含failed；仅1条消费日志且三份账本均550，临时数据已清理。
+- 用户明确确认正式替换后，仅将正式 `new-api-docker` 切换到同一固定 digest；切换耗时42秒。正式compose备份为 `/opt/docker/new-api/backups/release-20260927/compose-before-image-resolution-ratio-20260927.yml`，回滚镜像仍为 `sha256:9c8fd06879cc36864467bb78812819d5dcd4efa0af86e28d0729bd17b0d0dac1`。数据库、Redis、OpenResty、支付、OAuth和运行中价格未重置。
+- 正式真实HTTPS图片账本再次得到50000/160000/100000，用户/Token/日志总扣额均310000；Responses故障注入首渠道502 uncertain/retry、第二渠道success，客户端200且不含failed，单条消费日志与三份账本均550。临时用户、Token、渠道、日志均为0，临时模型价格已恢复。报告位于正式备份目录 `verification/image-resolution-ratio-production-20260927/report.json` 与 `verification/response-fallback-production-20260927/report.json`。
+- 发布后正式token、image-api及测试域名状态均200；正式容器digest/revision匹配、healthy、restart0，启动日志无panic/fatal。运行中的真实Responses完成请求已记录 `completion_delivered=true`、终态completed且status=ok，确认流式完成判定修复已生效。
