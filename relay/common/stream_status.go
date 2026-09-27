@@ -1,6 +1,8 @@
 package common
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -49,25 +51,28 @@ type StreamStatus struct {
 	Errors     []StreamErrorEntry
 	ErrorCount int
 
-	response         ResponseOutcome
-	errorCode        string
-	errorType        string
-	errorStatus      int
-	incompleteReason string
-	expectsTerminal  bool
+	response                   ResponseOutcome
+	errorCode                  string
+	errorType                  string
+	errorStatus                int
+	incompleteReason           string
+	expectsTerminal            bool
+	requiresCompletionDelivery bool
+	completionDelivered        bool
 }
 
 // StreamOutcome holds classification facts only; upstream messages never
 // enter it because they may contain credentials or request content.
 type StreamOutcome struct {
-	EndReason        StreamEndReason
-	HasErrors        bool
-	ExpectsTerminal  bool
-	Response         ResponseOutcome
-	ErrorCode        string
-	ErrorType        string
-	ErrorStatus      int
-	IncompleteReason string
+	EndReason           StreamEndReason
+	HasErrors           bool
+	ExpectsTerminal     bool
+	CompletionDelivered bool
+	Response            ResponseOutcome
+	ErrorCode           string
+	ErrorType           string
+	ErrorStatus         int
+	IncompleteReason    string
 }
 
 func NewStreamStatus() *StreamStatus {
@@ -177,14 +182,15 @@ func (s *StreamStatus) OutcomeSnapshot() StreamOutcome {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return StreamOutcome{
-		EndReason:        s.EndReason,
-		HasErrors:        s.ErrorCount > 0,
-		ExpectsTerminal:  s.expectsTerminal,
-		Response:         s.response,
-		ErrorCode:        s.errorCode,
-		ErrorType:        s.errorType,
-		ErrorStatus:      s.errorStatus,
-		IncompleteReason: s.incompleteReason,
+		EndReason:           s.EndReason,
+		HasErrors:           s.ErrorCount > 0,
+		ExpectsTerminal:     s.expectsTerminal,
+		CompletionDelivered: s.completionDelivered,
+		Response:            s.response,
+		ErrorCode:           s.errorCode,
+		ErrorType:           s.errorType,
+		ErrorStatus:         s.errorStatus,
+		IncompleteReason:    s.incompleteReason,
 	}
 }
 
@@ -206,14 +212,63 @@ func (s *StreamStatus) TotalErrorCount() int {
 	return s.ErrorCount
 }
 
-// IsCompletedSuccessfully reports a completed protocol response even when the
-// transport closes immediately afterward. The end reason remains available as
-// a transport diagnostic; errors and failed outcomes still invalidate it.
+// RequireCompletionDelivery opts native Responses streams into checked delivery.
+func (s *StreamStatus) RequireCompletionDelivery() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expectsTerminal = true
+	s.requiresCompletionDelivery = true
+}
+
+// MarkCompletionDelivered is called only after a complete terminal event write
+// and flush succeed. This confirms the server write, not client application receipt.
+func (s *StreamStatus) MarkCompletionDelivered() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.completionDelivered = true
+}
+
 func (s *StreamStatus) IsCompletedSuccessfully() bool {
-	if s == nil || s.ResponseOutcome() != string(ResponseOutcomeCompleted) {
+	if s == nil {
 		return false
 	}
-	return !s.HasErrors() && !s.ResponseFailed()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.response != ResponseOutcomeCompleted || !s.completionDelivered || s.ErrorCount != 0 || errors.Is(s.EndError, context.DeadlineExceeded) {
+		return false
+	}
+	switch s.EndReason {
+	case StreamEndReasonDone, StreamEndReasonEOF, StreamEndReasonHandlerStop, StreamEndReasonClientGone:
+		return true
+	case StreamEndReasonScannerErr:
+		return errors.Is(s.EndError, context.Canceled)
+	}
+	return false
+}
+
+// IsSuccessful is the shared request/log result, distinct from transport end.
+func (s *StreamStatus) IsSuccessful() bool {
+	if s == nil {
+		return true
+	}
+	if s.IsCompletedSuccessfully() {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrorCount != 0 || !s.IsNormalEnd() {
+		return false
+	}
+	if s.requiresCompletionDelivery {
+		return false
+	}
+	return s.response == ResponseOutcomeCompleted || (s.response == ResponseOutcomeUnknown && !s.expectsTerminal)
 }
 
 func (s *StreamStatus) IsNormalEnd() bool {

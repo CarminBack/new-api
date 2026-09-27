@@ -30,13 +30,14 @@ func FlushWriter(c *gin.Context) (err error) {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		return errors.New("streaming error: flusher not found")
+	// Gin's Flush discards the underlying FlushError. Commit its header, then
+	// unwrap it so ResponseController can report network flush failures.
+	c.Writer.WriteHeaderNow()
+	writer := http.ResponseWriter(c.Writer)
+	if wrapped, ok := writer.(interface{ Unwrap() http.ResponseWriter }); ok {
+		writer = wrapped.Unwrap()
 	}
-
-	flusher.Flush()
-	return nil
+	return http.NewResponseController(writer).Flush()
 }
 
 func requestContextDone(c *gin.Context) bool {

@@ -172,7 +172,7 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other *model.LogOther)
 	}
 	ss := relayInfo.StreamStatus
 	status := "ok"
-	if (!ss.IsNormalEnd() && !ss.IsCompletedSuccessfully()) || ss.HasErrors() || ss.ResponseFailed() {
+	if !ss.IsSuccessful() {
 		status = "error"
 	}
 	streamInfo := map[string]any{
@@ -196,6 +196,7 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other *model.LogOther)
 	// Downstream write progress distinguishes a prepared HTTP header from
 	// content the client actually received, which drives the retry decision.
 	if relayInfo.StreamTerminalEvent != "" || relayInfo.GetFinalRequestRelayFormat() == types.RelayFormatOpenAIResponses {
+		streamInfo["completion_delivered"] = ss.OutcomeSnapshot().CompletionDelivered
 		streamInfo["terminal_event"] = relayInfo.StreamTerminalEvent
 		streamInfo["usage_present"] = relayInfo.StreamUsagePresent
 		streamInfo["received_event_count"] = relayInfo.ReceivedResponseCount

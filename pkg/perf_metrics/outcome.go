@@ -24,6 +24,9 @@ func ClassifyRelayOutcome(ctx context.Context, info *relaycommon.RelayInfo, apiE
 	if info == nil || info.PerformanceBusinessRejection {
 		return OutcomeIgnored
 	}
+	if apiErr == nil && info.StreamStatus.IsCompletedSuccessfully() {
+		return OutcomeSuccess
+	}
 	if ctx != nil && ctx.Err() == context.Canceled {
 		return OutcomeIgnored
 	}

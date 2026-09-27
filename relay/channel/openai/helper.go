@@ -267,9 +267,15 @@ func sendResponsesStreamData(c *gin.Context, info *relaycommon.RelayInfo, stream
 		return nil
 	}
 	if err := helper.ResponseChunkData(c, streamResponse, data); err != nil {
+		if info != nil {
+			info.StreamStatus.RecordError("responses downstream write or flush failed")
+		}
 		return err
 	}
 	if info != nil {
+		if streamResponse.Type == "response.completed" || streamResponse.Type == "response.done" {
+			info.StreamStatus.MarkCompletionDelivered()
+		}
 		info.SendResponseCount++
 		info.StreamDownstreamStarted = true
 	}

@@ -132,12 +132,33 @@ func TestStreamStatus_HasErrors_NilSafe(t *testing.T) {
 func TestStreamStatusCompletedTransportCloseIsSuccessful(t *testing.T) {
 	s := NewStreamStatus()
 	s.MarkCompleted()
+	assert.False(t, s.IsCompletedSuccessfully())
+	s.MarkCompletionDelivered()
 	s.SetEndReason(StreamEndReasonClientGone, context.Canceled)
 	assert.True(t, s.IsCompletedSuccessfully())
 	assert.False(t, s.IsNormalEnd())
 
 	s.MarkFailed("bad_response", "server_error", 502)
 	assert.False(t, s.IsCompletedSuccessfully())
+}
+
+func TestCompletedDeliveryDoesNotHideTransportFailure(t *testing.T) {
+	for _, tc := range []struct {
+		reason StreamEndReason
+		err    error
+	}{
+		{StreamEndReasonTimeout, context.DeadlineExceeded},
+		{StreamEndReasonClientGone, context.DeadlineExceeded},
+		{StreamEndReasonScannerErr, fmt.Errorf("unexpected upstream read failure")},
+		{StreamEndReasonPanic, fmt.Errorf("panic")},
+	} {
+		s := NewStreamStatus()
+		s.RequireCompletionDelivery()
+		s.MarkCompleted()
+		s.MarkCompletionDelivered()
+		s.SetEndReason(tc.reason, tc.err)
+		assert.False(t, s.IsSuccessful(), "reason=%s", tc.reason)
+	}
 }
 
 func TestStreamStatus_IsNormalEnd(t *testing.T) {

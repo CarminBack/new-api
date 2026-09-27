@@ -182,3 +182,13 @@
 - 关键修正：首次实现时误把 `relayRetriesRemaining` 当作循环条件，导致 `RetryTimes=0` 时第一轮即退出；已改为仅作为决策函数的“剩余重试数”输入，循环仍由 `RetryTimes` 控制。该回归由既有 `TestResponsesInterruptedStreamHealth` 捕获。
 - 验证：新增 4 个测试文件（`controller/relay_retry_policy_test.go`、`controller/relay_task_retry_cap_test.go`、`service/channel_attempt_test.go`，加上此前的流式测试）。全仓库 `go test ./... -count=1` 44 包全通过；`go vet ./...`、`gofmt -l`、`git diff --check` 均干净；新增代码定向 `-race` 通过。`controller` 偶发的 `TestSecurityAccountDeletionConcurrentRequestsHaveOneWinner` 失败已在未改动代码上复现，属既有 SQLite 并发波动。
 - 状态：仅本地工作树，未提交、未推送、未构建镜像、未部署；测试站与正式站容器、数据库、Redis 均未修改。下一步：确定 `RetryTimes` 使用 3 还是 5，然后在测试站重跑故障注入（重点验证图片止于 2 次、任务止于 1 次、504 只切一次、流式元数据失败仍能切换），通过后再谈正式替换。
+
+## 2026-09-27 流式完成判定补齐与 WebSocket 发布阻塞
+
+- 更正 6eda7dc34 的验收边界：此前仅根据协议 completed 和无软错误覆盖日志状态，未独立跟踪完成事件写出，且 request_policy 仍使用旧判断。
+- 本次增加 native Responses SSE completion-delivery 标记：完整写入及可返回错误的 flush 都成功后才标记；保留 end_reason/end_error。日志、请求策略和文本延迟统计共用 IsSuccessful；完成后的 context cancellation 可判成功，超时、panic、非取消 scanner 错误、写出失败均不覆盖。EOF/[DONE] 未收到完成事件、failed/incomplete/cancelled 均不显示成功。健康统计保留 max_output_tokens 等业务分类，完成后取消可作为成功样本；计费算法未修改。
+- 新增真实 HTTP 网关/上游/客户端断开测试，以及 pipe + 故障 writer 验证完成后关闭、完成前关闭/EOF、write/flush 失败、failed、incomplete。定向 race 重复3轮通过；controller 既有 HTTP/SSE 与 WebSocket 账本测试覆盖连接复用、多轮、取消和单次结算；incomplete 的日志预期同步为 error，费用与健康预期保持不变。
+- 实际测试站网络验证：直连 ws://127.0.0.1:2890/v1/responses 握手101；wss://tokentest.mewinyou.shop/v1/responses 握手400。原因：测试域名 OpenResty 配置 proxy_set_header Connection ""，无法完成 WebSocket Upgrade。真实代理多轮/取消/账本验收因此尚未完成，不满足用户“没问题就更新”的正式发布条件。
+- 已准备只针对测试域名的 map + Connection 修复，普通HTTP仍为空头；文件位于服务器 /opt/docker/new-api-rc20-test/verification/ws-proxy-20260927/{before,candidate,validation}.conf，独立 nginx -t 通过。未更改活动配置、未 reload；其生效需要重载与正式站共用的 1Panel-openresty-MzcZ，待明确授权。回滚为恢复 before.conf 后 nginx -t + 平滑reload；验证包括测试WSS握手/多轮/取消/账本以及正式域名HTTP健康。
+- 检查：go build ./...、涉及包 go vet 和定向 race 通过；全仓 go test ./... 一轮通过，最终重跑仅既有 TestSecurityAccountDeletionConcurrentRequestsHaveOneWinner 出现 SQLite 并发波动（expected 1 / actual 0），该测试与全部 TestResponses 定向复跑通过。不能宣称最终全仓验收无失败。
+- 正式站与测试站应用镜像均未在本轮替换；历史日志未改写。服务器只进行了握手检查、候选配置准备及 dry-run。

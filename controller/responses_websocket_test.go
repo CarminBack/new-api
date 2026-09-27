@@ -973,10 +973,11 @@ func TestResponsesStreamOutcomesPreserveAccounting(t *testing.T) {
 					assert.Equal(t, "error", stream["status"])
 					assert.Equal(t, "failed", stream["response_status"])
 				} else {
-					assert.Equal(t, "ok", stream["status"])
 					if tc.name == "completed-at-output-limit" {
+						assert.Equal(t, "error", stream["status"])
 						assert.Equal(t, "incomplete", stream["response_status"])
 					} else {
+						assert.Equal(t, "ok", stream["status"])
 						assert.Equal(t, "completed", stream["response_status"])
 					}
 				}

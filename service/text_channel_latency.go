@@ -31,7 +31,7 @@ func RecordTextChannelLatency(c *gin.Context, info *relaycommon.RelayInfo, chann
 	if !IsTextRelayRequest(c) || c.Request.Context().Err() != nil || info == nil || info.ChannelMeta == nil || !info.IsStream || info.IsChannelTest || len(info.UpstreamTimings) == 0 {
 		return
 	}
-	if info.StreamStatus != nil && (!info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors()) {
+	if info.StreamStatus != nil && !info.StreamStatus.IsSuccessful() {
 		return
 	}
 	sample, ok := info.UpstreamTimings[len(info.UpstreamTimings)-1].Snapshot()["first_meaningful_data_ms"].(int64)
