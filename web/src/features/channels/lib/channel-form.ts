@@ -41,6 +41,7 @@ import {
   validateAdvancedCustomConfig,
 } from './advanced-custom'
 import { readTaskExtendPluginKeys } from './channel-plugin-extensions'
+import { supportsResponsesWebSocket } from './responses-websocket'
 
 // ============================================================================
 // Form Validation Schema
@@ -685,7 +686,7 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     responses_item_id_compatibility_enabled:
       formData.responses_item_id_compatibility_enabled === true,
     responses_websocket_enabled:
-      (formData.type === 1 || formData.type === 57) &&
+      supportsResponsesWebSocket(formData.type) &&
       formData.responses_websocket_enabled === true,
     image_resolution_tiers:
       Object.keys(imageResolutionTiers).length > 0
