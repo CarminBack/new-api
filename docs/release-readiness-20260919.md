@@ -242,3 +242,6 @@
 - 根因：Gemini原生入口的请求类型为 `GeminiChatRequest`，旧逻辑只处理 `ImageRequest`；OpenAI图片实际发送前没有重新确认倍率，最终结算可能使用缺失倍率的PriceData；符号尺寸 `2K` 也未被尺寸解析器识别。
 - 修复统一提取OpenAI Images、Gemini原生和明确图片意图的OpenAI兼容请求尺寸，支持1K/2K/4K符号值，并在OpenAI图片发送前刷新倍率。普通文本请求即使带 `size` 也保持不变。
 - Gemini原生2K、OpenAI兼容2K、GPT 1440x1920刷新、未知尺寸、分组/文本隔离和定向race通过；主模块及relaykit全量test/vet/build通过。尚未部署正式。
+- 提交 `42f85a54cfb7fe4887fa81a62a64212a969f25cd` 经Actions `36289630528` 构建，ARM64 digest为 `sha256:0310353ef6cba0fea0474747dab60da59d9cbe77d38aeac986bf57c4667e8850`，OCI revision匹配。
+- 候选部署测试站，原digest `sha256:e2fd70cace495e65b4a693a3fd96131eca8d5d47a6b8a6588bc976df0bcf6a0f`，compose备份 `/opt/docker/new-api-rc20-test/backups/compose-before-image-resolution-runtime-fix-20260927.yml`。
+- 隔离模拟上游真实链路验收：GPT Images `1440x1920` 与Gemini原生 `2K` 均按 `0.2 × 1.6 × 0.4 × 500000 = 64000` 结算，两请求用户/Token总差额均128000，日志与归档一致。0.4为测试用户组专属倍率，2K倍率1.6在两协议均生效。临时渠道、价格、日志、归档清零并刷新缓存；测试容器healthy、restart0、状态200。报告位于 `/opt/docker/new-api-rc20-test/verification/image-resolution-runtime-fix-20260927/report.json`。正式待确认。
