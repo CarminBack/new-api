@@ -20,6 +20,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   getCoreRowModel,
   useReactTable,
+  type ColumnDef,
   type VisibilityState,
 } from '@tanstack/react-table'
 import { render, screen, within, waitFor } from '@testing-library/react'
@@ -312,6 +313,49 @@ it('does not show mapped model names when inspecting a mobile model badge', asyn
   })
   await user.click(screen.getByRole('button', { name: `Model: ${longName}` }))
   expect(screen.queryByRole('dialog', { name: 'Model' })).not.toBeInTheDocument()
+})
+
+it('shows billing records instead of task IDs in task and drawing mobile cards', () => {
+  type MobileBillingRow = {
+    action: string
+    code: string
+    status: string
+    billing_record: string
+    task_id: string
+    mj_id: string
+  }
+  const row: MobileBillingRow = {
+    action: 'Image generation',
+    code: 'Success',
+    status: 'Success',
+    billing_record: '$2.8 · $0.7 × 10 s × 0.4x group',
+    task_id: 'task-private-id',
+    mj_id: 'drawing-private-id',
+  }
+  const columns: ColumnDef<MobileBillingRow>[] = Object.keys(row).map((key) => ({
+    accessorKey: key,
+    id: key,
+    cell: ({ getValue }) => String(getValue()),
+  }))
+
+  function MobileBillingFixture(props: { category: 'task' | 'drawing' }) {
+    const table = useReactTable({
+      data: [row],
+      columns,
+      getCoreRowModel: getCoreRowModel(),
+    })
+    return <UsageLogsMobileList table={table} logCategory={props.category} />
+  }
+
+  const { rerender } = render(<MobileBillingFixture category='task' />)
+  expect(screen.getByText('Billing Record')).toBeVisible()
+  expect(screen.getByText(row.billing_record)).toBeVisible()
+  expect(screen.queryByText(row.task_id)).not.toBeInTheDocument()
+
+  rerender(<MobileBillingFixture category='drawing' />)
+  expect(screen.getByText('Billing Record')).toBeVisible()
+  expect(screen.getByText(row.billing_record)).toBeVisible()
+  expect(screen.queryByText(row.mj_id)).not.toBeInTheDocument()
 })
 
 it('shows loading placeholders without displaying stale log fields', () => {

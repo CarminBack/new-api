@@ -160,13 +160,17 @@ function TaskLogsCard<TData>({
 }) {
   const { t } = useTranslation()
 
-  const taskIdCell = cells.get('task_id')
+  const billingRecordCell = cells.get('billing_record')
   const statusCell = cells.get('status')
 
   return (
     <div className='space-y-2.5'>
       <div className='flex min-w-0 items-start justify-between gap-3'>
-        <CompactCell cell={taskIdCell} className='flex-1' />
+        <SummaryField
+          label={t('Billing Record')}
+          cell={billingRecordCell}
+          className='flex-1'
+        />
         <CompactCell cell={statusCell} className='shrink-0 text-right' />
       </div>
 
@@ -214,7 +218,11 @@ function DrawingLogsCard<TData>({
           cell={cells.get('channel')}
           primaryOnly
         />
-        <SummaryField label={t('Task ID')} cell={cells.get('mj_id')} />
+        <SummaryField
+          label={t('Billing Record')}
+          cell={cells.get('billing_record')}
+          className='col-span-2'
+        />
         <SummaryField
           label={t('Duration')}
           cell={cells.get('duration')}
