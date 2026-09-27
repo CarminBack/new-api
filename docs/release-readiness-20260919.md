@@ -269,4 +269,8 @@
 - 提交 `7830d8864819b59aaaab3bf146e848370c2c3bc7` 已推送 fork；Actions `36293248678` 成功。Linux ARM64固定镜像digest为 `sha256:edb4cff28369ee1240ad5149f55c34729f3778e41cd50082af267b4c979a5d69`，OCI revision匹配。
 - 候选已部署测试站，回滚compose为 `/opt/docker/new-api-rc20-test/backups/compose-before-image-billing-boundary-fix-20260927.yml`，回滚digest为 `sha256:123e39a5e2b6b487baefbcbc6653df2a82cf455bebd722374e59fbfdafbbd964`。
 - 新增真实参数覆盖验收：客户端请求1K，渠道覆盖为4K；归档尺寸为4K，用户、Token、日志和归档均只扣80000，符合 `0.2 × 2 × 0.4 × 500000`。GPT Images `1440x1920` 与Gemini原生 `2K` 主路径各扣64000，两请求用户/Token总差额128000，日志及归档一致。
-- Responses代理回归仍通过8场景，8请求恰有8条消费日志，用户/Token/日志均扣3360。所有临时用户、Token、渠道、模型价、日志和图片归档残留为0；测试站healthy、restart0，本地与公网状态200，近20分钟无panic/fatal。正式环境尚未替换，等待生产确认门授权。
+- Responses代理回归仍通过8场景，8请求恰有8条消费日志，用户/Token/日志均扣3360。所有临时用户、Token、渠道、模型价、日志和图片归档残留为0；测试站healthy、restart0，本地与公网状态200，近20分钟无panic/fatal。
+- 用户明确确认正式发布后，将 `new-api-docker` 单实例切换至同一固定digest，实际重建与健康恢复用时41秒。运行环境和数据挂载逐项保持不变；数据库、Redis、OpenResty、支付、OAuth和价格配置未重置。
+- 正式Compose备份为 `/opt/docker/new-api/backups/release-20260927/compose-before-image-billing-boundary-fix-20260927.yml`，权限0600；回滚digest为 `sha256:e2fd70cace495e65b4a693a3fd96131eca8d5d47a6b8a6588bc976df0bcf6a0f`。
+- 正式隔离图片验收通过：GPT Images 2K扣160000、Gemini原生2K扣160000、客户端1K经渠道覆盖为4K扣200000；用户、Token和日志总扣额均520000，归档尺寸与实际出站尺寸一致。Responses正式WSS/SSE八场景仍为8条消费日志，三账本均3360。
+- 正式验收临时用户、Token、渠道、模型价格、日志及图片归档残留均为0。最终容器digest/revision匹配Linux ARM64、healthy、restart0，本地及token/image-api正式域名均200，近20分钟无panic/fatal/迁移错误。发布与图片验收报告均以0600保存在正式备份目录。
