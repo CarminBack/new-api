@@ -254,4 +254,8 @@
 - 修正一条既有usage日志测试：响应模型诊断是管理员专属，测试此前以普通用户身份断言管理员内容；现改为显式管理员上下文，不改变生产代码或展示权限。
 - 全库lint仍报告官方当前规则切换带来的大量存量问题，分布于上游新前端文件和既有文件；本次没有做无关的大规模格式重写。`git diff --check`通过。
 - 本轮只更新源码分支，尚未替换测试站或正式站。正式仍运行revision `5e86fa815...`；测试站仍运行图片修复候选revision `42f85a54c...`。
-- 集成验证提交 `5d99793b9b96cd9fcc219e657d2fd20eefaf03d0` 已推送fork。Actions `36291269632` 手动构建成功，不可变候选digest为 `sha256:123e39a5e2b6b487baefbcbc6653df2a82cf455bebd722374e59fbfdafbbd964`；镜像平台为Linux ARM64，OCI revision与提交精确匹配。尚未部署。
+- 集成验证提交 `5d99793b9b96cd9fcc219e657d2fd20eefaf03d0` 已推送fork。Actions `36291269632` 手动构建成功，不可变候选digest为 `sha256:123e39a5e2b6b487baefbcbc6653df2a82cf455bebd722374e59fbfdafbbd964`；镜像平台为Linux ARM64，OCI revision与提交精确匹配。
+- 用户确认后将该固定digest部署测试站。第一次执行因compose实际service名为 `new-api-test` 而不是 `new-api` 被拒绝，容器未重建；立即恢复原compose并确认旧容器healthy、restart0、状态200。随后使用正确service名完成替换。回滚compose为 `/opt/docker/new-api-rc20-test/backups/compose-before-upstream-sync-20260927.yml`，权限0600，回滚digest为 `sha256:0310353ef6cba0fea0474747dab60da59d9cbe77d38aeac986bf57c4667e8850`。
+- 测试站真实HTTP图片账本复验通过：GPT Images `1440x1920` 与Gemini原生 `2K` 各扣64000，公式仍为 `0.2 × 1.6 × 0.4 × 500000`；用户与Token总差额均128000，消费日志和图片归档一致。
+- Responses代理验收通过：同一WSS连接多轮完成、取消、继续完成及失败，加SSE完成后断开、完成前断开和失败，共8个请求恰有8条消费日志；用户、Token、日志均扣3360，成功/失败状态与completion delivery判定符合预期。
+- 临时图片渠道、价格、日志、归档及Responses用户、Token、渠道和日志均已清理。最终测试容器digest/revision匹配、healthy、restart0，本地与公网状态200，近20分钟日志无panic/fatal；正式站未修改。
