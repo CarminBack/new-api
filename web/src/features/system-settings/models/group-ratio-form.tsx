@@ -17,7 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Code2, Eye, HelpCircle } from 'lucide-react'
-import { memo, useCallback, useState, type ReactNode } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useWatch, type UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -44,6 +51,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Sheet,
   SheetContent,
@@ -59,14 +67,55 @@ import {
   SettingsSwitchItem,
 } from '../components/settings-form-layout'
 import { SettingsPageActionsPortal } from '../components/settings-page-context'
+import { safeJsonParse } from '../utils/json-parser'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import {
   GroupRatioVisualEditor,
   type GroupSettingsSection,
 } from './group-ratio-visual-editor'
 
+type ImageResolutionTier = '1k' | '2k' | '4k'
+
+type ResolutionRatioInputProps = {
+  tier: ImageResolutionTier
+  value: number
+  onChange: (tier: ImageResolutionTier, value: number) => void
+}
+
+function ResolutionRatioInput(props: ResolutionRatioInputProps) {
+  const { t } = useTranslation()
+  const [draft, setDraft] = useState(String(props.value))
+
+  useEffect(() => {
+    setDraft(String(props.value))
+  }, [props.value])
+
+  return (
+    <div className='space-y-2'>
+      <Label htmlFor={`image-resolution-ratio-${props.tier}`}>
+        {t('{{tier}} multiplier', { tier: props.tier.toUpperCase() })}
+      </Label>
+      <Input
+        id={`image-resolution-ratio-${props.tier}`}
+        type='number'
+        min={0.01}
+        step={0.1}
+        value={draft}
+        onChange={(event) => {
+          setDraft(event.target.value)
+          const value = event.target.valueAsNumber
+          if (Number.isFinite(value) && value > 0) {
+            props.onChange(props.tier, value)
+          }
+        }}
+      />
+    </div>
+  )
+}
+
 type GroupFormValues = {
   GroupRatio: string
+  ImageGroupResolutionRatio: string
   TopupGroupRatio: string
   UserUsableGroups: string
   GroupGroupRatio: string
@@ -92,6 +141,25 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
   const [guideOpen, setGuideOpen] = useState(false)
   const [section, setSection] = useState<GroupSettingsSection>('pricing')
+  const imageResolutionRatios = useMemo(
+    () =>
+      safeJsonParse<Record<ImageResolutionTier, number>>(
+        values.ImageGroupResolutionRatio ?? '',
+        { fallback: { '1k': 1, '2k': 1.6, '4k': 2 }, silent: true }
+      ),
+    [values.ImageGroupResolutionRatio]
+  )
+
+  const updateImageResolutionRatio = useCallback(
+    (tier: ImageResolutionTier, value: number) => {
+      form.setValue(
+        'ImageGroupResolutionRatio',
+        JSON.stringify({ ...imageResolutionRatios, [tier]: value }, null, 2),
+        { shouldValidate: true, shouldDirty: true }
+      )
+    },
+    [form, imageResolutionRatios]
+  )
 
   const handleFieldChange = useCallback(
     (field: keyof GroupFormValues, value: string) => {
@@ -164,73 +232,117 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           </Button>
         </SettingsPageActionsPortal>
         {editMode === 'visual' ? (
-          <GroupRatioVisualEditor
-            section={section}
-            onSectionChange={setSection}
-            groupRatio={values.GroupRatio ?? ''}
-            topupGroupRatio={values.TopupGroupRatio ?? ''}
-            userUsableGroups={values.UserUsableGroups ?? ''}
-            groupGroupRatio={values.GroupGroupRatio ?? ''}
-            autoGroups={values.AutoGroups ?? ''}
-            maxTokenAutoGroupsField={
-              <FormField
-                control={form.control}
-                name='MaxTokenAutoGroups'
-                render={({ field, fieldState }) => (
-                  <FormItem data-invalid={fieldState.invalid}>
-                    <FormLabel>
-                      {t('Maximum custom groups per token')}
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        {...safeNumberFieldProps(field)}
-                        type='number'
-                        min={1}
-                        step={1}
-                        aria-invalid={fieldState.invalid}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'Limits only token-specific Auto snapshots. Global Auto inheritance remains unlimited.'
-                      )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            }
-            defaultUseAutoGroupField={
-              <FormField
-                control={form.control}
-                name='DefaultUseAutoGroup'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{t('Default to auto groups')}</FormLabel>
+          <div className='space-y-6'>
+            <fieldset className='space-y-3'>
+              <legend className='text-sm font-medium'>
+                {t('Image group resolution multipliers')}
+              </legend>
+              <div className='grid gap-4 sm:grid-cols-3'>
+                {(['1k', '2k', '4k'] as const).map((tier) => (
+                  <ResolutionRatioInput
+                    key={tier}
+                    tier={tier}
+                    value={imageResolutionRatios[tier]}
+                    onChange={updateImageResolutionRatio}
+                  />
+                ))}
+              </div>
+            </fieldset>
+            <GroupRatioVisualEditor
+              section={section}
+              onSectionChange={setSection}
+              groupRatio={values.GroupRatio ?? ''}
+              topupGroupRatio={values.TopupGroupRatio ?? ''}
+              userUsableGroups={values.UserUsableGroups ?? ''}
+              groupGroupRatio={values.GroupGroupRatio ?? ''}
+              autoGroups={values.AutoGroups ?? ''}
+              maxTokenAutoGroupsField={
+                <FormField
+                  control={form.control}
+                  name='MaxTokenAutoGroups'
+                  render={({ field, fieldState }) => (
+                    <FormItem data-invalid={fieldState.invalid}>
+                      <FormLabel>
+                        {t('Maximum custom groups per token')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          {...safeNumberFieldProps(field)}
+                          type='number'
+                          min={1}
+                          step={1}
+                          aria-invalid={fieldState.invalid}
+                        />
+                      </FormControl>
                       <FormDescription>
                         {t(
-                          'If default auto group is enabled, newly created tokens start with auto instead of an empty group.'
+                          'Limits only token-specific Auto snapshots. Global Auto inheritance remains unlimited.'
                         )}
                       </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
-            }
-            groupSpecialUsableGroup={values.GroupSpecialUsableGroup ?? ''}
-            onChange={(field, value) =>
-              handleFieldChange(field as keyof GroupFormValues, value)
-            }
-          />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              }
+              defaultUseAutoGroupField={
+                <FormField
+                  control={form.control}
+                  name='DefaultUseAutoGroup'
+                  render={({ field }) => (
+                    <SettingsSwitchItem>
+                      <SettingsSwitchContent>
+                        <FormLabel>{t('Default to auto groups')}</FormLabel>
+                        <FormDescription>
+                          {t(
+                            'If default auto group is enabled, newly created tokens start with auto instead of an empty group.'
+                          )}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+              }
+              groupSpecialUsableGroup={values.GroupSpecialUsableGroup ?? ''}
+              onChange={(field, value) =>
+                handleFieldChange(field as keyof GroupFormValues, value)
+              }
+            />
+          </div>
         ) : (
           <SettingsForm onSubmit={form.handleSubmit(onSave)}>
+            <FormField
+              control={form.control}
+              name='ImageGroupResolutionRatio'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Image group resolution multipliers')}
+                  </FormLabel>
+                  <FormControl>
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      textareaRef={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON multipliers applied after model price and group ratio for 1K, 2K, and 4K images in the Image group.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             <FormField
               control={form.control}
               name='GroupRatio'

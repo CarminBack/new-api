@@ -338,6 +338,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "ImageGroupResolutionRatio":
+		err = ratio_setting.CheckImageGroupResolutionRatio(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "Image 分组图片分辨率倍率设置失败: " + err.Error(),
+			})
+			return
+		}
 	case "AudioRatio":
 		err = ratio_setting.UpdateAudioRatioByJSONString(option.Value.(string))
 		if err != nil {

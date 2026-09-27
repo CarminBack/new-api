@@ -211,3 +211,11 @@
 - 回归：真实controller链路首渠道发送created+failed(server_error)，第二渠道completed，客户端未看到failed、上游尝试2次、仅1次结算；单元覆盖嵌套失败、顶层错误和正文后失败。全仓go test、go vet、build通过，相关race三轮通过。
 - 提交57bb863f1经Actions 36285438585构建ARM64镜像digest sha256:df9a612625b727a5326600a3ee120a63de0d001db6a9454425cbb93786357430并部署测试站。真实HTTPS代理故障注入：首渠道created+failed无usage，备用渠道completed；客户端200且不含failed，route_attempts=2（首个502/uncertain/retry、第二个success），仅1条消费日志，用户/Token/日志扣额均550，临时数据已清理。正式部署待用户按生产确认门明确确认。
 - 图片价格只读核对：ImageGroupPrice为1K=0.10、2K=0.16、4K=0.20；gpt-image-2基础价0.10，gpt-image-1.5为0.10，gpt-image-2-exact/2.5/sunburst为0.30，flare为0.20，gemini-3-pro-image为0.10，imagen fast为0.20。共18个匹配图片模型渠道、14个启用。价格配置无修改。
+
+## 2026-09-27 Image 分组按模型价与分辨率倍率计费
+
+- 更正前述核对结论：当前同步代码仅保留数据库中的 `ImageGroupPrice` 值，实际计费链路没有读取该配置。因此正式当前现代图片模型实际为 `ModelPrice × GroupRatio × image_count`，1K/2K/4K 不会因该遗留配置改变价格。
+- 按用户选择改为 `ModelPrice × GroupRatio × ImageGroupResolutionRatio[tier] × image_count`，仅在实际使用 `Image` 分组且请求类型为图片时生效；默认倍率为1K=1、2K=1.6、4K=2。其他分组和非图片请求不变，无法识别的尺寸按4K倍率处理以避免少扣。
+- 新增独立动态选项 `ImageGroupResolutionRatio`，避免把旧的绝对美元价格配置误解释为倍率。后台分组设置页同时提供1K/2K/4K可视输入和JSON编辑；保存走现有Option API并即时更新内存，后续调价无需重建镜像或重启。
+- 回归覆盖Image分组2K、实际图片数量、未知尺寸4K兜底、其他分组和非图片请求；配置校验要求仅包含1k/2k/4k且均为有限正数。全仓 `go test ./...`、`go vet ./...`、`go build ./...`、前端typecheck/目标交互测试/生产构建、涉及文件定向lint及新增测试定向race通过。包级race仍触发既有全局logger及任务轮询并发基线，与本次路径无关。
+- 当前仅本地实现，尚未提交、推送、构建新镜像或部署；测试站与正式站运行状态、数据库和价格配置均未修改。正式仍运行17aed836e镜像，Responses失败切换仍仅在测试站候选中。

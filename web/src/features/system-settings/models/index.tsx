@@ -58,6 +58,7 @@ const defaultModelSettings: ModelSettings = {
   'tool_price_setting.prices': '{}',
   TopupGroupRatio: '',
   GroupRatio: '',
+  ImageGroupResolutionRatio: '{"1k":1,"2k":1.6,"4k":2}',
   UserUsableGroups: '',
   GroupGroupRatio: '',
   AutoGroups: '',

@@ -133,6 +133,25 @@ const createModelSchema = (t: Translate) =>
 const createGroupSchema = (t: Translate) =>
   z.object({
     GroupRatio: createJsonStringField(t),
+    ImageGroupResolutionRatio: createJsonStringField(t, {
+      predicate: (parsed) => {
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return false
+        }
+        const ratios = parsed as Record<string, unknown>
+        return (
+          Object.keys(ratios).length === 3 &&
+          ['1k', '2k', '4k'].every(
+            (tier) =>
+              typeof ratios[tier] === 'number' &&
+              Number.isFinite(ratios[tier]) &&
+              ratios[tier] > 0
+          )
+        )
+      },
+      predicateMessage:
+        'Expected positive numeric multipliers for 1k, 2k, and 4k',
+    }),
     TopupGroupRatio: createJsonStringField(t),
     UserUsableGroups: createJsonStringField(t),
     GroupGroupRatio: createJsonStringField(t),
@@ -243,6 +262,9 @@ export function RatioSettingsCard({
 
   const groupNormalizedDefaults = useRef({
     GroupRatio: normalizeJsonString(groupDefaults.GroupRatio),
+    ImageGroupResolutionRatio: normalizeJsonString(
+      groupDefaults.ImageGroupResolutionRatio
+    ),
     TopupGroupRatio: normalizeJsonString(groupDefaults.TopupGroupRatio),
     UserUsableGroups: normalizeJsonString(groupDefaults.UserUsableGroups),
     GroupGroupRatio: normalizeJsonString(groupDefaults.GroupGroupRatio),
@@ -283,6 +305,9 @@ export function RatioSettingsCard({
     defaultValues: {
       ...groupDefaults,
       GroupRatio: formatJsonForTextarea(groupDefaults.GroupRatio),
+      ImageGroupResolutionRatio: formatJsonForTextarea(
+        groupDefaults.ImageGroupResolutionRatio
+      ),
       TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
       UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
       GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
@@ -333,6 +358,9 @@ export function RatioSettingsCard({
   useEffect(() => {
     groupNormalizedDefaults.current = {
       GroupRatio: normalizeJsonString(groupDefaults.GroupRatio),
+      ImageGroupResolutionRatio: normalizeJsonString(
+        groupDefaults.ImageGroupResolutionRatio
+      ),
       TopupGroupRatio: normalizeJsonString(groupDefaults.TopupGroupRatio),
       UserUsableGroups: normalizeJsonString(groupDefaults.UserUsableGroups),
       GroupGroupRatio: normalizeJsonString(groupDefaults.GroupGroupRatio),
@@ -347,6 +375,9 @@ export function RatioSettingsCard({
     groupForm.reset({
       ...groupDefaults,
       GroupRatio: formatJsonForTextarea(groupDefaults.GroupRatio),
+      ImageGroupResolutionRatio: formatJsonForTextarea(
+        groupDefaults.ImageGroupResolutionRatio
+      ),
       TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
       UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
       GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
@@ -411,6 +442,9 @@ export function RatioSettingsCard({
     async (values: GroupFormValues) => {
       const normalized = {
         GroupRatio: normalizeJsonString(values.GroupRatio),
+        ImageGroupResolutionRatio: normalizeJsonString(
+          values.ImageGroupResolutionRatio
+        ),
         TopupGroupRatio: normalizeJsonString(values.TopupGroupRatio),
         UserUsableGroups: normalizeJsonString(values.UserUsableGroups),
         GroupGroupRatio: normalizeJsonString(values.GroupGroupRatio),
