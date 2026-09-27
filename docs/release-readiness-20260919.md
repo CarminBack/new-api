@@ -245,3 +245,12 @@
 - 提交 `42f85a54cfb7fe4887fa81a62a64212a969f25cd` 经Actions `36289630528` 构建，ARM64 digest为 `sha256:0310353ef6cba0fea0474747dab60da59d9cbe77d38aeac986bf57c4667e8850`，OCI revision匹配。
 - 候选部署测试站，原digest `sha256:e2fd70cace495e65b4a693a3fd96131eca8d5d47a6b8a6588bc976df0bcf6a0f`，compose备份 `/opt/docker/new-api-rc20-test/backups/compose-before-image-resolution-runtime-fix-20260927.yml`。
 - 隔离模拟上游真实链路验收：GPT Images `1440x1920` 与Gemini原生 `2K` 均按 `0.2 × 1.6 × 0.4 × 500000 = 64000` 结算，两请求用户/Token总差额均128000，日志与归档一致。0.4为测试用户组专属倍率，2K倍率1.6在两协议均生效。临时渠道、价格、日志、归档清零并刷新缓存；测试容器healthy、restart0、状态200。报告位于 `/opt/docker/new-api-rc20-test/verification/image-resolution-runtime-fix-20260927/report.json`。正式待确认。
+
+## 2026-09-27 同步官方 main 至 c2b7a9a9e
+
+- 在 `test/upstream-main-20260921-integration` 合并官方 `origin/main` 的9个新增提交，合并提交为 `90b5770877135b7046c00276e490c12ba960b1bd`，无冲突。官方新增内容主要为Claude `output_config`、Responses WebSocket设置保存、模型价格后台表达式差异高亮与选择体验；既有图片计费、视频任务、Responses终态、故障切换、渠道治理和支付/OAuth定制保持不变。
+- 没有将现有模型强制迁移为表达式计费；继续保留官方Ratio与 `tiered_expr` 双轨语义，避免改变当前正式价格。
+- 后端主模块与relaykit的 `go test ./...`、`go vet ./...`、`go build ./...` 均通过；前端typecheck、生产构建及全量Vitest通过，计171个测试文件、2124个用例。重点复验Responses WebSocket设置、模型价格选择和usage日志用例通过。
+- 修正一条既有usage日志测试：响应模型诊断是管理员专属，测试此前以普通用户身份断言管理员内容；现改为显式管理员上下文，不改变生产代码或展示权限。
+- 全库lint仍报告官方当前规则切换带来的大量存量问题，分布于上游新前端文件和既有文件；本次没有做无关的大规模格式重写。`git diff --check`通过。
+- 本轮只更新源码分支，尚未构建新的整合镜像，也未替换测试站或正式站。正式仍运行revision `5e86fa815...`；测试站仍运行图片修复候选revision `42f85a54c...`。
