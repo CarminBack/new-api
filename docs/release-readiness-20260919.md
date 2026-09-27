@@ -253,4 +253,5 @@
 - 后端主模块与relaykit的 `go test ./...`、`go vet ./...`、`go build ./...` 均通过；前端typecheck、生产构建及全量Vitest通过，计171个测试文件、2124个用例。重点复验Responses WebSocket设置、模型价格选择和usage日志用例通过。
 - 修正一条既有usage日志测试：响应模型诊断是管理员专属，测试此前以普通用户身份断言管理员内容；现改为显式管理员上下文，不改变生产代码或展示权限。
 - 全库lint仍报告官方当前规则切换带来的大量存量问题，分布于上游新前端文件和既有文件；本次没有做无关的大规模格式重写。`git diff --check`通过。
-- 本轮只更新源码分支，尚未构建新的整合镜像，也未替换测试站或正式站。正式仍运行revision `5e86fa815...`；测试站仍运行图片修复候选revision `42f85a54c...`。
+- 本轮只更新源码分支，尚未替换测试站或正式站。正式仍运行revision `5e86fa815...`；测试站仍运行图片修复候选revision `42f85a54c...`。
+- 集成验证提交 `5d99793b9b96cd9fcc219e657d2fd20eefaf03d0` 已推送fork。Actions `36291269632` 手动构建成功，不可变候选digest为 `sha256:123e39a5e2b6b487baefbcbc6653df2a82cf455bebd722374e59fbfdafbbd964`；镜像平台为Linux ARM64，OCI revision与提交精确匹配。尚未部署。
