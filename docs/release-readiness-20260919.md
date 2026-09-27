@@ -192,3 +192,21 @@
 - 已准备只针对测试域名的 map + Connection 修复，普通HTTP仍为空头；文件位于服务器 /opt/docker/new-api-rc20-test/verification/ws-proxy-20260927/{before,candidate,validation}.conf，独立 nginx -t 通过。未更改活动配置、未 reload；其生效需要重载与正式站共用的 1Panel-openresty-MzcZ，待明确授权。回滚为恢复 before.conf 后 nginx -t + 平滑reload；验证包括测试WSS握手/多轮/取消/账本以及正式域名HTTP健康。
 - 检查：go build ./...、涉及包 go vet 和定向 race 通过；全仓 go test ./... 一轮通过，最终重跑仅既有 TestSecurityAccountDeletionConcurrentRequestsHaveOneWinner 出现 SQLite 并发波动（expected 1 / actual 0），该测试与全部 TestResponses 定向复跑通过。不能宣称最终全仓验收无失败。
 - 正式站与测试站应用镜像均未在本轮替换；历史日志未改写。服务器只进行了握手检查、候选配置准备及 dry-run。
+
+## 2026-09-27 正式发布完成（后续授权与验收）
+
+- 用户明确同意平滑重载共享OpenResty；应用测试域名候选后握手由400恢复101，正式应用未受该次配置重载影响。固定候选17aed836e333f3adc230cef51c48c17cc5d24c18经Actions 36283232267构建，ARM64与OCI revision核对通过，digest为sha256:9c8fd06879cc36864467bb78812819d5dcd4efa0af86e28d0729bd17b0d0dac1。
+- 新镜像先部署测试站，经真实HTTPS代理接隔离模拟上游：同一WS连接两轮完成→取消→继续完成→真实failed，加SSE完成后关闭、完成前关闭、failed，共8个请求恰有8条消费日志。用户/令牌/日志扣额均3360；完成后关闭有completion_delivered=true且request_policy=success，提前关闭与failed均error。写入/flush失败由本地故障writer及真实HTTP回归覆盖，定向race三轮通过。最终go test ./...退出0、go vet ./...退出0、go build ./...通过；先前SQLite并发测试波动仍是已知基线，未通过修改该测试掩盖。
+- 正式只读核对纠正旧记录：正式与测试当时RetryTimes均为3，ImageGroupPrice均已有1K/2K/4K=0.10/0.16/0.20；本次没有重设价格或复制测试options。正式两条旧亲和规则codex/claude cli trace迁为显式prefer、skip_retry_on_failure=false，保持旧正式故障可切换行为；正式token域名Connection改为按Upgrade映射。
+- 正式备份目录 /opt/docker/new-api/backups/release-20260927：单事务MySQL完整dump约649MB gzip、媒体data.tar约6.16GB，gzip -t与tar目录校验通过；保存原compose、运行环境、完整options和代理配置。dump在正式运行期间取得，不可用于覆盖发布后新增交易。镜像/配置可分别回退；涉及数据恢复必须另行冻结写入并评估差额。
+- 验收满足用户有条件发布授权后，正式new-api-docker切换同一digest，操作约44秒；healthy/restart0。运行环境、数据挂载及除亲和以外所有既有options逐项保持一致（支付/OAuth/价格等未覆盖）。正式token与image-api域名、测试域名均健康。
+- 正式域名再次运行同样8场景，消费日志8条，用户/令牌/日志扣额再次均3360，结果通过。临时用户、令牌、渠道、消费日志清理并核对无残留，模拟进程已终止。报告分别保存在测试verification/stream-ws-20260927/report.json与正式备份verification/report.json，final-health.json记录最终状态。
+- WebSocket范围：网关及代理已上线并通过模拟上游链路验收；既有上游渠道开关保持原状（发布前没有开启WS的正式渠道），未声称真实商业上游都支持。需按提供商能力单独开启渠道。WS既有结算先于终态发送的机制未在本次改动，completion_delivered标记仅对native Responses SSE作确认。
+
+## 2026-09-27 Responses 上游失败自动切换修复
+
+- 正式只读排查确认“upstream service temporarily unavailable”不是应用或代理重启：两者restart均为0。存在请求前无可用渠道的毫秒级503，以及上游在约45–48秒后仅发送response.failed的真实失败；后者主要见于gpt-6-astra渠道211，而渠道205同期可正常完成。
+- 原因：native Responses SSE会先把response.failed写给客户端，随后主relay看到下游已开始，不能重放，因此无正文失败也失去备用渠道切换机会。
+- 修复：当上游失败终态到达、下游尚未收到任何事件且失败不含usage时，丢弃缓冲元数据并返回结构化上游错误给主relay，由既有错误分类、预算、亲和及渠道健康策略决定是否切换。已有正文/下游事件或失败已带usage时仍原样发送且禁止重放，避免重复输出或忽略已发生的上游用量；业务拒绝仍由既有分类停止，不泛化重试。
+- 回归：真实controller链路首渠道发送created+failed(server_error)，第二渠道completed，客户端未看到failed、上游尝试2次、仅1次结算；单元覆盖嵌套失败、顶层错误和正文后失败。相关包race三轮、vet和build通过。正式部署尚未执行。
+- 图片价格只读核对：ImageGroupPrice为1K=0.10、2K=0.16、4K=0.20；gpt-image-2基础价0.10，gpt-image-1.5为0.10，gpt-image-2-exact/2.5/sunburst为0.30，flare为0.20，gemini-3-pro-image为0.10，imagen fast为0.20。共18个匹配图片模型渠道、14个启用。价格配置无修改。

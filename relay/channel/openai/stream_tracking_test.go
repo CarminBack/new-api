@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -126,15 +127,54 @@ func TestResponsesStreamTerminalEventWithoutDoneIsNotRetryable(t *testing.T) {
 	assert.Nil(t, err, "a terminal event closes the stream even without [DONE]")
 }
 
+// A terminal failure before output must stay private so the relay can fail over.
+func TestResponsesStreamFailureBeforeOutputIsRetryable(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, code, errorType string
+	}{
+		{name: "nested server error", body: `{"type":"response.failed","response":{"id":"r","status":"failed","error":{"code":"server_error","type":"server_error","message":"temporarily unavailable"}}}`, code: "server_error", errorType: "server_error"},
+		{name: "top-level rate limit", body: `{"type":"error","code":"rate_limit_exceeded","message":"try later"}`, code: "rate_limit_exceeded", errorType: "upstream_error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r\"}}\n\n" + "data: " + tc.body + "\n\n"
+			c, w, info, err := runResponsesStream(t, body)
+			require.Error(t, err)
+			assert.Empty(t, w.Body.String())
+			assert.False(t, common.GetContextKeyBool(c, constant.ContextKeyStreamDownstreamStarted))
+			assert.True(t, info.StreamStatus.ResponseFailed())
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			assert.Equal(t, tc.code, fmt.Sprint(apiErr.GetErrorCode()))
+			assert.Equal(t, tc.errorType, apiErr.ToOpenAIError().Type)
+			assert.False(t, types.IsSkipRetryError(apiErr))
+		})
+	}
+}
+
+// Once content was emitted, forwarding response.failed is terminal: replaying
+// on another channel would duplicate the partial answer.
+func TestResponsesStreamFailureAfterOutputIsNotRetried(t *testing.T) {
+	body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n" +
+		"data: {\"type\":\"response.failed\",\"response\":{\"id\":\"r\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"type\":\"server_error\",\"message\":\"temporarily unavailable\"}}}\n\n"
+
+	c, w, info, err := runResponsesStream(t, body)
+
+	require.NoError(t, err)
+	assert.Contains(t, w.Body.String(), "response.failed")
+	assert.True(t, common.GetContextKeyBool(c, constant.ContextKeyStreamActualOutputStarted))
+	assert.True(t, info.StreamStatus.ResponseFailed())
+}
+
 // Buffered metadata alone does not count as content: the client never saw it.
-func TestResponsesStreamBufferedMetadataPlusTerminalIsNotRetryable(t *testing.T) {
+func TestResponsesStreamBufferedMetadataPlusTerminalIsRetryable(t *testing.T) {
 	body := "data: {\"type\":\"response.in_progress\"}\n\n" +
 		"data: {\"type\":\"response.failed\",\"response\":{\"id\":\"r\",\"status\":\"failed\"}}\n\n"
 
-	c, _, info, _ := runResponsesStream(t, body)
+	_, w, info, err := runResponsesStream(t, body)
 
+	require.Error(t, err)
+	assert.Empty(t, w.Body.String())
 	assert.Equal(t, "response.failed", info.StreamTerminalEvent)
-	assert.False(t, common.GetContextKeyBool(c, constant.ContextKeyStreamActualOutputStarted))
 }
 
 // A writer that exposes failures hidden by Gin's http.Flusher interface.

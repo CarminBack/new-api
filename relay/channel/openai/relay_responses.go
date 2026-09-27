@@ -141,6 +141,27 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			info.StreamUsagePresent = streamResponse.Response != nil && streamResponse.Response.Usage != nil
 		}
 		accumulator.Observe(&streamResponse)
+		if info.StreamStatus.ResponseFailed() && !streamDownstreamStarted() && !info.StreamUsagePresent {
+			// Nothing has reached the client, so keep terminal failures private and
+			// let the ordinary relay policy decide whether another channel is safe.
+			pending = pending[:0]
+			oaiErr := &types.OpenAIError{
+				Message: streamResponse.Message,
+				Type:    "upstream_error",
+				Code:    streamResponse.Code,
+			}
+			if streamResponse.Response != nil {
+				if responseErr := streamResponse.Response.GetOpenAIError(); responseErr != nil {
+					oaiErr = responseErr
+				}
+			}
+			if oaiErr.Message == "" {
+				oaiErr.Message = "upstream Responses stream failed before producing output"
+			}
+			streamErr = types.WithOpenAIError(*oaiErr, http.StatusBadGateway)
+			sr.Stop(streamErr)
+			return
+		}
 		switch streamResponse.Type {
 		case "response.created", "response.in_progress", "response.queued":
 			pending = append(pending, pendingEvent{response: streamResponse, data: data})
