@@ -259,3 +259,14 @@
 - 测试站真实HTTP图片账本复验通过：GPT Images `1440x1920` 与Gemini原生 `2K` 各扣64000，公式仍为 `0.2 × 1.6 × 0.4 × 500000`；用户与Token总差额均128000，消费日志和图片归档一致。
 - Responses代理验收通过：同一WSS连接多轮完成、取消、继续完成及失败，加SSE完成后断开、完成前断开和失败，共8个请求恰有8条消费日志；用户、Token、日志均扣3360，成功/失败状态与completion delivery判定符合预期。
 - 临时图片渠道、价格、日志、归档及Responses用户、Token、渠道和日志均已清理。最终测试容器digest/revision匹配、healthy、restart0，本地与公网状态200，近20分钟日志无panic/fatal；正式站未修改。
+
+## 2026-09-27 图片计费重试边界修复候选
+
+- 修复渠道参数覆盖后的计费输入：OpenAI Images 在参数覆盖和请求转换完成后，从最终出站 JSON 刷新 `n` 与 `size`，并使用独立计费请求，不修改原始入口请求。实际发送 2K/4K 时，预扣和最终结算不再沿用客户端原始尺寸。
+- `PriceData` 新增单项倍率删除能力。每次计费尝试先清除旧 `image_resolution`，仅当前实际分组为 `Image` 时重新写入，避免 Image 到非 Image 的跨组重试或不同渠道重试串用上次倍率。
+- 明确图片 modality、Google `imageConfig` 或 Gemini 原生 `imageConfig` 且省略尺寸时统一按默认 1K；普通文本请求仍不套图片倍率。
+- 回归覆盖最终出站 `size/n` 覆盖、出站无尺寸时保留原尺寸、最终尺寸参与预扣、离开 Image 分组清除倍率、三类图片意图省略尺寸按 1K，以及多次调用不残留。定向测试连续10轮、定向race连续3轮、主模块与relaykit全量test/vet/build、前端typecheck/build和降低并发后的171文件/2124个Vitest全部通过。
+- 提交 `7830d8864819b59aaaab3bf146e848370c2c3bc7` 已推送 fork；Actions `36293248678` 成功。Linux ARM64固定镜像digest为 `sha256:edb4cff28369ee1240ad5149f55c34729f3778e41cd50082af267b4c979a5d69`，OCI revision匹配。
+- 候选已部署测试站，回滚compose为 `/opt/docker/new-api-rc20-test/backups/compose-before-image-billing-boundary-fix-20260927.yml`，回滚digest为 `sha256:123e39a5e2b6b487baefbcbc6653df2a82cf455bebd722374e59fbfdafbbd964`。
+- 新增真实参数覆盖验收：客户端请求1K，渠道覆盖为4K；归档尺寸为4K，用户、Token、日志和归档均只扣80000，符合 `0.2 × 2 × 0.4 × 500000`。GPT Images `1440x1920` 与Gemini原生 `2K` 主路径各扣64000，两请求用户/Token总差额128000，日志及归档一致。
+- Responses代理回归仍通过8场景，8请求恰有8条消费日志，用户/Token/日志均扣3360。所有临时用户、Token、渠道、模型价、日志和图片归档残留为0；测试站healthy、restart0，本地与公网状态200，近20分钟无panic/fatal。正式环境尚未替换，等待生产确认门授权。
