@@ -295,3 +295,10 @@
 - 用户明确确认后，正式 `new-api-docker` 从旧镜像切换至候选 digest `sha256:65a13f952e2d0662c427162a655cab4e7a7be30d6b1c194cb802402193bb9011`，代码 revision `582fb8c60` 匹配。切换前备份 Compose、环境文件、4个相关计费 Option 和渠道17非敏感映射字段，目录 `/opt/docker/new-api/backups/release-20260927/aistarslab-price-sync-20260927-081515/`，权限0700/0600。
 - 使用正式已保存利润率35%（markup rate 1.35）执行同步：AistarsLab源配置30个模型，27个按秒、3个按次总价；更新4个ModelPrice、2个计费表达式、2个渠道映射，移除4个源配置已不存在的旧Seedance别名。历史账单未修改，未执行追扣。
 - 新容器 healthy、restart0，正式本地状态接口及 `token.mewinyou.shop`、`image-api.mewinyou.shop` 均200；最近5分钟无panic/fatal/数据库或迁移错误。
+
+## 2026-09-27 同步500与扣费详情修复正式发布
+
+- 根因是同步无变化时旧响应的变化字段为 `null`，前端 `.map()` 触发通用500错误页；后端现在始终返回空数组，前端也兼容旧响应。
+- 扣费记录列表改为仅显示可点击金额，弹窗显示总扣费和中文具体扣费规则。
+- 用户确认后正式切换至修复候选 `sha256:3123ef8faf65edaed0ca8511e5cfae6659ff720eb258c5fe01eb1e4ec709756b`（revision `a2a648279`）。备份目录 `/opt/docker/new-api/backups/release-20260927/billing-details-fix-20260927-084710/`，权限0700/0600。
+- 正式同步dry-run成功，5个变化字段均为数组；任务日志API成功，容器healthy、restart0，两个正式域名200，最近5分钟无同步500或服务端严重错误。
