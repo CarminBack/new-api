@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
@@ -55,6 +56,7 @@ type AistarsLabSyncResult struct {
 	AddedModels       []string                     `json:"added_models"`
 	RemovedModels     []string                     `json:"removed_models"`
 	ExpressionChanges []AistarsLabExpressionChange `json:"expression_changes"`
+	PriceChanges      []AistarsLabPriceChange      `json:"price_changes"`
 	MappingChanges    []AistarsLabMappingChange    `json:"mapping_changes"`
 	Models            []AistarsLabSeedanceModel    `json:"models"`
 }
@@ -63,6 +65,12 @@ type AistarsLabExpressionChange struct {
 	Model string `json:"model"`
 	Old   string `json:"old,omitempty"`
 	New   string `json:"new,omitempty"`
+}
+
+type AistarsLabPriceChange struct {
+	Model string   `json:"model"`
+	Old   *float64 `json:"old,omitempty"`
+	New   *float64 `json:"new,omitempty"`
 }
 
 type AistarsLabMappingChange struct {
@@ -184,7 +192,7 @@ func SyncAistarsLabConfig(ctx context.Context, request AistarsLabSyncRequest) (*
 	if request.DryRun {
 		return result, nil
 	}
-	if err := applyAistarsLabSync(request.ChannelID, models); err != nil {
+	if err := applyAistarsLabSync(request.ChannelID, request.MarkupRate, models); err != nil {
 		return nil, err
 	}
 	model.RefreshPricing()
@@ -356,6 +364,7 @@ func buildAistarsLabSyncResult(request AistarsLabSyncRequest, models []AistarsLa
 	result := &AistarsLabSyncResult{DryRun: request.DryRun, ChannelID: request.ChannelID, ConfigURL: request.ConfigURL,
 		CreditRate: request.CreditRate, MarkupRate: request.MarkupRate, TotalModels: len(models), Models: models}
 	oldExpressions := billing_setting.GetConfiguredBillingExprCopy()
+	oldPrices := ratio_setting.GetModelPriceCopy()
 	oldMappings := getAistarsLabChannelMapping(request.ChannelID)
 	current := make(map[string]bool, len(models))
 	for _, item := range models {
@@ -367,31 +376,63 @@ func buildAistarsLabSyncResult(request AistarsLabSyncRequest, models []AistarsLa
 		if oldExpression != item.BillingExpression {
 			result.ExpressionChanges = append(result.ExpressionChanges, AistarsLabExpressionChange{Model: item.PublicModel, Old: oldExpression, New: item.BillingExpression})
 		}
+		if oldPrice, exists := oldPrices[item.PublicModel]; !exists || math.Abs(oldPrice-item.Price) > 1e-9 {
+			var old *float64
+			if exists {
+				value := oldPrice
+				old = &value
+			}
+			value := item.Price
+			result.PriceChanges = append(result.PriceChanges, AistarsLabPriceChange{Model: item.PublicModel, Old: old, New: &value})
+		}
 		if oldMappings[item.PublicModel] != item.UpstreamModel {
 			result.MappingChanges = append(result.MappingChanges, AistarsLabMappingChange{Model: item.PublicModel, Old: oldMappings[item.PublicModel], New: item.UpstreamModel})
 		}
 	}
-	for name := range oldExpressions {
-		if isAistarsLabSeedanceAlias(name) && !current[name] {
+	removed := make(map[string]bool)
+	markRemoved := func(name string) {
+		if !removed[name] {
+			removed[name] = true
 			result.RemovedModels = append(result.RemovedModels, name)
-			result.ExpressionChanges = append(result.ExpressionChanges, AistarsLabExpressionChange{Model: name, Old: oldExpressions[name]})
+		}
+	}
+	for name, oldExpression := range oldExpressions {
+		if isAistarsLabSeedanceAlias(name) && !current[name] {
+			markRemoved(name)
+			result.ExpressionChanges = append(result.ExpressionChanges, AistarsLabExpressionChange{Model: name, Old: oldExpression})
+		}
+	}
+	for name, oldPrice := range oldPrices {
+		if isAistarsLabSeedanceAlias(name) && !current[name] {
+			markRemoved(name)
+			value := oldPrice
+			result.PriceChanges = append(result.PriceChanges, AistarsLabPriceChange{Model: name, Old: &value})
+		}
+	}
+	for name, oldMapping := range oldMappings {
+		if isAistarsLabSeedanceAlias(name) && !current[name] {
+			markRemoved(name)
+			result.MappingChanges = append(result.MappingChanges, AistarsLabMappingChange{Model: name, Old: oldMapping})
 		}
 	}
 	sort.Strings(result.AddedModels)
 	sort.Strings(result.RemovedModels)
 	sort.Slice(result.ExpressionChanges, func(i, j int) bool { return result.ExpressionChanges[i].Model < result.ExpressionChanges[j].Model })
+	sort.Slice(result.PriceChanges, func(i, j int) bool { return result.PriceChanges[i].Model < result.PriceChanges[j].Model })
 	sort.Slice(result.MappingChanges, func(i, j int) bool { return result.MappingChanges[i].Model < result.MappingChanges[j].Model })
 	return result
 }
 
-func applyAistarsLabSync(channelID int, modelsToSync []AistarsLabSeedanceModel) error {
+func applyAistarsLabSync(channelID int, markupRate float64, modelsToSync []AistarsLabSeedanceModel) error {
 	modes := billing_setting.GetConfiguredBillingModeCopy()
 	expressions := billing_setting.GetConfiguredBillingExprCopy()
+	prices := ratio_setting.GetModelPriceCopy()
 	active := make(map[string]bool, len(modelsToSync))
 	for _, item := range modelsToSync {
 		active[item.PublicModel] = true
 		modes[item.PublicModel] = billing_setting.BillingModeTieredExpr
 		expressions[item.PublicModel] = item.BillingExpression
+		prices[item.PublicModel] = item.Price
 	}
 	for name := range modes {
 		if isAistarsLabSeedanceAlias(name) && !active[name] {
@@ -403,6 +444,11 @@ func applyAistarsLabSync(channelID int, modelsToSync []AistarsLabSeedanceModel) 
 			delete(expressions, name)
 		}
 	}
+	for name := range prices {
+		if isAistarsLabSeedanceAlias(name) && !active[name] {
+			delete(prices, name)
+		}
+	}
 	modeJSON, err := common.Marshal(modes)
 	if err != nil {
 		return err
@@ -411,9 +457,15 @@ func applyAistarsLabSync(channelID int, modelsToSync []AistarsLabSeedanceModel) 
 	if err != nil {
 		return err
 	}
+	priceJSON, err := common.Marshal(prices)
+	if err != nil {
+		return err
+	}
 	if err := model.UpdateOptionsBulk(map[string]string{
-		"billing_setting.billing_mode": string(modeJSON),
-		"billing_setting.billing_expr": string(expressionJSON),
+		billing_setting.BillingModeField: string(modeJSON),
+		billing_setting.BillingExprField: string(expressionJSON),
+		"ModelPrice":                     string(priceJSON),
+		"AistarsLabMarkupRate":           strconv.FormatFloat(markupRate, 'f', -1, 64),
 	}); err != nil {
 		return err
 	}

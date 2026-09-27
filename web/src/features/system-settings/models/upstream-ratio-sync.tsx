@@ -46,6 +46,7 @@ import type {
   UpstreamChannel,
   UpstreamConfig,
 } from '../types'
+import { AistarsLabSync } from './aistarslab-sync'
 import { ChannelSelectorDialog } from './channel-selector-dialog'
 import {
   ConflictConfirmDialog,
@@ -282,6 +283,7 @@ export function UpstreamRatioSync() {
     loadingBaseline || fetchMutation.isPending || syncMutation.isPending
   return (
     <div className='flex h-full min-h-0 flex-col gap-3'>
+      <AistarsLabSync />
       <div className='min-h-0 flex-1'>
         {fetchMutation.isError ? (
           <ErrorState

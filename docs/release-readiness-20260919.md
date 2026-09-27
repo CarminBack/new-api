@@ -282,3 +282,9 @@
 - 绘图日志和任务日志列表将“任务ID”主列替换为“扣费记录”：显示最终quota和计算链；任务ID仍保留在详情及筛选。任务DTO增加只读安全计费快照，仅包含价格、倍率、表达式和usage facts；旧记录无快照时显示通用规则，避免以当前价格伪造历史计算。
 - 新增后端DTO及前端规则、移动卡片测试。主模块全量test/vet/build、relaykit全量test/vet/build、前端typecheck/build和Vitest 172文件/2128用例均通过。测试站部署Linux ARM64候选 `sha256:3fa9bdfd9eab5fdd70baa0f8f025cd8c4fd9201cdc7c062e6d0b06284bfcb7ee`（revision `c84c66c5cc504d83d6af0377cd5ae9d8ba176513`）；Playwright在1440×1000及390×844验证绘图/任务日志均显示金额和规则且没有任务ID主列，截图检查无重叠。临时用户、会话、任务、绘图及审计记录全部清零；测试站healthy、restart0、状态接口200。独立reviewer受非Herdr会话限制未启动。
 - 用户确认后，正式 `new-api-docker` 在41秒内切换到同一不可变digest；环境变量和数据挂载保持不变，容器healthy、restart0，两个正式域名均200。正式最近10条任务和绘图API均返回最终quota；旧任务无计费快照时按设计显示通用规则，DTO响应未暴露private_data、上游请求/响应或渠道凭证。近10分钟无panic/fatal/数据库或迁移错误。备份及报告位于 `/opt/docker/new-api/backups/release-20260927/billing-log-ui-20260927/`（目录0700、文件0600），回滚digest为 `sha256:edb4cff28369ee1240ad5149f55c34729f3778e41cd50082af267b4c979a5d69`。
+
+## 2026-09-27 扣费公式细化与渠道17利润同步恢复
+
+- 任务扣费记录对含安全计费快照的新任务明确显示按秒或按次、单位价格、实际用量、分组倍率和计算金额，例如 `按秒收费: 单价 $0.7/秒; 10 秒 × $0.7/秒 × 0.4x 分组 = $2.8`；主金额仍读取最终quota，历史无快照记录继续显示通用规则，不以当前配置反推。
+- 恢复渠道17 AistarsLab利润同步管理区：按 `上游credits ÷ 100 × (1 + 利润率)` 生成两位小数模型单价，预览并确认后批量更新 `ModelPrice`、`billing_mode/billing_expr` 和利润率配置，并同步渠道模型映射。现代按秒/按次语义由 `u("seconds")`/`u("videos")` 表达式承担，不恢复已淘汰的 `TaskBillingUnit` 运行时依赖。
+- 主模块全量test/vet/build、relaykit全量test/vet/build、前端typecheck、生产构建及Vitest 172文件/2130用例通过；新增公式和同步定向测试最终14用例通过。全仓格式检查仅报告20个既有且未修改文件，本次修改文件未被报告。独立跨模型reviewer仍因当前会话不在Herdr环境无法启动。本次未部署、未修改测试或正式运行配置。

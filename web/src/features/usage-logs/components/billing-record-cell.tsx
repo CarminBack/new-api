@@ -31,52 +31,77 @@ function compactNumber(value: number): string {
   )
 }
 
+function formatAmount(value: number): string {
+  return formatBillingCurrencyFromUSD(value)
+}
+
+function usageUnit(facts: Record<string, unknown>): {
+  label: string
+  key: 'seconds' | 'videos'
+  value: number
+} | null {
+  if (finitePositive(facts.seconds)) {
+    return { label: 'per second', key: 'seconds', value: facts.seconds }
+  }
+  if (finitePositive(facts.duration)) {
+    return { label: 'per second', key: 'seconds', value: facts.duration }
+  }
+  if (finitePositive(facts.videos)) {
+    return { label: 'per item', key: 'videos', value: facts.videos }
+  }
+  return null
+}
+
+function defaultBillingTranslation(key: string): string {
+  return key === 'seconds short' ? 's' : key
+}
+
 export function taskBillingRule(
   billing: TaskBillingInfo | undefined,
-  fallback: string
+  fallback: string,
+  translate: (key: string) => string = defaultBillingTranslation
 ): string {
   if (!billing) return fallback
 
+  const facts = {
+    ...(billing.other_ratios ?? {}),
+    ...(billing.usage_facts ?? {}),
+  }
+  const unit = usageUnit(facts)
+  const group =
+    typeof billing.group_ratio === 'number' &&
+    Number.isFinite(billing.group_ratio)
+      ? billing.group_ratio
+      : 1
+  const unitPrice = finitePositive(billing.model_price)
+    ? billing.model_price
+    : null
+  if (unit && unitPrice != null) {
+    const total = unitPrice * unit.value * group
+    const unitName =
+      unit.key === 'seconds' ? translate('seconds short') : translate('item')
+    return `${translate(unit.label)}: ${translate('Unit price')} ${formatAmount(unitPrice)}/${unitName}; ${compactNumber(unit.value)} ${unitName} × ${formatAmount(unitPrice)}/${unitName} × ${compactNumber(group)}x ${translate('group')} = ${formatAmount(total)}`
+  }
+
   const parts: string[] = []
-  if (finitePositive(billing.model_price)) {
-    parts.push(formatBillingCurrencyFromUSD(billing.model_price))
-  } else if (finitePositive(billing.model_ratio)) {
+  if (unitPrice != null) parts.push(formatAmount(unitPrice))
+  else if (finitePositive(billing.model_ratio))
     parts.push(`${compactNumber(billing.model_ratio)}x`)
-  }
-
-  const facts = billing.usage_facts ?? {}
-  if (finitePositive(facts.seconds)) {
-    parts.push(`${compactNumber(facts.seconds)} s`)
-  } else if (finitePositive(facts.duration)) {
-    parts.push(`${compactNumber(facts.duration)} s`)
-  } else if (finitePositive(facts.videos)) {
-    parts.push(`${compactNumber(facts.videos)} item`)
-  }
-
-  if (parts.length < 2) {
-    for (const [key, value] of Object.entries(billing.other_ratios ?? {})) {
-      if (!finitePositive(value) || value === 1) continue
-      parts.push(
-        key === 'seconds' || key === 'duration'
-          ? `${compactNumber(value)} s`
-          : `${key} ${compactNumber(value)}x`
-      )
-    }
-  }
-
-  if (finitePositive(billing.group_ratio)) {
-    parts.push(`${compactNumber(billing.group_ratio)}x group`)
-  }
-
+  if (unit)
+    parts.push(
+      `${compactNumber(unit.value)} ${unit.key === 'seconds' ? translate('seconds short') : translate('item')}`
+    )
+  if (Number.isFinite(group))
+    parts.push(`${compactNumber(group)}x ${translate('group')}`)
   return parts.length >= 2 ? parts.join(' × ') : fallback
 }
 
 export function BillingRecordCell(props: BillingRecordCellProps) {
   const { t } = useTranslation()
-  const rule = taskBillingRule(props.billing, props.fallbackRule)
+  const rule = taskBillingRule(props.billing, props.fallbackRule, t)
 
   return (
-    <div className='flex max-w-[230px] flex-col items-start gap-1'>
+    <div className='flex max-w-[360px] flex-col items-start gap-1'>
       <StatusBadge
         type='badge'
         variant='neutral'
@@ -88,10 +113,10 @@ export function BillingRecordCell(props: BillingRecordCellProps) {
         <span className='whitespace-nowrap'>{formatLogQuota(props.quota)}</span>
       </StatusBadge>
       <span
-        className='text-muted-foreground max-w-full truncate text-[11px]'
+        className='text-muted-foreground max-w-[360px] text-[11px] leading-4 break-words whitespace-normal'
         title={rule}
       >
-        {t(rule)}
+        {rule}
       </span>
     </div>
   )

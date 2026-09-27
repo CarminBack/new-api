@@ -106,6 +106,14 @@ func TestSyncAistarsLabConfigDryRun(t *testing.T) {
 	assert.True(t, result.DryRun)
 	assert.Equal(t, "seedance-720p-c47", result.Models[0].PublicModel)
 	assert.Equal(t, `tier("base", u("seconds") * 0.7)`, result.Models[0].BillingExpression)
+	require.Len(t, result.PriceChanges, 1)
+	assert.Equal(t, "seedance-720p-c47", result.PriceChanges[0].Model)
+	require.NotNil(t, result.PriceChanges[0].New)
+	assert.InDelta(t, 0.7, *result.PriceChanges[0].New, 1e-9)
+	require.Len(t, result.ExpressionChanges, 1)
+	assert.Equal(t, `tier("base", u("seconds") * 0.7)`, result.ExpressionChanges[0].New)
+	require.Len(t, result.MappingChanges, 1)
+	assert.Equal(t, "47:seedance-2.0", result.MappingChanges[0].New)
 }
 
 func newAistarsLabQuality(quality, pricingType string, credits float64) aistarsLabQuality {

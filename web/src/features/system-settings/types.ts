@@ -481,3 +481,34 @@ export type UpstreamRatiosResponse = {
     test_results: TestResult[]
   }
 }
+
+export type AistarsLabSyncRequest = {
+  dry_run: boolean
+  markup_rate: number
+  channel_id?: number
+}
+
+export type AistarsLabValueChange<T> = {
+  model: string
+  old?: T
+  new?: T
+}
+
+export type AistarsLabSyncResult = {
+  dry_run: boolean
+  channel_id: number
+  credit_rate: number
+  markup_rate: number
+  total_models: number
+  added_models: string[]
+  removed_models: string[]
+  expression_changes: AistarsLabValueChange<string>[]
+  price_changes: AistarsLabValueChange<number>[]
+  mapping_changes: AistarsLabValueChange<string>[]
+}
+
+export type AistarsLabSyncResponse = {
+  success: boolean
+  message: string
+  data?: AistarsLabSyncResult
+}

@@ -35,6 +35,7 @@ import {
 } from '@/features/model-pricing/pricing'
 import { api } from '@/lib/api'
 
+import { AistarsLabSync } from '../models/aistarslab-sync'
 import { UpstreamRatioSync } from '../models/upstream-ratio-sync'
 import {
   getSyncPriceLines,
@@ -101,7 +102,76 @@ function TableFixture(props: { prices: PricingSyncModels }) {
     />
   )
 }
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
+
+describe('Channel 17 profit synchronization', () => {
+  it('previews model prices, billing formulas, and mappings with the configured profit', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: [{ key: 'AistarsLabMarkupRate', value: '1.45' }],
+      },
+    })
+    const post = vi.spyOn(api, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          dry_run: true,
+          channel_id: 17,
+          credit_rate: 100,
+          markup_rate: 1.45,
+          total_models: 1,
+          added_models: [],
+          removed_models: [],
+          price_changes: [{ model: 'seedance-720p-c47', old: 0.7, new: 0.78 }],
+          expression_changes: [
+            {
+              model: 'seedance-720p-c47',
+              old: 'old',
+              new: 'tier("base", u("seconds") * 0.78)',
+            },
+          ],
+          mapping_changes: [
+            {
+              model: 'seedance-720p-c47',
+              old: 'old-model',
+              new: '47:seedance-2.0',
+            },
+          ],
+        },
+      },
+    })
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <AistarsLabSync />
+      </QueryClientProvider>
+    )
+    expect(await screen.findByDisplayValue('45')).toBeVisible()
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Preview' }))
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/ratio_sync/aistarslab/sync', {
+        dry_run: true,
+        markup_rate: 1.45,
+        channel_id: 17,
+      })
+    )
+    expect(await screen.findAllByText('seedance-720p-c47')).toHaveLength(3)
+    expect(screen.getByText('0.78')).toBeVisible()
+    expect(screen.getByText('Billing formula')).toBeVisible()
+    expect(screen.getByText('Channel mapping')).toBeVisible()
+  })
+})
 
 describe('pricing synchronization', () => {
   it('shows every dollar price inline, including explicit zero cache and audio prices', () => {
@@ -160,17 +230,34 @@ describe('pricing synchronization', () => {
     ).not.toBeInTheDocument()
     const user = userEvent.setup()
     const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
-    await user.click(screen.getByRole('button', { name: 'Copy billing expression' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Copy billing expression' })
+    )
     expect(copy).toHaveBeenCalledWith(expression)
   })
 
   it('shows every parsed tier and falls back to the full expression when pricing cannot be parsed safely', () => {
-    const tiered = 'len <= 128000 ? tier("base", p * 2 + c * 8 + cr * 0.2) : tier("long", p * 4 + c * 12 + cr * 0.4)'
+    const tiered =
+      'len <= 128000 ? tier("base", p * 2 + c * 8 + cr * 0.2) : tier("long", p * 4 + c * 12 + cr * 0.4)'
     const custom = 'tier("custom", p * 2 + c * 8) * max(1, param("factor"))'
-    render(<TableFixture prices={{
-      tiered: { current: {}, upstreams: { upstream: { billing_mode: 'tiered_expr', billing_expr: tiered } } },
-      custom: { current: {}, upstreams: { upstream: { billing_mode: 'tiered_expr', billing_expr: custom } } },
-    }} />)
+    render(
+      <TableFixture
+        prices={{
+          tiered: {
+            current: {},
+            upstreams: {
+              upstream: { billing_mode: 'tiered_expr', billing_expr: tiered },
+            },
+          },
+          custom: {
+            current: {},
+            upstreams: {
+              upstream: { billing_mode: 'tiered_expr', billing_expr: custom },
+            },
+          },
+        }}
+      />
+    )
     expect(screen.queryByText(tiered)).not.toBeInTheDocument()
     expect(screen.getByText(/128,000/)).toBeVisible()
     expect(screen.getByText('$0.2')).toBeVisible()
@@ -238,7 +325,9 @@ describe('pricing synchronization', () => {
     )
     expect(first).toBeChecked()
     expect(
-      screen.getByRole('checkbox', { name: 'Select price for z from upstream' })
+      screen.getByRole('checkbox', {
+        name: 'Select price for z from upstream',
+      })
     ).toBeChecked()
     await user.type(screen.getByRole('textbox', { name: 'Search models' }), 'm')
     await waitFor(() =>
@@ -258,7 +347,9 @@ describe('pricing synchronization', () => {
       })
     ).toBeChecked()
     expect(
-      screen.getByRole('checkbox', { name: 'Select price for m from upstream' })
+      screen.getByRole('checkbox', {
+        name: 'Select price for m from upstream',
+      })
     ).not.toBeChecked()
   })
 
@@ -411,8 +502,12 @@ describe('pricing synchronization', () => {
     const preview = screen.getByRole('alertdialog', {
       name: 'Preview price changes',
     })
-    expect(within(preview).getByText(/Expression pricing/)).toHaveTextContent('Input: $2')
-    expect(within(preview).getByText(/Expression pricing/)).toHaveTextContent('Output: $8')
+    expect(within(preview).getByText(/Expression pricing/)).toHaveTextContent(
+      'Input: $2'
+    )
+    expect(within(preview).getByText(/Expression pricing/)).toHaveTextContent(
+      'Output: $8'
+    )
     expect(within(preview).queryByText(expression)).not.toBeInTheDocument()
     expect(patch).not.toHaveBeenCalled()
     await user.click(

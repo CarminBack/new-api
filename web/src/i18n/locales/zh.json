@@ -6825,6 +6825,23 @@
     "e.g., 6.77 for USDT": "例如：USDT 填写 6.77",
     "Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.": "可选：每一单位该支付方式可兑换的 USD 额度。留空则使用旧版 Price 设置。",
     "USD per unit": "每单位 USD 额度",
-    "USD per unit:": "每单位 USD 额度："
+    "USD per unit:": "每单位 USD 额度：",
+    "Channel 17 profit price sync": "渠道 17 利润价格同步",
+    "Synchronize Channel 17 models, mappings, billing formulas, and model prices from AistarsLab": "根据 AistarsLab 同步渠道 17 的模型、映射、计费公式和模型价格",
+    "Profit percentage": "利润率",
+    "AistarsLab price sync failed": "AistarsLab 价格同步失败",
+    "Channel 17 price preview completed": "渠道 17 价格预览完成",
+    "Channel 17 prices synced": "渠道 17 价格同步完成",
+    "Profit percentage cannot be less than 0": "利润率不能小于 0",
+    "Unit price": "单价",
+    "Billing formula": "计费公式",
+    "Confirm Channel 17 price sync": "确认同步渠道 17 价格",
+    "This updates Channel 17 mappings and model prices using a {{profit}}% profit margin. Preview before applying.": "将按 {{profit}}% 利润率更新渠道 17 的模型映射与价格。请先预览再应用。",
+    "per second": "按秒收费",
+    "per item": "按次收费",
+    "seconds short": "秒",
+    "item": "次",
+    "group": "分组",
+    "Sync Channel 17": "同步渠道 17"
   }
 }
