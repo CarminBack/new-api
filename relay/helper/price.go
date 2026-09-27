@@ -21,24 +21,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func isImagePricingGroup(group string) bool {
-	return strings.EqualFold(strings.TrimSpace(group), "image")
-}
-
 func imageGroupResolutionRatio(info *relaycommon.RelayInfo) (float64, bool) {
-	if info == nil || !isImagePricingGroup(info.UsingGroup) {
+	if info == nil {
 		return 0, false
 	}
-	request, ok := info.Request.(*dto.ImageRequest)
-	if !ok {
-		return 0, false
-	}
-	tier, valid := dto.ImageSizeTier(request.Size)
-	if !valid {
-		// Unknown dimensions fail closed to the highest configured tier.
-		tier = "4k"
-	}
-	return ratio_setting.GetImageGroupResolutionRatio(tier)
+	return relaycommon.ImageGroupResolutionRatio(info.Request, info.UsingGroup)
 }
 
 func modelPriceNotConfiguredError(modelName string, userId int) error {

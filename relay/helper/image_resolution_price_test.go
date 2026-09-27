@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"testing"
 
@@ -38,10 +39,28 @@ func TestImageGroupResolutionRatioUsesModelPrice(t *testing.T) {
 		wantRatio bool
 	}{
 		{
-			name:      "Image group applies 2k multiplier and image count",
+			name:      "Image group applies symbolic 2k multiplier and image count",
 			group:     "Image",
-			request:   &dto.ImageRequest{Model: "priced-image", Size: "2048x1152", N: &count},
+			request:   &dto.ImageRequest{Model: "priced-image", Size: "2K", N: &count},
 			wantQuota: 160000,
+			wantRatio: true,
+		},
+		{
+			name:  "Gemini native image config applies 2k multiplier",
+			group: "Image",
+			request: &dto.GeminiChatRequest{GenerationConfig: dto.GeminiChatGenerationConfig{
+				ImageConfig: json.RawMessage(`{"imageSize":"2K"}`),
+			}},
+			wantQuota: 80000,
+			wantRatio: true,
+		},
+		{
+			name:  "OpenAI compatible Gemini image config applies 2k multiplier",
+			group: "Image",
+			request: &dto.GeneralOpenAIRequest{
+				ExtraBody: json.RawMessage(`{"google":{"image_config":{"image_size":"2K"}}}`),
+			},
+			wantQuota: 80000,
 			wantRatio: true,
 		},
 		{
@@ -56,6 +75,12 @@ func TestImageGroupResolutionRatioUsesModelPrice(t *testing.T) {
 			group:     "default",
 			request:   &dto.ImageRequest{Model: "priced-image", Size: "2048x1152", N: &count},
 			wantQuota: 100000,
+		},
+		{
+			name:      "text request with size in Image group is unchanged",
+			group:     "Image",
+			request:   &dto.GeneralOpenAIRequest{Size: "2K"},
+			wantQuota: 50000,
 		},
 		{
 			name:      "non image request in Image group is unchanged",

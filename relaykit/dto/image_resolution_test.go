@@ -16,11 +16,14 @@ func TestImageSizeTier(t *testing.T) {
 	}{
 		{name: "empty defaults to 1k", want: "1k", ok: true},
 		{name: "auto defaults to 1k", size: "auto", want: "1k", ok: true},
+		{name: "symbolic 1k", size: "1K", want: "1k", ok: true},
+		{name: "symbolic 2k", size: "2K", want: "2k", ok: true},
+		{name: "symbolic 4k", size: "4K", want: "4k", ok: true},
 		{name: "1k square", size: "1024x1024", want: "1k", ok: true},
 		{name: "2k canvas", size: "2048x1152", want: "2k", ok: true},
 		{name: "4k canvas", size: "3840x2160", want: "4k", ok: true},
 		{name: "oversized", size: "4097x2160"},
-		{name: "invalid", size: "4K"},
+		{name: "invalid", size: "large"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

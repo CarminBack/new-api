@@ -163,7 +163,10 @@ func indexComma(s string) int {
 
 func ImageSizeTier(size string) (string, bool) {
 	size = strings.ToLower(strings.TrimSpace(size))
-	if size == "" || size == "auto" {
+	switch size {
+	case "1k", "2k", "4k":
+		return size, true
+	case "", "auto":
 		size = "1024x1024"
 	}
 	parts := strings.Split(size, "x")

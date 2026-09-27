@@ -21,6 +21,11 @@ func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		return types.NewErrorWithStatusCode(fmt.Errorf("image_count must be an integer between 1 and %d", dto.MaxImageN), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	info.ImageRequestCount = count
+	if ratio, ok := relaycommon.ImageGroupResolutionRatio(info.Request, info.UsingGroup); ok {
+		// Refresh after channel selection so retries and final settlement use the
+		// same resolution multiplier as the actual image request.
+		info.PriceData.AddOtherRatio("image_resolution", ratio)
+	}
 	var quota int
 	var err error
 	if snap := info.TieredBillingSnapshot; snap != nil && snap.BillingMode == "tiered_expr" {

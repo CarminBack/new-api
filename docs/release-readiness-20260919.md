@@ -225,3 +225,20 @@
 - 用户明确确认正式替换后，仅将正式 `new-api-docker` 切换到同一固定 digest；切换耗时42秒。正式compose备份为 `/opt/docker/new-api/backups/release-20260927/compose-before-image-resolution-ratio-20260927.yml`，回滚镜像仍为 `sha256:9c8fd06879cc36864467bb78812819d5dcd4efa0af86e28d0729bd17b0d0dac1`。数据库、Redis、OpenResty、支付、OAuth和运行中价格未重置。
 - 正式真实HTTPS图片账本再次得到50000/160000/100000，用户/Token/日志总扣额均310000；Responses故障注入首渠道502 uncertain/retry、第二渠道success，客户端200且不含failed，单条消费日志与三份账本均550。临时用户、Token、渠道、日志均为0，临时模型价格已恢复。报告位于正式备份目录 `verification/image-resolution-ratio-production-20260927/report.json` 与 `verification/response-fallback-production-20260927/report.json`。
 - 发布后正式token、image-api及测试域名状态均200；正式容器digest/revision匹配、healthy、restart0，启动日志无panic/fatal。运行中的真实Responses完成请求已记录 `completion_delivered=true`、终态completed且status=ok，确认流式完成判定修复已生效。
+
+## 2026-09-27 Seedance 正式选渠故障诊断
+
+- 正式只读核查确认：`seedance-720p-c47` 由内置 `aistarslab` 任务插件声明，但唯一承载渠道 17 仍是 OpenAI 类型 `1`，且 `setting` 没有 `task_plugin_key`，所以 distributor 在任务提交前返回无可用渠道。
+- 渠道 17 当前启用、分组 `Video`，Base URL 和 `seedance-720p-c47 -> 47:seedance-2.0` 映射正确；当前无进行中任务。数据库没有 AistarsLab 覆盖插件行，使用镜像内置插件，符合预期。
+- 拟议修复仅将渠道 17 类型从 `1` 改为任务插件类型 `61`，并在保留原设置后加入 `task_plugin_key=aistarslab`。不改密钥、Base URL、模型映射、计费、容器或 OpenResty；回滚为恢复原类型和原 setting。正式变更等待用户确认。
+- 用户明确确认后，通过正式管理 API 将渠道17改为类型 `61` 并绑定 `aistarslab`。原密钥、Base URL、分组和模型映射保持不变，应用同步刷新能力缓存；容器和OpenResty均未重启。
+- 原39条模型项中有5条重复项，另有插件未声明的 `seedance-480p-c49`、`seedance-480p-fast-c49`。已去重并移除这两个不可路由旧别名，最终保留32个唯一且由插件声明、映射完整的Seedance模型；未新增当前未上架的 `seedance-4k-c64`。
+- 正式Video分组盘点：启用渠道19的 `grok-video-1.5` 已由Sora插件通过其声明的兼容类型1接管，不绑定AistarsLab；渠道167保持禁用。`/v1/models` 已见32个Seedance模型且旧别名缺席，Seedance/AistarsLab及Grok/Sora无计费预检均到达插件参数校验并无 `model_not_found`；未创建任务、消费日志或扣费。容器healthy、restart0。
+- 完整渠道备份和验收报告保存于 `/opt/docker/new-api/backups/release-20260927/seedance-channel-17-plugin-migration/`，目录权限0700、文件0600。
+
+## 2026-09-27 图片分辨率倍率漏算修复候选
+
+- 正式只读证据：运行时 `ImageGroupResolutionRatio` 仍为1/1.6/2，隔离验收模型刚刚仍按50000/160000/100000扣费；但 `gemini-3-pro-image-preview` 的2K真实请求仅按基础价扣50000或100000，`gpt-image-2.5` 的1440x1440/1440x1920也未乘2K倍率。请求均在Image分组且为ratio模式。
+- 根因：Gemini原生入口的请求类型为 `GeminiChatRequest`，旧逻辑只处理 `ImageRequest`；OpenAI图片实际发送前没有重新确认倍率，最终结算可能使用缺失倍率的PriceData；符号尺寸 `2K` 也未被尺寸解析器识别。
+- 修复统一提取OpenAI Images、Gemini原生和明确图片意图的OpenAI兼容请求尺寸，支持1K/2K/4K符号值，并在OpenAI图片发送前刷新倍率。普通文本请求即使带 `size` 也保持不变。
+- Gemini原生2K、OpenAI兼容2K、GPT 1440x1920刷新、未知尺寸、分组/文本隔离和定向race通过；主模块及relaykit全量test/vet/build通过。尚未部署正式。
