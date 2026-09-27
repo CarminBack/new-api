@@ -29,8 +29,9 @@ import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
+import { taskStatusMapper } from '../../lib/mappers'
 import type { TaskLog } from '../../types'
+import { BillingRecordCell } from '../billing-record-cell'
 import { TaskDetailsDialog } from '../dialogs/task-details-dialog'
 import { PluginAuthorLink } from '../plugin-author-link'
 import { TaskArtifactsCell } from '../task-artifacts'
@@ -199,30 +200,19 @@ export function useTaskLogsColumns(
 
     columns.push(
       {
-        accessorKey: 'task_id',
-        header: t('Task ID'),
-        cell: ({ row }) => {
-          const log = row.original
-          const taskId = row.getValue('task_id') as string
-          if (!taskId) {
-            return <span className='text-muted-foreground/60 text-xs'>-</span>
-          }
-          return (
-            <div className='flex max-w-[170px] flex-col gap-0.5'>
-              <StatusBadge
-                label={taskId}
-                copyText={taskId}
-                variant='neutral'
-                size='sm'
-                className='border-border/60 bg-muted/30 !text-foreground max-w-full truncate rounded-md border px-1.5 py-0.5 font-mono'
-              />
-              <span className='text-muted-foreground/60 truncate text-[11px]'>
-                {t(log.platform)} · {t(taskActionMapper.getLabel(log.action))}
-              </span>
-            </div>
-          )
-        },
+        id: 'billing_record',
+        accessorFn: (row) => row.quota,
+        header: t('Billing Record'),
+        cell: ({ row }) => (
+          <BillingRecordCell
+            quota={row.original.quota || 0}
+            billing={row.original.billing}
+            fallbackRule='Model price × group ratio × task parameters'
+          />
+        ),
         meta: { mobileTitle: true },
+        size: 230,
+        maxSize: 250,
       },
       createDurationColumn<TaskLog>({
         submitTimeKey: 'submit_time',

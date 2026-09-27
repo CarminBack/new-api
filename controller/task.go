@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -453,6 +454,7 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			}
 		}
 		item := relay.TaskModel2Dto(task)
+		item.Billing = taskBillingInfo(task)
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
 		item.ResultDiscarded = task.PrivateData.ResultDiscarded
 		if task.Status == model.TaskStatusSuccess {
@@ -506,6 +508,27 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 		result[i] = item
 	}
 	return result
+}
+
+func taskBillingInfo(task *model.Task) *dto.TaskBillingInfo {
+	if task == nil || task.PrivateData.BillingContext == nil {
+		return nil
+	}
+	context := task.PrivateData.BillingContext
+	billing := &dto.TaskBillingInfo{
+		Mode:        "ratio",
+		ModelPrice:  context.ModelPrice,
+		ModelRatio:  context.ModelRatio,
+		GroupRatio:  context.GroupRatio,
+		OtherRatios: context.OtherRatios,
+	}
+	if snapshot := context.TieredSnapshot; snapshot != nil {
+		billing.Mode = "tiered_expr"
+		billing.ExprB64 = base64.StdEncoding.EncodeToString([]byte(snapshot.ExprString))
+		billing.MatchedTier = snapshot.EstimatedTier
+		billing.UsageFacts = snapshot.UsageFacts
+	}
+	return billing
 }
 
 func taskFailReasonIsLegacyResultURL(value string) bool {

@@ -290,6 +290,7 @@ export interface MidjourneyLog {
   id: number
   user_id: number
   channel_id: number
+  quota: number
   code: number
   mj_id: string
   action: string // IMAGINE, UPSCALE, VARIATION, etc. (backend field name)
@@ -324,6 +325,7 @@ export interface TaskLog {
   channel_id: number
   group: string
   quota: number
+  billing?: TaskBillingInfo
   submit_time: number // seconds
   start_time?: number // seconds
   finish_time?: number // seconds
@@ -353,6 +355,17 @@ export interface TaskLog {
   }
   created_at?: number
   updated_at?: number
+}
+
+export interface TaskBillingInfo {
+  mode: 'ratio' | 'tiered_expr' | string
+  model_price?: number
+  model_ratio?: number
+  group_ratio?: number
+  other_ratios?: Record<string, number>
+  expr_b64?: string
+  matched_tier?: string
+  usage_facts?: Record<string, string | number>
 }
 
 export interface TaskPluginInfo {

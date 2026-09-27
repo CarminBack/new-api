@@ -48,6 +48,7 @@ import {
   mjSubmitResultMapper,
 } from '../../lib/mappers'
 import type { MidjourneyLog } from '../../types'
+import { BillingRecordCell } from '../billing-record-cell'
 import { ImageDialog } from '../dialogs/image-dialog'
 import { PromptDialog } from '../dialogs/prompt-dialog'
 import {
@@ -142,28 +143,22 @@ export function useDrawingLogsColumns(
     })
 
     columns.push({
-      accessorKey: 'mj_id',
-      header: t('Task ID'),
-      cell: ({ row }) => {
-        const mjId = row.getValue('mj_id') as string
-
-        if (!mjId) {
-          return <span className='text-muted-foreground/60 text-xs'>-</span>
-        }
-
-        return (
-          <div className='flex max-w-[160px] flex-col gap-0.5'>
-            <StatusBadge
-              label={mjId}
-              copyText={mjId}
-              variant='neutral'
-              size='sm'
-              className='border-border/60 bg-muted/30 !text-foreground max-w-full truncate rounded-md border px-1.5 py-0.5 font-mono'
-            />
-          </div>
-        )
-      },
+      id: 'billing_record',
+      accessorFn: (row) => row.quota,
+      header: t('Billing Record'),
+      cell: ({ row }) => (
+        <BillingRecordCell
+          quota={row.original.quota || 0}
+          fallbackRule={
+            row.original.action === 'IMAGE_GENERATION'
+              ? 'Model price × group ratio × resolution ratio × image count'
+              : 'Model price × group ratio × task parameters'
+          }
+        />
+      ),
       meta: { mobileTitle: true },
+      size: 230,
+      maxSize: 250,
     })
 
     columns.push(

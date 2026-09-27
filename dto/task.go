@@ -48,16 +48,28 @@ type TaskDto struct {
 	LegacyVideoAvailable bool   `json:"legacy_video_available,omitempty"`
 	// ResultDiscarded marks a synchronous result that was returned inline and
 	// never persisted; the UI must not offer artifact retrieval for it.
-	ResultDiscarded bool            `json:"result_discarded,omitempty"`
-	SubmitTime      int64           `json:"submit_time"`
-	StartTime       int64           `json:"start_time"`
-	FinishTime      int64           `json:"finish_time"`
-	Progress        string          `json:"progress"`
-	Properties      any             `json:"properties"`
-	Username        string          `json:"username,omitempty"`
-	Data            json.RawMessage `json:"data"`
-	AdminInfo       *TaskAdminInfo  `json:"admin_info,omitempty"`
-	RootInfo        *TaskRootInfo   `json:"root_info,omitempty"`
+	ResultDiscarded bool             `json:"result_discarded,omitempty"`
+	SubmitTime      int64            `json:"submit_time"`
+	StartTime       int64            `json:"start_time"`
+	FinishTime      int64            `json:"finish_time"`
+	Progress        string           `json:"progress"`
+	Properties      any              `json:"properties"`
+	Username        string           `json:"username,omitempty"`
+	Data            json.RawMessage  `json:"data"`
+	AdminInfo       *TaskAdminInfo   `json:"admin_info,omitempty"`
+	RootInfo        *TaskRootInfo    `json:"root_info,omitempty"`
+	Billing         *TaskBillingInfo `json:"billing,omitempty"`
+}
+
+type TaskBillingInfo struct {
+	Mode        string             `json:"mode"`
+	ModelPrice  float64            `json:"model_price"`
+	ModelRatio  float64            `json:"model_ratio,omitempty"`
+	GroupRatio  float64            `json:"group_ratio"`
+	OtherRatios map[string]float64 `json:"other_ratios,omitempty"`
+	ExprB64     string             `json:"expr_b64,omitempty"`
+	MatchedTier string             `json:"matched_tier,omitempty"`
+	UsageFacts  map[string]any     `json:"usage_facts,omitempty"`
 }
 
 type TaskPluginInfo struct {

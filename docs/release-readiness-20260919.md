@@ -274,3 +274,10 @@
 - 正式Compose备份为 `/opt/docker/new-api/backups/release-20260927/compose-before-image-billing-boundary-fix-20260927.yml`，权限0600；回滚digest为 `sha256:e2fd70cace495e65b4a693a3fd96131eca8d5d47a6b8a6588bc976df0bcf6a0f`。
 - 正式隔离图片验收通过：GPT Images 2K扣160000、Gemini原生2K扣160000、客户端1K经渠道覆盖为4K扣200000；用户、Token和日志总扣额均520000，归档尺寸与实际出站尺寸一致。Responses正式WSS/SSE八场景仍为8条消费日志，三账本均3360。
 - 正式验收临时用户、Token、渠道、模型价格、日志及图片归档残留均为0。最终容器digest/revision匹配Linux ARM64、healthy、restart0，本地及token/image-api正式域名均200，近20分钟无panic/fatal/迁移错误。发布与图片验收报告均以0600保存在正式备份目录。
+
+## 2026-09-27 Video计费配置修复与日志扣费列候选
+
+- 正式Video按秒回归根因是渠道17迁移任务插件后，旧 `TaskBillingUnit` 没有同步到真正执行的 `billing_setting.billing_mode/billing_expr`，导致 `ModelPrice` 被当作固定每次价格。迁移后4笔成功任务合计少扣15400000额度；按用户确认不追扣、不改历史记录。
+- 先测试后正式迁移全部33个启用Video模型：28个按秒表达式 `u("seconds") × price`，5个供应商固定总价模型按次表达式 `u("videos") × price`。正式备份与报告在 `/opt/docker/new-api/backups/release-20260927/video-billing-fix-20260927/`，权限0700/0600；配置即时刷新，无容器重启，测试/正式均healthy、restart0。
+- 绘图日志和任务日志列表将“任务ID”主列替换为“扣费记录”：显示最终quota和计算链；任务ID仍保留在详情及筛选。任务DTO增加只读安全计费快照，仅包含价格、倍率、表达式和usage facts；旧记录无快照时显示通用规则，避免以当前价格伪造历史计算。
+- 新增后端DTO及前端规则测试。主模块全量test/vet/build、relaykit全量test/vet/build、前端typecheck/build和Vitest 172文件/2127用例均通过。独立reviewer受非Herdr会话限制未启动。UI候选待构建并部署测试站浏览器验收，正式应用镜像尚未更新。
