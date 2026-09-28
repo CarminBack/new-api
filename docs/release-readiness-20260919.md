@@ -302,3 +302,13 @@
 - 扣费记录列表改为仅显示可点击金额，弹窗显示总扣费和中文具体扣费规则。
 - 用户确认后正式切换至修复候选 `sha256:3123ef8faf65edaed0ca8511e5cfae6659ff720eb258c5fe01eb1e4ec709756b`（revision `a2a648279`）。备份目录 `/opt/docker/new-api/backups/release-20260927/billing-details-fix-20260927-084710/`，权限0700/0600。
 - 正式同步dry-run成功，5个变化字段均为数组；任务日志API成功，容器healthy、restart0，两个正式域名200，最近5分钟无同步500或服务端严重错误。
+
+## 2026-09-28 Canvas 余额与模型目录兼容修复正式发布
+
+- New API 提交：`c04ae61b2`，恢复 `GET /api/usage/token/balance`，使用能力令牌所属用户返回真实账户余额与展示配置。
+- Canvas 提交：`2eb9230`，旧 `/v1/image-group-pricing` 不可用时降级为无图片价格标签，不再阻断生图、视频及其他模型目录。
+- 正式 New API 镜像：`sha256:0a31e6803cd076adb310eac06f50dd5c01ceb0e829cfa3311c88964585841e9d`。
+- 正式 Canvas 镜像：`sha256:12a48cea97b50056bb0dc9fa7dfd8bd5cd173afe276229416470f7796a2684b2`。
+- 备份：`/opt/docker/new-api/backups/release-20260928/canvas-balance-model-fix-20260928-140011/`，包含两套 Compose/环境配置、容器检查信息和一致性 Canvas SQLite 数据归档。
+- 验证：两个容器均 healthy、restart 0；Canvas 余额接口与模型目录均为 200；充值地址指向 Token 站；目录返回图片 7、视频 31、文本 12、音频 12 个模型；71 个原有有效会话均保留；三个正式域名和 Canvas health/login 均为 200；发布后无 panic、fatal、数据库、迁移、Invalid URL 或 Invalid token 错误。
+- 回滚点：New API `sha256:3123ef8faf65edaed0ca8511e5cfae6659ff720eb258c5fe01eb1e4ec709756b`；Canvas `sha256:3454e15094e16d8105c0c9217ac869ba9f784fabee755f91e4ae2f68d70ba87e`。
