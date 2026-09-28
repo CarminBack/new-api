@@ -312,3 +312,15 @@
 - 备份：`/opt/docker/new-api/backups/release-20260928/canvas-balance-model-fix-20260928-140011/`，包含两套 Compose/环境配置、容器检查信息和一致性 Canvas SQLite 数据归档。
 - 验证：两个容器均 healthy、restart 0；Canvas 余额接口与模型目录均为 200；充值地址指向 Token 站；目录返回图片 7、视频 31、文本 12、音频 12 个模型；71 个原有有效会话均保留；三个正式域名和 Canvas health/login 均为 200；发布后无 panic、fatal、数据库、迁移、Invalid URL 或 Invalid token 错误。
 - 回滚点：New API `sha256:3123ef8faf65edaed0ca8511e5cfae6659ff720eb258c5fe01eb1e4ec709756b`；Canvas `sha256:3454e15094e16d8105c0c9217ac869ba9f784fabee755f91e4ae2f68d70ba87e`。
+
+## 2026-09-28 Canvas 视频模型价格与功能限制正式发布
+
+- New API 提交：`cc546e433`，新增能力令牌鉴权的安全视频模型元数据接口；仅返回模型 ID、说明、实际分组价格标签和功能限制，不返回计费表达式、渠道、上游地址或凭证。
+- Canvas 提交：`214ae66`，视频模型选择器展示模型名称、价格、说明及分辨率、时长、输入模式等限制。
+- 首个候选曾使用旧 `quota_type` 判断计费单位，发布验证发现按秒模型被显示为按条；立即回滚，实际计费未受影响。修正版优先依据真实 `billing_expr` 中的 `u("seconds")` / `u("videos")` 判断单位。
+- 正式 New API 镜像：`sha256:ec8961bc993903d33b945b983ed174f07b9b7e1084e529279e5a3edfef8b9596`。
+- 正式 Canvas 镜像：`sha256:ee4a0dd47b9017844abab82d6350853e1c7a98026119988c4f5798227f01ba5b`。
+- 备份：`/opt/docker/new-api/backups/release-20260928/video-model-metadata-corrected-20260928-144938/`，权限 0700，包含配置、容器检查信息和一致性 Canvas SQLite 数据归档。
+- 联合验证：Canvas 目录返回 31 个视频模型，其中 28 个按秒、3 个按条；`seedance-1080p-c47` 为 `$1.08/秒`，`seedance-720p-c50` 为 `$6.08/条`；31 个模型均含功能限制；安全字段仅为 `id/description/priceLabel/limitations`；71 个有效会话保留。
+- 两个容器均 healthy、restart 0；Canvas health/login、Token 状态和 Image API 状态均为 200；发布后无 panic、fatal、数据库、迁移、Invalid URL 或 Invalid token 错误。
+- 回滚点：New API `sha256:0a31e6803cd076adb310eac06f50dd5c01ceb0e829cfa3311c88964585841e9d`；Canvas `sha256:12a48cea97b50056bb0dc9fa7dfd8bd5cd173afe276229416470f7796a2684b2`。
