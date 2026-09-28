@@ -42,3 +42,40 @@ func TestCanvasAccountBalanceUsesAuthenticatedOwnerQuota(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildTokenVideoModelsReturnsSafePriceAndLimits(t *testing.T) {
+	items := []model.Pricing{
+		{ModelName: "seedance-720p-c49", Description: "Seedance video", ModelPrice: 0.08, QuotaType: 2, EnableGroup: []string{"Video"}, BillingExpr: `tier("base", u("seconds") * 0.08)`},
+		{ModelName: "gpt-image-2", ModelPrice: 0.04, QuotaType: 1, EnableGroup: []string{"Image"}},
+	}
+	catalog := buildTokenVideoModels(items, "Video", 1.35)
+	if len(catalog) != 1 {
+		t.Fatalf("expected one video model, got %+v", catalog)
+	}
+	entry := catalog[0]
+	if entry.ID != "seedance-720p-c49" || entry.PriceLabel != "$0.108/秒" {
+		t.Fatalf("unexpected catalog entry: %+v", entry)
+	}
+	joined := strings.Join(entry.Limitations, " ")
+	for _, expected := range []string{"720p", "4–15 秒", "首尾帧", "2000"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("missing limitation %q in %q", expected, joined)
+		}
+	}
+	encoded, err := common.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{"billing_expr", "channel", "token", "upstream"} {
+		if strings.Contains(strings.ToLower(string(encoded)), private) {
+			t.Fatalf("catalog exposes private field %q: %s", private, encoded)
+		}
+	}
+}
+
+func TestTokenVideoPriceLabelSupportsPerVideoPricing(t *testing.T) {
+	item := model.Pricing{ModelPrice: 1.2, QuotaType: 1}
+	if got := tokenVideoPriceLabel(item, 1.5); got != "$1.8/条" {
+		t.Fatalf("unexpected label %q", got)
+	}
+}

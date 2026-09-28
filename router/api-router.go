@@ -299,6 +299,7 @@ func SetApiRouter(router *gin.Engine) {
 			{
 				tokenUsageRoute.GET("/", controller.GetTokenUsage)
 				tokenUsageRoute.GET("/balance", middleware.DisableCache(), controller.GetTokenUserBalance)
+				tokenUsageRoute.GET("/video-models", middleware.DisableCache(), controller.GetTokenVideoModels)
 			}
 		}
 

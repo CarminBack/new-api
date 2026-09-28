@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -243,6 +245,95 @@ func GetTokenUserBalance(c *gin.Context) {
 		"custom_currency_symbol":        generalSetting.CustomCurrencySymbol,
 		"custom_currency_exchange_rate": generalSetting.CustomCurrencyExchangeRate,
 	})
+}
+
+type tokenVideoModelInfo struct {
+	ID          string   `json:"id"`
+	Description string   `json:"description,omitempty"`
+	PriceLabel  string   `json:"price_label,omitempty"`
+	Limitations []string `json:"limitations,omitempty"`
+}
+
+func GetTokenVideoModels(c *gin.Context) {
+	token, err := model.GetTokenById(c.GetInt("token_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	groupRatio := ratio_setting.GetGroupRatio(token.Group)
+	if user, err := model.GetUserCache(token.UserId); err == nil {
+		if specialRatio, ok := ratio_setting.GetGroupGroupRatio(user.Group, token.Group); ok {
+			groupRatio = specialRatio
+		}
+	}
+	c.Header("Cache-Control", "no-store")
+	common.ApiSuccess(c, buildTokenVideoModels(model.GetPricing(), token.Group, groupRatio))
+}
+
+func buildTokenVideoModels(pricing []model.Pricing, group string, groupRatio float64) []tokenVideoModelInfo {
+	result := make([]tokenVideoModelInfo, 0)
+	for _, item := range pricing {
+		if !common.StringsContains(item.EnableGroup, "all") && !common.StringsContains(item.EnableGroup, group) {
+			continue
+		}
+		if !common.StringsContains(item.EnableGroup, "Video") && !strings.Contains(strings.ToLower(item.ModelName), "video") && !strings.Contains(strings.ToLower(item.ModelName), "seedance") {
+			continue
+		}
+		result = append(result, tokenVideoModelInfo{
+			ID: item.ModelName, Description: strings.TrimSpace(item.Description),
+			PriceLabel: tokenVideoPriceLabel(item, groupRatio), Limitations: videoModelLimitations(item.ModelName),
+		})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
+func tokenVideoPriceLabel(item model.Pricing, groupRatio float64) string {
+	price := decimal.NewFromFloat(item.ModelPrice).Mul(decimal.NewFromFloat(groupRatio))
+	if price.IsNegative() || price.IsZero() {
+		return "按量计费"
+	}
+	value := strings.TrimRight(strings.TrimRight(price.StringFixed(4), "0"), ".")
+	switch item.QuotaType {
+	case 2:
+		return "$" + value + "/秒"
+	case 1:
+		return "$" + value + "/条"
+	default:
+		return "$" + value
+	}
+}
+
+func videoModelLimitations(modelName string) []string {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	if !strings.HasPrefix(name, "seedance-") {
+		return []string{"功能限制以模型接口校验为准"}
+	}
+	limits := []string{"单次生成 1 条"}
+	for _, resolution := range []string{"480p", "720p", "1080p", "4k"} {
+		if strings.Contains(name, "-"+resolution+"-") {
+			label := resolution
+			if resolution == "4k" {
+				label = "4K"
+			}
+			limits = append(limits, "分辨率 "+label)
+			break
+		}
+	}
+	channel := ""
+	if index := strings.LastIndex(name, "-c"); index >= 0 {
+		channel = name[index+2:]
+	}
+	switch channel {
+	case "47", "48", "50":
+		limits = append(limits, "支持文生视频、图生视频", "时长 4–15 秒")
+	case "49":
+		limits = append(limits, "支持文生视频、图生视频、首尾帧", "时长 4–15 秒")
+	default:
+		limits = append(limits, "支持文生视频、图生视频、首尾帧")
+	}
+	limits = append(limits, "提示词最多 2000 字")
+	return limits
 }
 
 func GetTokenUsage(c *gin.Context) {
