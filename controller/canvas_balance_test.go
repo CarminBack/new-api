@@ -45,7 +45,7 @@ func TestCanvasAccountBalanceUsesAuthenticatedOwnerQuota(t *testing.T) {
 
 func TestBuildTokenVideoModelsReturnsSafePriceAndLimits(t *testing.T) {
 	items := []model.Pricing{
-		{ModelName: "seedance-720p-c49", Description: "Seedance video", ModelPrice: 0.08, QuotaType: 2, EnableGroup: []string{"Video"}, BillingExpr: `tier("base", u("seconds") * 0.08)`},
+		{ModelName: "seedance-720p-c49", Description: "Seedance video", ModelPrice: 0.08, QuotaType: 1, EnableGroup: []string{"Video"}, BillingExpr: `tier("base", u("seconds") * 0.08)`},
 		{ModelName: "gpt-image-2", ModelPrice: 0.04, QuotaType: 1, EnableGroup: []string{"Image"}},
 	}
 	catalog := buildTokenVideoModels(items, "Video", 1.35)
@@ -74,7 +74,7 @@ func TestBuildTokenVideoModelsReturnsSafePriceAndLimits(t *testing.T) {
 }
 
 func TestTokenVideoPriceLabelSupportsPerVideoPricing(t *testing.T) {
-	item := model.Pricing{ModelPrice: 1.2, QuotaType: 1}
+	item := model.Pricing{ModelPrice: 1.2, QuotaType: 2, BillingExpr: `tier("base", u("videos") * 1.2)`}
 	if got := tokenVideoPriceLabel(item, 1.5); got != "$1.8/条" {
 		t.Fatalf("unexpected label %q", got)
 	}

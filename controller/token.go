@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -294,6 +295,13 @@ func tokenVideoPriceLabel(item model.Pricing, groupRatio float64) string {
 		return "按量计费"
 	}
 	value := strings.TrimRight(strings.TrimRight(price.StringFixed(4), "0"), ".")
+	usageKeys := billingexpr.UsedUsageKeys(item.BillingExpr)
+	if _, ok := usageKeys["seconds"]; ok {
+		return "$" + value + "/秒"
+	}
+	if _, ok := usageKeys["videos"]; ok {
+		return "$" + value + "/条"
+	}
 	switch item.QuotaType {
 	case 2:
 		return "$" + value + "/秒"
