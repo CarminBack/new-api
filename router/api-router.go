@@ -298,6 +298,7 @@ func SetApiRouter(router *gin.Engine) {
 			tokenUsageRoute.Use(middleware.TokenAuthReadOnly())
 			{
 				tokenUsageRoute.GET("/", controller.GetTokenUsage)
+				tokenUsageRoute.GET("/balance", middleware.DisableCache(), controller.GetTokenUserBalance)
 			}
 		}
 
