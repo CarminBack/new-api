@@ -6836,6 +6836,15 @@
     "e.g., 6.77 for USDT": "например, 6,77 для USDT",
     "Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.": "Необязательно: квота USD за одну единицу этого способа оплаты. Оставьте пустым, чтобы использовать прежнюю настройку Price.",
     "USD per unit": "USD за единицу",
-    "USD per unit:": "USD за единицу:"
+    "USD per unit:": "USD за единицу:",
+    "Set prices in bulk": "Set prices in bulk",
+    "Set prices for unset models": "Set prices for unset models",
+    "Apply one price to {{count}} models and save immediately. Prices are saved as expressions.": "Apply one price to {{count}} models and save immediately. Prices are saved as expressions.",
+    "Apply and save": "Apply and save",
+    "Billing unit": "Billing unit",
+    "Input price (USD / 1M tokens)": "Input price (USD / 1M tokens)",
+    "Output price (USD / 1M tokens)": "Output price (USD / 1M tokens)",
+    "Price per request (USD)": "Price per request (USD)",
+    "Selected rows are used when any are checked; otherwise all models in the current filtered list are updated.": "Selected rows are used when any are checked; otherwise all models in the current filtered list are updated."
   }
 }

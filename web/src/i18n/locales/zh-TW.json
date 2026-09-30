@@ -6836,6 +6836,15 @@
     "e.g., 6.77 for USDT": "例如：USDT 填寫 6.77",
     "Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.": "選填：每一單位此付款方式可兌換的 USD 額度。留空則使用舊版 Price 設定。",
     "USD per unit": "每單位 USD 額度",
-    "USD per unit:": "每單位 USD 額度："
+    "USD per unit:": "每單位 USD 額度：",
+    "Set prices in bulk": "一键设置价格",
+    "Set prices for unset models": "批量设置未定价模型",
+    "Apply one price to {{count}} models and save immediately. Prices are saved as expressions.": "将同一价格应用到 {{count}} 个模型并立即保存，价格以表达式形式保存。",
+    "Apply and save": "应用并保存",
+    "Billing unit": "计费方式",
+    "Input price (USD / 1M tokens)": "输入价格（USD / 1M tokens）",
+    "Output price (USD / 1M tokens)": "输出价格（USD / 1M tokens）",
+    "Price per request (USD)": "每次价格（USD）",
+    "Selected rows are used when any are checked; otherwise all models in the current filtered list are updated.": "勾选了模型时只更新勾选项；未勾选时更新当前筛选列表中的全部模型。"
   }
 }

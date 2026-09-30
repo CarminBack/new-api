@@ -24,7 +24,7 @@ import type {
   VisibilityState,
   SortingState,
 } from '@tanstack/react-table'
-import { Copy, Plus } from 'lucide-react'
+import { Copy, Plus, WandSparkles } from 'lucide-react'
 import {
   useState,
   useMemo,
@@ -67,13 +67,16 @@ import {
 import {
   buildModelSnapshots,
   getSnapshotSignature,
+  buildUnsetBulkPricingExpr,
   isBasePricingUnset,
   type ModelRow,
+  type UnsetBulkPricingValues,
 } from './model-pricing-snapshots'
 import {
   buildModelRatioColumns,
   TASK_PRICING_MODE_FILTER,
 } from './model-ratio-table-columns'
+import { UnsetBulkPricingDialog } from './unset-bulk-pricing-dialog'
 
 type ModelRatioVisualEditorProps = {
   savedModelPrice: string
@@ -154,6 +157,9 @@ const ModelRatioVisualEditorComponent = forwardRef<
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editData, setEditData] = useState<ModelRatioData | null>(null)
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
+  const [bulkTargetCount, setBulkTargetCount] = useState(0)
+  const [bulkSavePending, setBulkSavePending] = useState(false)
   const pricingConfig = useModelPricing(
     editData?.name ? [editData.name] : [],
     Boolean(editData?.name)
@@ -611,6 +617,52 @@ const ModelRatioVisualEditorComponent = forwardRef<
     )
   }, [editData, editorOpen, persistPricingData, t, table])
 
+  const getBulkTargetNames = useCallback(() => {
+    const selected = table.getFilteredSelectedRowModel().rows
+    const rows =
+      selected.length > 0 ? selected : table.getFilteredRowModel().rows
+    return rows.map((row) => row.original.name)
+  }, [table])
+
+  const handleOpenBulkDialog = useCallback(() => {
+    setBulkTargetCount(getBulkTargetNames().length)
+    setBulkDialogOpen(true)
+  }, [getBulkTargetNames])
+
+  const handleBulkApply = useCallback(
+    (values: UnsetBulkPricingValues) => {
+      const targetNames = getBulkTargetNames()
+      if (targetNames.length === 0) {
+        toast.error(t('No models with unset prices'))
+        return
+      }
+      // Close the editor first so saving does not commit a stale open draft
+      // over the bulk price.
+      setEditData(null)
+      setEditorOpen(false)
+      setSheetOpen(false)
+      persistPricingData(
+        {
+          name: targetNames[0],
+          billingMode: 'tiered_expr',
+          billingExpr: buildUnsetBulkPricingExpr(values),
+        },
+        targetNames
+      )
+      table.resetRowSelection()
+      setBulkSavePending(true)
+    },
+    [getBulkTargetNames, persistPricingData, t, table]
+  )
+
+  // Save after the editor-closed state has rendered, so the parent save path
+  // sees no open editor draft.
+  useEffect(() => {
+    if (!bulkSavePending || editorOpen) return
+    setBulkSavePending(false)
+    void Promise.resolve(onSave()).finally(() => setBulkDialogOpen(false))
+  }, [bulkSavePending, editorOpen, onSave])
+
   useImperativeHandle(
     ref,
     () => ({
@@ -678,7 +730,15 @@ const ModelRatioVisualEditorComponent = forwardRef<
               },
             ]}
             preActions={
-              filterMode === 'unset' ? undefined : (
+              filterMode === 'unset' ? (
+                <Button
+                  onClick={handleOpenBulkDialog}
+                  disabled={!hasRows || isSaving}
+                >
+                  <WandSparkles data-icon='inline-start' />
+                  {t('Set prices in bulk')}
+                </Button>
+              ) : (
                 <Button onClick={handleAdd}>
                   <Plus data-icon='inline-start' />
                   {t('Add model')}
@@ -792,6 +852,16 @@ const ModelRatioVisualEditorComponent = forwardRef<
             : t('Open a source model first')}
         </Button>
       </DataTableBulkActions>
+
+      {filterMode === 'unset' && (
+        <UnsetBulkPricingDialog
+          open={bulkDialogOpen}
+          onOpenChange={setBulkDialogOpen}
+          modelCount={bulkTargetCount}
+          isSaving={isSaving || bulkSavePending}
+          onConfirm={handleBulkApply}
+        />
+      )}
 
       {isMobile && (
         <ModelPricingSheet

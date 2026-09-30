@@ -6847,6 +6847,15 @@
     "seconds short": "s",
     "item": "item",
     "group": "group",
-    "Sync Channel 17": "Sync Channel 17"
+    "Sync Channel 17": "Sync Channel 17",
+    "Set prices in bulk": "Set prices in bulk",
+    "Set prices for unset models": "Set prices for unset models",
+    "Apply one price to {{count}} models and save immediately. Prices are saved as expressions.": "Apply one price to {{count}} models and save immediately. Prices are saved as expressions.",
+    "Apply and save": "Apply and save",
+    "Billing unit": "Billing unit",
+    "Input price (USD / 1M tokens)": "Input price (USD / 1M tokens)",
+    "Output price (USD / 1M tokens)": "Output price (USD / 1M tokens)",
+    "Price per request (USD)": "Price per request (USD)",
+    "Selected rows are used when any are checked; otherwise all models in the current filtered list are updated.": "Selected rows are used when any are checked; otherwise all models in the current filtered list are updated."
   }
 }

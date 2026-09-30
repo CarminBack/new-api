@@ -6836,6 +6836,15 @@
     "e.g., 6.77 for USDT": "ví dụ: 6,77 cho USDT",
     "Optional USD quota granted for one unit of this payment method. Leave blank to use the legacy Price setting.": "Tùy chọn: hạn mức USD được cấp cho mỗi đơn vị của phương thức thanh toán này. Để trống để dùng cài đặt Price cũ.",
     "USD per unit": "USD mỗi đơn vị",
-    "USD per unit:": "USD mỗi đơn vị:"
+    "USD per unit:": "USD mỗi đơn vị:",
+    "Set prices in bulk": "Set prices in bulk",
+    "Set prices for unset models": "Set prices for unset models",
+    "Apply one price to {{count}} models and save immediately. Prices are saved as expressions.": "Apply one price to {{count}} models and save immediately. Prices are saved as expressions.",
+    "Apply and save": "Apply and save",
+    "Billing unit": "Billing unit",
+    "Input price (USD / 1M tokens)": "Input price (USD / 1M tokens)",
+    "Output price (USD / 1M tokens)": "Output price (USD / 1M tokens)",
+    "Price per request (USD)": "Price per request (USD)",
+    "Selected rows are used when any are checked; otherwise all models in the current filtered list are updated.": "Selected rows are used when any are checked; otherwise all models in the current filtered list are updated."
   }
 }
