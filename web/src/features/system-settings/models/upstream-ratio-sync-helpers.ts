@@ -21,10 +21,15 @@ import { createContext, useContext } from 'react'
 import { BILLING_PRICING_VARS, splitBillingExprAndRequestRules } from '@/features/pricing/lib/billing-expr'
 import { tryParseVisualConfig } from '@/features/pricing/lib/tier-expr'
 
-import type { PricingSyncValues } from '../types'
+import type { PricingSyncModels, PricingSyncValues } from '../types'
+import type { ConflictItem } from './conflict-confirm-dialog'
 import {
+  OFFICIAL_CHANNEL_BASE_URL,
+  OFFICIAL_CHANNEL_ENDPOINT,
   OFFICIAL_CHANNEL_ID,
   OFFICIAL_CHANNEL_NAME,
+  MODELS_DEV_PRESET_BASE_URL,
+  MODELS_DEV_PRESET_ENDPOINT,
   MODELS_DEV_PRESET_ID,
   MODELS_DEV_PRESET_NAME,
 } from './constants'
@@ -203,4 +208,57 @@ export function useSyncPriceSelection() {
   const context = useContext(SyncPriceContext)
   if (!context) throw new Error('Sync price selection provider is required')
   return context
+}
+
+// Official presets in priority order: the new-api official ratio preset
+// first, then models.dev for models it does not cover.
+export const OFFICIAL_PRICE_SOURCES = [
+  {
+    id: OFFICIAL_CHANNEL_ID,
+    name: OFFICIAL_CHANNEL_NAME,
+    base_url: OFFICIAL_CHANNEL_BASE_URL,
+    endpoint: OFFICIAL_CHANNEL_ENDPOINT,
+  },
+  {
+    id: MODELS_DEV_PRESET_ID,
+    name: MODELS_DEV_PRESET_NAME,
+    base_url: MODELS_DEV_PRESET_BASE_URL,
+    endpoint: MODELS_DEV_PRESET_ENDPOINT,
+  },
+]
+
+export type OfficialPriceSelection = {
+  resolutions: Record<string, Record<string, number | string>>
+  previews: ConflictItem[]
+  missing: number
+}
+
+// Picks the highest-priority official source that has a price for each model.
+export function pickOfficialPrices(
+  prices: PricingSyncModels,
+  targetNames: string[],
+  t: (key: string) => string
+): OfficialPriceSelection {
+  const resolutions: OfficialPriceSelection['resolutions'] = {}
+  const previews: ConflictItem[] = []
+  let missing = 0
+  for (const name of targetNames) {
+    const row = prices[name]
+    const source = OFFICIAL_PRICE_SOURCES.map(
+      (item) => `${item.name}(${item.id})`
+    ).find((key) => row?.upstreams[key])
+    const values = source ? row?.upstreams[source] : undefined
+    if (!row || !source || !values) {
+      missing += 1
+      continue
+    }
+    resolutions[name] = { ...values }
+    previews.push({
+      model: name,
+      channel: getUpstreamDisplayName(source, t),
+      current: describeSyncPrice(row.current, t),
+      newVal: describeSyncPrice(values, t),
+    })
+  }
+  return { resolutions, previews, missing }
 }

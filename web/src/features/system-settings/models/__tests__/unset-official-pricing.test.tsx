@@ -22,8 +22,12 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
-import { buildUnsetBulkPricingExpr } from '../model-pricing-snapshots'
 import { ModelRatioVisualEditor } from '../model-ratio-visual-editor'
+import { pickOfficialPrices } from '../upstream-ratio-sync-helpers'
+
+const OFFICIAL = '官方倍率预设(-100)'
+const MODELS_DEV = 'models.dev 价格预设(-101)'
+const t = (key: string) => key
 
 let client: QueryClient | undefined
 
@@ -33,31 +37,62 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-it('builds expression prices for token and request billing', () => {
-  expect(
-    buildUnsetBulkPricingExpr({
-      mode: 'token',
-      inputPrice: 1.5,
-      outputPrice: 6,
-      requestPrice: 0,
-    })
-  ).toBe('tier("base", p * 1.5 + c * 6)')
-  expect(
-    buildUnsetBulkPricingExpr({
-      mode: 'request',
-      inputPrice: 0,
-      outputPrice: 0,
-      requestPrice: 0.02,
-    })
-  ).toBe('tier("base", fixed(0.02))')
+it('prefers the official preset and falls back to models.dev', () => {
+  const selection = pickOfficialPrices(
+    {
+      a: {
+        current: {},
+        upstreams: {
+          [MODELS_DEV]: { model_ratio: 9 },
+          [OFFICIAL]: { model_ratio: 1, completion_ratio: 4 },
+        },
+      },
+      b: { current: {}, upstreams: { [MODELS_DEV]: { model_ratio: 2 } } },
+    },
+    ['a', 'b', 'c'],
+    t
+  )
+  expect(selection.resolutions).toEqual({
+    a: { model_ratio: 1, completion_ratio: 4 },
+    b: { model_ratio: 2 },
+  })
+  expect(selection.missing).toBe(1)
+  expect(selection.previews.map((item) => item.channel)).toEqual([
+    'Official pricing preset',
+    'models.dev pricing preset',
+  ])
 })
 
-it('applies one price to every unset model and saves', async () => {
+it('fetches official prices for unset models and saves after confirmation', async () => {
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/pricing') {
       return { data: { success: true, data: [], vendors: [] } }
     }
     return { data: { success: true, data: {} } }
+  })
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        differences: {},
+        test_results: [
+          { name: OFFICIAL, status: 'success' },
+          { name: MODELS_DEV, status: 'success' },
+        ],
+        prices: {
+          'new-a': {
+            current: {},
+            upstreams: {
+              [OFFICIAL]: { model_ratio: 1.25, completion_ratio: 8 },
+            },
+          },
+          'priced-model': {
+            current: { model_ratio: 1 },
+            upstreams: { [OFFICIAL]: { model_ratio: 5 } },
+          },
+        },
+      },
+    },
   })
   const savedRatio = JSON.stringify({ 'priced-model': 1 })
   const onChange = vi.fn()
@@ -96,30 +131,31 @@ it('applies one price to every unset model and saves', async () => {
   )
 
   await screen.findByRole('row', { name: /new-a/ })
-  expect(screen.queryByRole('row', { name: /priced-model/ })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Fetch official prices' }))
 
-  fireEvent.click(screen.getByRole('button', { name: 'Set prices in bulk' }))
-  fireEvent.change(screen.getByLabelText('Input price (USD / 1M tokens)'), {
-    target: { value: '2' },
-  })
-  fireEvent.change(screen.getByLabelText('Output price (USD / 1M tokens)'), {
-    target: { value: '8' },
-  })
-  fireEvent.click(screen.getByRole('button', { name: 'Apply and save' }))
+  expect(await screen.findByText('Preview price changes')).toBeInTheDocument()
+  expect(post).toHaveBeenCalledWith(
+    '/api/ratio_sync/fetch',
+    expect.objectContaining({
+      upstreams: [
+        expect.objectContaining({ id: -100 }),
+        expect.objectContaining({ id: -101 }),
+      ],
+    })
+  )
+  expect(
+    screen.getByText(/1 models have no official price and are skipped/)
+  ).toBeInTheDocument()
+  expect(onSave).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm Changes' }))
 
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
   const lastValue = (key: string) =>
     JSON.parse(
-      onChange.mock.calls.findLast(([field]) => field === key)?.[1] ?? '{}'
+      [...onChange.mock.calls].reverse().find((call) => call[0] === key)?.[1] ??
+        '{}'
     )
-  const expr = 'tier("base", p * 2 + c * 8)'
-  expect(lastValue('billing_setting.billing_expr')).toEqual({
-    'new-a': expr,
-    'new-b': expr,
-  })
-  expect(lastValue('billing_setting.billing_mode')).toEqual({
-    'new-a': 'tiered_expr',
-    'new-b': 'tiered_expr',
-  })
-  expect(lastValue('ModelRatio')).toEqual({ 'priced-model': 1 })
+  expect(lastValue('ModelRatio')).toEqual({ 'priced-model': 1, 'new-a': 1.25 })
+  expect(lastValue('CompletionRatio')).toEqual({ 'new-a': 8 })
 })

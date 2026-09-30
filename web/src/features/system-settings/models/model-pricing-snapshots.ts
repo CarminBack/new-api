@@ -314,21 +314,3 @@ export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
     ),
   })
 }
-
-export type UnsetBulkPricingMode = 'token' | 'request'
-
-export type UnsetBulkPricingValues = {
-  mode: UnsetBulkPricingMode
-  inputPrice: number
-  outputPrice: number
-  requestPrice: number
-}
-
-// Bulk-filled models use a standard expression, never the deprecated
-// ratio/per-request fields.
-export function buildUnsetBulkPricingExpr(values: UnsetBulkPricingValues) {
-  if (values.mode === 'request') {
-    return `tier("base", fixed(${values.requestPrice}))`
-  }
-  return `tier("base", p * ${values.inputPrice} + c * ${values.outputPrice})`
-}

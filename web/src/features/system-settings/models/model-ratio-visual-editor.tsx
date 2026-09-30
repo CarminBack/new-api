@@ -1,3 +1,4 @@
+import { useMutation } from '@tanstack/react-query'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -24,7 +25,7 @@ import type {
   VisibilityState,
   SortingState,
 } from '@tanstack/react-table'
-import { Copy, Plus, WandSparkles } from 'lucide-react'
+import { Copy, DownloadCloud, Plus } from 'lucide-react'
 import {
   useState,
   useMemo,
@@ -49,14 +50,19 @@ import {
 import { Button } from '@/components/ui/button'
 import { useModelPricing } from '@/features/model-pricing/api'
 import {
+  applyPriceSyncSelections,
   applyPricingDraft,
   pricingOptions,
 } from '@/features/model-pricing/pricing'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { splitPluginBillingExprKey } from '@/features/pricing/lib/plugin-pricing'
 import { useMediaQuery } from '@/hooks'
+import { handleServerError } from '@/lib/handle-server-error'
+import { createServerError } from '@/lib/server-error-message'
 
+import { fetchUpstreamRatios } from '../api'
 import { safeJsonParse } from '../utils/json-parser'
+import { ConflictConfirmDialog } from './conflict-confirm-dialog'
 import type { PricingMode } from './model-pricing-core'
 import {
   ModelPricingEditorPanel,
@@ -67,16 +73,19 @@ import {
 import {
   buildModelSnapshots,
   getSnapshotSignature,
-  buildUnsetBulkPricingExpr,
   isBasePricingUnset,
   type ModelRow,
-  type UnsetBulkPricingValues,
 } from './model-pricing-snapshots'
 import {
   buildModelRatioColumns,
   TASK_PRICING_MODE_FILTER,
 } from './model-ratio-table-columns'
-import { UnsetBulkPricingDialog } from './unset-bulk-pricing-dialog'
+import {
+  getUpstreamDisplayName,
+  OFFICIAL_PRICE_SOURCES,
+  pickOfficialPrices,
+  type OfficialPriceSelection,
+} from './upstream-ratio-sync-helpers'
 
 type ModelRatioVisualEditorProps = {
   savedModelPrice: string
@@ -157,8 +166,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editData, setEditData] = useState<ModelRatioData | null>(null)
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false)
-  const [bulkTargetCount, setBulkTargetCount] = useState(0)
+  const [officialSelection, setOfficialSelection] =
+    useState<OfficialPriceSelection | null>(null)
   const [bulkSavePending, setBulkSavePending] = useState(false)
   const pricingConfig = useModelPricing(
     editData?.name ? [editData.name] : [],
@@ -624,43 +633,95 @@ const ModelRatioVisualEditorComponent = forwardRef<
     return rows.map((row) => row.original.name)
   }, [table])
 
-  const handleOpenBulkDialog = useCallback(() => {
-    setBulkTargetCount(getBulkTargetNames().length)
-    setBulkDialogOpen(true)
-  }, [getBulkTargetNames])
-
-  const handleBulkApply = useCallback(
-    (values: UnsetBulkPricingValues) => {
-      const targetNames = getBulkTargetNames()
-      if (targetNames.length === 0) {
-        toast.error(t('No models with unset prices'))
+  const officialFetch = useMutation({
+    mutationFn: async (targetNames: string[]) => {
+      const response = await fetchUpstreamRatios({
+        upstreams: OFFICIAL_PRICE_SOURCES,
+        timeout: 15,
+      })
+      if (!response.success || !response.data?.prices) {
+        throw createServerError(response, t('Failed to fetch upstream prices'))
+      }
+      const results = response.data.test_results
+      if (results.length && results.every((r) => r.status === 'error')) {
+        throw new Error(
+          results
+            .map((r) => `${getUpstreamDisplayName(r.name, t)}: ${r.error}`)
+            .join(', ')
+        )
+      }
+      return pickOfficialPrices(response.data.prices, targetNames, t)
+    },
+    onSuccess: (selection) => {
+      if (selection.previews.length === 0) {
+        toast.info(t('No official prices found for these models'))
         return
       }
-      // Close the editor first so saving does not commit a stale open draft
-      // over the bulk price.
-      setEditData(null)
-      setEditorOpen(false)
-      setSheetOpen(false)
-      persistPricingData(
-        {
-          name: targetNames[0],
-          billingMode: 'tiered_expr',
-          billingExpr: buildUnsetBulkPricingExpr(values),
-        },
-        targetNames
-      )
-      table.resetRowSelection()
-      setBulkSavePending(true)
+      setOfficialSelection(selection)
     },
-    [getBulkTargetNames, persistPricingData, t, table]
-  )
+    onError: (error: Error) =>
+      handleServerError(error, t('Failed to fetch upstream prices')),
+  })
+
+  const handleFetchOfficialPrices = useCallback(() => {
+    const targetNames = getBulkTargetNames()
+    if (targetNames.length === 0) {
+      toast.error(t('No models with unset prices'))
+      return
+    }
+    officialFetch.mutate(targetNames)
+  }, [getBulkTargetNames, officialFetch, t])
+
+  const handleApplyOfficialPrices = useCallback(() => {
+    if (!officialSelection) return
+    // Close the editor first so saving does not commit a stale open draft
+    // over the official price.
+    setEditData(null)
+    setEditorOpen(false)
+    setSheetOpen(false)
+    const options = pricingOptions({
+      ModelPrice: modelPrice,
+      ModelRatio: modelRatio,
+      CompletionRatio: completionRatio,
+      CacheRatio: cacheRatio,
+      CreateCacheRatio: createCacheRatio,
+      ImageRatio: imageRatio,
+      AudioRatio: audioRatio,
+      AudioCompletionRatio: audioCompletionRatio,
+      BillingMode: billingMode,
+      BillingExpr: billingExpr,
+      PluginBillingExpr: pluginBillingExpr,
+    })
+    const updated = applyPriceSyncSelections(
+      options,
+      officialSelection.resolutions
+    )
+    for (const [key, value] of Object.entries(updated)) onChange(key, value)
+    table.resetRowSelection()
+    setBulkSavePending(true)
+  }, [
+    officialSelection,
+    modelPrice,
+    modelRatio,
+    completionRatio,
+    cacheRatio,
+    createCacheRatio,
+    imageRatio,
+    audioRatio,
+    audioCompletionRatio,
+    billingMode,
+    billingExpr,
+    pluginBillingExpr,
+    onChange,
+    table,
+  ])
 
   // Save after the editor-closed state has rendered, so the parent save path
   // sees no open editor draft.
   useEffect(() => {
     if (!bulkSavePending || editorOpen) return
     setBulkSavePending(false)
-    void Promise.resolve(onSave()).finally(() => setBulkDialogOpen(false))
+    void Promise.resolve(onSave()).finally(() => setOfficialSelection(null))
   }, [bulkSavePending, editorOpen, onSave])
 
   useImperativeHandle(
@@ -732,11 +793,13 @@ const ModelRatioVisualEditorComponent = forwardRef<
             preActions={
               filterMode === 'unset' ? (
                 <Button
-                  onClick={handleOpenBulkDialog}
-                  disabled={!hasRows || isSaving}
+                  onClick={handleFetchOfficialPrices}
+                  disabled={!hasRows || isSaving || officialFetch.isPending}
                 >
-                  <WandSparkles data-icon='inline-start' />
-                  {t('Set prices in bulk')}
+                  <DownloadCloud data-icon='inline-start' />
+                  {officialFetch.isPending
+                    ? t('Fetching official prices...')
+                    : t('Fetch official prices')}
                 </Button>
               ) : (
                 <Button onClick={handleAdd}>
@@ -854,12 +917,23 @@ const ModelRatioVisualEditorComponent = forwardRef<
       </DataTableBulkActions>
 
       {filterMode === 'unset' && (
-        <UnsetBulkPricingDialog
-          open={bulkDialogOpen}
-          onOpenChange={setBulkDialogOpen}
-          modelCount={bulkTargetCount}
-          isSaving={isSaving || bulkSavePending}
-          onConfirm={handleBulkApply}
+        <ConflictConfirmDialog
+          open={officialSelection !== null}
+          onOpenChange={(open) => {
+            if (!open && !isSaving && !bulkSavePending) {
+              setOfficialSelection(null)
+            }
+          }}
+          conflicts={officialSelection?.previews ?? []}
+          onConfirm={handleApplyOfficialPrices}
+          isLoading={isSaving || bulkSavePending}
+          notice={
+            officialSelection?.missing
+              ? t('{{count}} models have no official price and are skipped', {
+                  count: officialSelection.missing,
+                })
+              : undefined
+          }
         />
       )}
 

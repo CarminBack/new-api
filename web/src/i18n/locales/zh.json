@@ -6848,14 +6848,9 @@
     "item": "次",
     "group": "分组",
     "Sync Channel 17": "同步渠道 17",
-    "Set prices in bulk": "一键设置价格",
-    "Set prices for unset models": "批量设置未定价模型",
-    "Apply one price to {{count}} models and save immediately. Prices are saved as expressions.": "将同一价格应用到 {{count}} 个模型并立即保存，价格以表达式形式保存。",
-    "Apply and save": "应用并保存",
-    "Billing unit": "计费方式",
-    "Input price (USD / 1M tokens)": "输入价格（USD / 1M tokens）",
-    "Output price (USD / 1M tokens)": "输出价格（USD / 1M tokens）",
-    "Price per request (USD)": "每次价格（USD）",
-    "Selected rows are used when any are checked; otherwise all models in the current filtered list are updated.": "勾选了模型时只更新勾选项；未勾选时更新当前筛选列表中的全部模型。"
+    "Fetch official prices": "一键获取官方价格",
+    "Fetching official prices...": "正在获取官方价格...",
+    "No official prices found for these models": "这些模型没有找到官方价格",
+    "{{count}} models have no official price and are skipped": "{{count}} 个模型没有官方价格，已跳过"
   }
 }

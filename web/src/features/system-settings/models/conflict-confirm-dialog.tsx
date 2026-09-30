@@ -37,6 +37,7 @@ type ConflictConfirmDialogProps = {
   isLoading?: boolean
   error?: string
   onReload?: () => void
+  notice?: string
 }
 export function ConflictConfirmDialog(props: ConflictConfirmDialogProps) {
   const { t } = useTranslation()
@@ -53,6 +54,11 @@ export function ConflictConfirmDialog(props: ConflictConfirmDialogProps) {
       handleConfirm={props.onConfirm}
       disabled={Boolean(props.error)}
     >
+      {props.notice && (
+        <p className='text-muted-foreground text-sm' role='status'>
+          {props.notice}
+        </p>
+      )}
       {props.error && (
         <ErrorState
           description={props.error}
