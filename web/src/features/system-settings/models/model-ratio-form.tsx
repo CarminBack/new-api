@@ -73,6 +73,7 @@ type ModelRatioFormProps = {
   isSaving: boolean
   isResetting: boolean
   variant?: 'default' | 'unset'
+  onExposeRatioChange?: (enabled: boolean) => Promise<void>
 }
 
 type ModelJsonFieldName =
@@ -176,6 +177,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
   isSaving,
   isResetting,
   variant = 'default',
+  onExposeRatioChange,
 }: ModelRatioFormProps) {
   const { t } = useTranslation()
   const isUnsetVariant = variant === 'unset'
@@ -254,7 +256,13 @@ export const ModelRatioForm = memo(function ModelRatioForm({
                     <FormControl>
                       <Switch
                         checked={field.value}
-                        onCheckedChange={field.onChange}
+                        onCheckedChange={(checked) => {
+                          field.onChange(checked)
+                          if (!onExposeRatioChange) return
+                          void onExposeRatioChange(checked).catch(() => {
+                            field.onChange(!checked)
+                          })
+                        }}
                       />
                     </FormControl>
                     <LearnMore contentProps={{ side: 'bottom', align: 'end' }}>

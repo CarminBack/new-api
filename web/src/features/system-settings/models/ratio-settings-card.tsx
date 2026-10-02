@@ -388,6 +388,21 @@ export function RatioSettingsCard({
     })
   }, [groupDefaults, groupForm])
 
+  const handleExposeRatioChange = useCallback(
+    async (enabled: boolean) => {
+      await updateOption.mutateAsync({
+        key: 'ExposeRatioEnabled',
+        value: enabled,
+      })
+      modelNormalizedDefaults.current.ExposeRatioEnabled = enabled
+      setSavedModelValues((previous) => ({
+        ...previous,
+        ExposeRatioEnabled: enabled,
+      }))
+    },
+    [updateOption]
+  )
+
   const saveModelRatios = useCallback(
     async (values: ModelFormValues) => {
       const normalized = {
@@ -435,7 +450,13 @@ export function RatioSettingsCard({
         handleServerError(error)
       }
     },
-    [t, updateOption, pricingBaseline, savePricing, pricingQuery]
+    [
+      t,
+      updateOption,
+      pricingBaseline,
+      savePricing,
+      pricingQuery,
+    ]
   )
 
   const saveGroupRatios = useCallback(
@@ -538,6 +559,9 @@ export function RatioSettingsCard({
             isSaving={updateOption.isPending || savePricing.isPending}
             isResetting={resetMutation.isPending}
             variant={tab === 'unset-models' ? 'unset' : 'default'}
+            onExposeRatioChange={
+              tab === 'models' ? handleExposeRatioChange : undefined
+            }
           />
         </>
       )
