@@ -290,12 +290,22 @@ func buildTokenVideoModels(pricing []model.Pricing, group string, groupRatio flo
 }
 
 func tokenVideoPriceLabel(item model.Pricing, groupRatio float64) string {
-	price := decimal.NewFromFloat(item.ModelPrice).Mul(decimal.NewFromFloat(groupRatio))
+	unitPrice := item.ModelPrice
+	usageKeys := billingexpr.UsedUsageKeys(item.BillingExpr)
+	// Task billing evaluates the usage expression, so show the cost of one unit from the
+	// same expression; fall back to ModelPrice when it depends on more than one usage fact.
+	if len(usageKeys) == 1 {
+		for key := range usageKeys {
+			if cost, _, err := billingexpr.RunExprWithRequest(item.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: map[string]any{key: 1}}); err == nil {
+				unitPrice = cost
+			}
+		}
+	}
+	price := decimal.NewFromFloat(unitPrice).Mul(decimal.NewFromFloat(groupRatio))
 	if price.IsNegative() || price.IsZero() {
 		return "按量计费"
 	}
 	value := strings.TrimRight(strings.TrimRight(price.StringFixed(4), "0"), ".")
-	usageKeys := billingexpr.UsedUsageKeys(item.BillingExpr)
 	if _, ok := usageKeys["seconds"]; ok {
 		return "$" + value + "/秒"
 	}

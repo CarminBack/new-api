@@ -73,6 +73,21 @@ func TestBuildTokenVideoModelsReturnsSafePriceAndLimits(t *testing.T) {
 	}
 }
 
+func TestTokenVideoPriceLabelUsesBillingExpression(t *testing.T) {
+	// ModelPrice is stale; the label must follow the expression that actually bills.
+	item := model.Pricing{ModelPrice: 0.35, QuotaType: 2, BillingExpr: `tier("base", u("seconds") * 0.25)`}
+	if got := tokenVideoPriceLabel(item, 1); got != "$0.25/秒" {
+		t.Fatalf("unexpected label %q", got)
+	}
+	if got := tokenVideoPriceLabel(item, 1.4); got != "$0.35/秒" {
+		t.Fatalf("unexpected label with group ratio %q", got)
+	}
+	item = model.Pricing{ModelPrice: 0.5, QuotaType: 2, BillingExpr: `tier("base", u("seconds") * u("videos") * 2)`}
+	if got := tokenVideoPriceLabel(item, 1); got != "$0.5/秒" {
+		t.Fatalf("multi-fact expression should fall back to ModelPrice, got %q", got)
+	}
+}
+
 func TestTokenVideoPriceLabelSupportsPerVideoPricing(t *testing.T) {
 	item := model.Pricing{ModelPrice: 1.2, QuotaType: 2, BillingExpr: `tier("base", u("videos") * 1.2)`}
 	if got := tokenVideoPriceLabel(item, 1.5); got != "$1.8/条" {
