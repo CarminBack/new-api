@@ -1,6 +1,6 @@
 # 渠道17利润价格同步修复 — 2026-10-09
 
-状态：本地修复及三数据库验证完成，待生产发布确认。
+状态：2026-10-09已获用户“同步”确认，修复镜像发布并应用同步完成。生产重复预览所有差异列表为空。
 
 ## 问题
 
@@ -48,3 +48,16 @@ git diff --check
 - 不开启定时同步，不修改有效模型加价率，不额外删除历史无效配置键。
 - 备份原镜像/compose、相关计费option和渠道17非敏感映射字段。失败恢复原镜像和原option/模型映射，检查容器和公网状态。
 - 验证实际配置键、原35%加价率、19个有效模型、重复预览零变化，以及本机/公网接口健康。不提交付费视频生成。
+
+## 生产发布与同步结果
+
+- 用户在当前会话明确回复“同步”，按前述范围发布修复并应用一次同步。
+- 提交`e4454d93da39b72ba5e168d081499c3b307abd13`；ARM64镜像`ghcr.io/carminback/new-api@sha256:1753cc45dc91c7bc142e6ce1a5b3ed6929d6051c9f53de918145819cb16d4b76`。Actions 37886654859成功，架构与revision已核对。
+- 发布前重新预览：19个有效模型、价格和映射零变化、原13个旧模型公式待删除，没有新的变价或模型变化。无其他启用渠道引用13个旧模型。
+- 即时备份`/opt/docker/new-api/backups/channel17-sync-release-20261009T051936Z`，含原compose、6个相关option、渠道17无敏感models/model_mapping、前后预览及应用结果。
+- 仅重建new-api服务。新镜像启动健康，restart_count=0、OOM=false，本机status成功。
+- 新镜像下再次预览并核对备份/差异未变化，然后明确指定channel_id=17、markup_rate=1.35、credit_rate=100、dry_run=false调用同步接口，HTTP200且success=true。
+- 数据库验证：两个billing_setting.配置映射只删原13个旧模型；ModelPrice全部值、加价率、旧无效键、渠道模型集合和映射均无语义变化。19个有效模型的持久化价格、公式、模式与新预览一致。
+- 随后真实dry-run：total_models=19，markup_rate=1.35，added_models/removed_models/price_changes/expression_changes/mapping_changes全部为空。无重复差异。
+- 公网`https://token.mewinyou.shop/api/status`返回200；本机客户端残留CAfile环境指向不存在文件，改为显式系统CA bundle验证成功，未改服务TLS配置。容器日志未见panic/fatal，后续正常从数据库同步options/channels。
+- 无付费生成；未开启定时AistarsLab同步、未修改重试预算或代理数据库配置；原镜像与计费快照保留作回滚。
