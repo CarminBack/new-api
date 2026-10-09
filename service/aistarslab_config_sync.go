@@ -464,10 +464,10 @@ func applyAistarsLabSync(channelID int, markupRate float64, modelsToSync []Aista
 		return err
 	}
 	if err := model.UpdateOptionsBulk(map[string]string{
-		billing_setting.BillingModeField: string(modeJSON),
-		billing_setting.BillingExprField: string(expressionJSON),
-		"ModelPrice":                     string(priceJSON),
-		"AistarsLabMarkupRate":           strconv.FormatFloat(markupRate, 'f', -1, 64),
+		"billing_setting." + billing_setting.BillingModeField: string(modeJSON),
+		"billing_setting." + billing_setting.BillingExprField: string(expressionJSON),
+		"ModelPrice":           string(priceJSON),
+		"AistarsLabMarkupRate": strconv.FormatFloat(markupRate, 'f', -1, 64),
 	}); err != nil {
 		return err
 	}
