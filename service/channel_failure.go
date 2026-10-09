@@ -108,8 +108,12 @@ func DecideChannelFailureForModel(c *gin.Context, err *types.NewAPIError, modelN
 		decision.Retry = false
 		decision.Reason += ":specific_channel"
 	}
-	if decision.Retry && IsTextRelayRequest(c) && common.TextRetryMinRemainingSeconds > 0 {
-		if deadline, ok := c.Request.Context().Deadline(); ok && time.Until(deadline) < time.Duration(common.TextRetryMinRemainingSeconds)*time.Second {
+	if decision.Retry && IsTextRelayRequest(c) {
+		minimum := time.Duration(common.TextRetryMinRemainingSeconds) * time.Second
+		if deadline, ok := TextFirstResponseDeadline(c); ok && (time.Until(deadline) <= 0 || time.Until(deadline) < minimum) {
+			decision.Retry = false
+			decision.Reason += ":first_response_budget_exhausted"
+		} else if deadline, ok := c.Request.Context().Deadline(); ok && time.Until(deadline) < minimum {
 			decision.Retry = false
 			decision.Reason += ":insufficient_time_remaining"
 		}

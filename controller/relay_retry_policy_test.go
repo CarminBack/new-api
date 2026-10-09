@@ -96,6 +96,15 @@ func TestAllowsUncertainCrossChannelRetryGatesImageTool(t *testing.T) {
 	assert.False(t, allowsUncertainCrossChannelRetry(nil, nil))
 }
 
+func TestManagedRetryImmediatelyAcceptsExplicitBadGateway(t *testing.T) {
+	c := newRelayPolicyContext(t)
+	apiErr := types.NewOpenAIError(errors.New("upstream bad gateway"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway)
+	failure := service.DecideChannelFailure(c, apiErr, 1, false, false)
+	require.True(t, failure.Retry)
+	decision := resolveManagedRetryDecision(c, apiErr, 1, failure)
+	assert.Equal(t, "retry", decision.Action, "an explicit 502 is retried without waiting for a response timeout")
+}
+
 func TestManagedRetryPreservesStopGuards(t *testing.T) {
 	for _, name := range []string{"skip", "cancel", "committed", "exhausted", "timeout"} {
 		t.Run(name, func(t *testing.T) {

@@ -244,6 +244,51 @@ func TestTextFailoverPrefersIndependentHealthyHost(t *testing.T) {
 	ReleaseCurrentChannelHealthReservation(c)
 }
 
+func TestTextRetryChainAvoidsPreviouslyFailedHosts(t *testing.T) {
+	setupChannelHealthTest(t)
+	high, second := failoverChannels(t)
+	for _, tc := range []struct {
+		id       int
+		priority int64
+		url      string
+	}{
+		{822, 5, high.GetBaseURL()},
+		{823, 0, "https://third.example"},
+	} {
+		weight := uint(1)
+		channel := &model.Channel{Id: tc.id, Type: 1, Key: "fixture", Models: "gpt-test", Group: "default", Status: common.ChannelStatusEnabled, Priority: &tc.priority, Weight: &weight, BaseURL: &tc.url}
+		require.NoError(t, model.DB.Create(channel).Error)
+		require.NoError(t, model.DB.Create(&model.Ability{Group: "default", Model: "gpt-test", ChannelId: channel.Id, Enabled: true, Priority: &tc.priority, Weight: weight}).Error)
+	}
+	c := failoverContext()
+	c.Set("channel_id", high.Id)
+	AppendUsedChannel(c, high.Id)
+	require.True(t, AllowChannelRetryFor(c, "gpt-test", "/v1/responses", ChannelFailureTransient, high.Id))
+	ExcludeChannelForRequest(c, high.Id)
+	param := &RetryParam{Ctx: c, TokenGroup: "default", ModelName: "gpt-test", RequestPath: "/v1/responses"}
+	selected, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, second.Id, selected.Id)
+	ReleaseCurrentChannelHealthReservation(c)
+	c.Set("channel_id", second.Id)
+	AppendUsedChannel(c, second.Id)
+	ExcludeChannelForRequest(c, second.Id)
+	selected, _, err = CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, 823, selected.Id, "A -> B must not return to A's higher-priority alias when C is eligible")
+	ReleaseCurrentChannelHealthReservation(c)
+	// Request filters remain authoritative; with C excluded, an eligible
+	// same-host alias is retained rather than inventing an unavailable route.
+	ExcludeChannelForRequest(c, 823)
+	selected, _, err = CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	require.Equal(t, 822, selected.Id)
+	ReleaseCurrentChannelHealthReservation(c)
+}
+
 func TestTextConcurrentRateLimitCannotShortenRetryAfter(t *testing.T) {
 	now := setupChannelHealthTest(t)
 	high, _ := failoverChannels(t)

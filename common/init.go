@@ -112,6 +112,7 @@ func InitEnv() {
 	RelayTimeout = GetEnvOrDefault("RELAY_TIMEOUT", 0)
 	TextRelayTimeout = max(0, GetEnvOrDefault("TEXT_RELAY_TIMEOUT", 600))
 	TextFirstResponseTimeout = max(0, GetEnvOrDefault("TEXT_FIRST_RESPONSE_TIMEOUT", 90))
+	TextFirstResponseTotalTimeout = max(0, GetEnvOrDefault("TEXT_FIRST_RESPONSE_TOTAL_TIMEOUT", 0))
 	TextRetryMinRemainingSeconds = max(0, GetEnvOrDefault("TEXT_RETRY_MIN_REMAINING_SECONDS", 5))
 	var textRulesErr error
 	textFirstResponseRules, textRulesErr = ParseTextFirstResponseRules(os.Getenv("TEXT_FIRST_RESPONSE_TIMEOUT_RULES"))

@@ -170,6 +170,10 @@ var TextRelayTimeout int
 // TextFirstResponseTimeout bounds each text attempt until the first response body byte.
 // It does not limit the duration of a stream once output has begun.
 var TextFirstResponseTimeout = 90
+
+// TextFirstResponseTotalTimeout bounds pre-response waiting across all text
+// attempts. Zero preserves existing behavior; established streams are unaffected.
+var TextFirstResponseTotalTimeout int
 var TextAdaptiveRoutingEnabled bool
 var TextSlowFirstContentSeconds = 15
 var LocalVerificationMode bool

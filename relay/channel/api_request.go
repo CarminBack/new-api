@@ -521,6 +521,7 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	var releaseTextContext func()
 	var firstTextByte func()
+	var firstResponseDeadline time.Time
 	if service.IsTextRelayRequest(c) {
 		service.CaptureTextRetryAfter(c, nil)
 		ctx, cancel := context.WithCancel(req.Context())
@@ -529,9 +530,21 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		if info != nil && info.OriginModelName != "" {
 			modelName = info.OriginModelName
 		}
-		firstResponseSeconds := common2.TextFirstResponseSeconds(modelName, c.Request.URL.Path)
-		if firstResponseSeconds > 0 {
-			firstResponseTimer = time.AfterFunc(time.Duration(firstResponseSeconds)*time.Second, cancel)
+		firstResponseSeconds := common2.TextFirstResponseSeconds(modelName, c.Request.URL.Path, service.TextRequestReasoningEffort(c))
+		wait := time.Duration(firstResponseSeconds) * time.Second
+		if deadline, ok := service.TextFirstResponseDeadline(c); ok {
+			firstResponseDeadline = deadline
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				cancel()
+				return nil, types.NewErrorWithStatusCode(errors.New("text first response total budget exhausted"), types.ErrorCode("first_response_budget_exhausted"), http.StatusGatewayTimeout, types.ErrOptionWithSkipRetry())
+			}
+			if wait <= 0 || remaining < wait {
+				wait = remaining
+			}
+		}
+		if wait > 0 {
+			firstResponseTimer = time.AfterFunc(wait, cancel)
 		}
 		firstTextByte = func() {
 			if firstResponseTimer != nil {
@@ -603,6 +616,9 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
+		if !firstResponseDeadline.IsZero() && !time.Now().Before(firstResponseDeadline) && c.Request.Context().Err() == nil {
+			return nil, types.NewErrorWithStatusCode(errors.New("text first response total budget exhausted"), types.ErrorCode("first_response_budget_exhausted"), http.StatusGatewayTimeout, types.ErrOptionWithSkipRetry())
+		}
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {

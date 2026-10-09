@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -107,6 +108,69 @@ func TestTextRelayCompletionRecordsAffinityButCancellationDoesNot(t *testing.T) 
 			require.Error(t, relayCtx.Err(), "relay deadline resources must be released")
 		})
 	}
+}
+
+func TestTextTimeoutEffortUsesOriginalProtocolBody(t *testing.T) {
+	for _, tc := range []struct {
+		path, body, effort string
+	}{
+		{"/v1/responses", `{"reasoning":{"effort":"max"}}`, "max"},
+		{"/v1/chat/completions", `{"reasoning_effort":"xhigh"}`, "xhigh"},
+		{"/v1/messages", `{"output_config":{"effort":"high"}}`, "high"},
+		{"/v1/responses", `{}`, ""},
+		{"/v1/responses", `{"reasoning":{"effort":123}}`, ""},
+	} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
+		require.Equal(t, tc.effort, TextRequestReasoningEffort(c))
+		c.Request = httptest.NewRequest("POST", tc.path, strings.NewReader(`{"reasoning":{"effort":"low"}}`))
+		require.Equal(t, tc.effort, TextRequestReasoningEffort(c), "channel overrides must not change the original timeout class")
+	}
+}
+
+func TestTextFirstResponseBudgetIsSharedAcrossAttempts(t *testing.T) {
+	oldTotal, oldMinimum := common.TextFirstResponseTotalTimeout, common.TextRetryMinRemainingSeconds
+	common.TextFirstResponseTotalTimeout, common.TextRetryMinRemainingSeconds = 90, 5
+	t.Cleanup(func() {
+		common.TextFirstResponseTotalTimeout, common.TextRetryMinRemainingSeconds = oldTotal, oldMinimum
+	})
+	for _, tc := range []struct {
+		name    string
+		elapsed time.Duration
+		retry   bool
+	}{
+		{"enough for failover", 45 * time.Second, true},
+		{"too little for failover", 88 * time.Second, false},
+		{"expired", 91 * time.Second, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := failoverContext()
+			start := time.Now().Add(-tc.elapsed)
+			common.SetContextKey(c, constant.ContextKeyRequestStartTime, start)
+			deadline, enabled := TextFirstResponseDeadline(c)
+			require.True(t, enabled)
+			assert.Equal(t, start.Add(90*time.Second), deadline)
+			// A later attempt must retain the original deadline.
+			common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+			next, _ := TextFirstResponseDeadline(c)
+			assert.Equal(t, deadline, next)
+			decision := DecideChannelFailureForModel(c, types.NewErrorWithStatusCode(context.DeadlineExceeded, types.ErrorCodeBadResponseStatusCode, 502), "gpt-test", 3, false, true)
+			assert.Equal(t, tc.retry, decision.Retry)
+			if !tc.retry {
+				assert.Contains(t, decision.Reason, "first_response_budget_exhausted")
+			}
+			require.NoError(t, c.Request.Context().Err(), "pre-response budget must not cancel established streams")
+		})
+	}
+	c := failoverContext()
+	common.TextFirstResponseTotalTimeout = 0
+	_, enabled := TextFirstResponseDeadline(c)
+	assert.False(t, enabled, "default preserves existing behavior")
+	common.TextFirstResponseTotalTimeout = 90
+	c.Request.URL.Path = "/v1/images/generations"
+	c.Set(textRelayEligibilityKey, false)
+	_, enabled = TextFirstResponseDeadline(c)
+	assert.False(t, enabled, "media requests keep existing deadlines")
 }
 
 func TestTextAdaptiveWeightNeedsSamplesPreservesFloorAndExpires(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -231,17 +232,30 @@ func selectHealthyChannel(param *RetryParam, group string, retry int) (*model.Ch
 	if managed {
 		retry = 0
 	}
-	// On failover prefer another upstream host, while preserving priority and
-	// weight within that pool. Host identity is never an eligibility override.
+	// On failover prefer a host not yet attempted in this request, while
+	// preserving priority and weight within that pool. This avoids A -> B -> A
+	// when multiple channels share a failed upstream. Host identity is only a hint.
 	filters := GetChannelConstraints(param.Ctx).Filters
 	var sameDomain map[int]struct{}
 	if managed && IsTextRelayRequest(param.Ctx) && param.Ctx.GetBool("text_first_failover_checked") {
-		failed, _ := model.CacheGetChannel(param.Ctx.GetInt("channel_id"))
-		domain := channelFaultDomain(failed)
+		failedDomains := make(map[string]struct{})
+		attempted := append([]string{strconv.Itoa(param.Ctx.GetInt("channel_id"))}, param.Ctx.GetStringSlice("use_channel")...)
+		for _, id := range attempted {
+			channelID, err := strconv.Atoi(id)
+			if err != nil {
+				continue
+			}
+			failed, _ := model.CacheGetChannel(channelID)
+			if domain := channelFaultDomain(failed); domain != "" {
+				failedDomains[domain] = struct{}{}
+			}
+		}
 		candidates := model.GetSatisfiedChannels(group, param.ModelName, filters)
 		hasIndependent := false
 		for _, candidate := range candidates {
-			if candidate.Id != param.Ctx.GetInt("channel_id") && domain != "" && channelFaultDomain(candidate) != "" && channelFaultDomain(candidate) != domain &&
+			domain := channelFaultDomain(candidate)
+			_, attempted := failedDomains[domain]
+			if domain != "" && !attempted && len(failedDomains) > 0 &&
 				IsChannelPriorityAffinityReady(candidate, param.ModelName, param.RequestPath) {
 				hasIndependent = true
 				break
@@ -250,7 +264,7 @@ func selectHealthyChannel(param *RetryParam, group string, retry int) (*model.Ch
 		excluded := make(map[int]struct{})
 		sameDomain = make(map[int]struct{})
 		for _, candidate := range candidates {
-			if hasIndependent && channelFaultDomain(candidate) == domain {
+			if _, attempted := failedDomains[channelFaultDomain(candidate)]; hasIndependent && attempted {
 				sameDomain[candidate.Id] = struct{}{}
 			}
 			if param.Ctx.GetBool("text_first_failover_reserved") && !IsChannelPriorityAffinityReady(candidate, param.ModelName, param.RequestPath) {

@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -124,6 +126,49 @@ func TestTextFirstResponseTimeoutCancelsOnlyTheAttempt(t *testing.T) {
 			}
 			require.Error(t, err)
 			require.NoError(t, c.Request.Context().Err(), "another channel can still be attempted")
+		})
+	}
+}
+
+func TestTextTotalFirstResponseBudgetBoundsAttempt(t *testing.T) {
+	oldTotal, oldAttempt := common.TextFirstResponseTotalTimeout, common.TextFirstResponseTimeout
+	common.TextFirstResponseTotalTimeout, common.TextFirstResponseTimeout = 1, 90
+	t.Cleanup(func() {
+		common.TextFirstResponseTotalTimeout, common.TextFirstResponseTimeout = oldTotal, oldAttempt
+	})
+	for _, expired := range []bool{false, true} {
+		t.Run(fmt.Sprint(expired), func(t *testing.T) {
+			entered := make(chan struct{}, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				entered <- struct{}{}
+				<-r.Context().Done()
+			}))
+			defer server.Close()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{}`))
+			start := time.Now()
+			if expired {
+				start = start.Add(-2 * time.Second)
+			}
+			common.SetContextKey(c, constant.ContextKeyRequestStartTime, start)
+			req, err := http.NewRequest("POST", server.URL, strings.NewReader(`{}`))
+			require.NoError(t, err)
+			_, err = doRequest(c, req, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+			require.Error(t, err)
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			require.Equal(t, http.StatusGatewayTimeout, apiErr.StatusCode)
+			require.Equal(t, types.ErrorCode("first_response_budget_exhausted"), apiErr.GetErrorCode())
+			require.True(t, types.IsSkipRetryError(apiErr))
+			require.Contains(t, apiErr.Error(), "total budget exhausted")
+			require.NoError(t, c.Request.Context().Err())
+			select {
+			case <-entered:
+				require.False(t, expired, "expired budget must not dispatch another billable request")
+			default:
+				require.True(t, expired)
+			}
 		})
 	}
 }
