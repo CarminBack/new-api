@@ -1,6 +1,6 @@
 # New API 上游重试修复评估 — 2026-10-09
 
-状态：本地补丁和数据核对已完成，生产未变更。
+状态：第一阶段已于2026-10-09 12:30 CST上线；单次首响应等待保持90秒，总预算保持关闭（0）。
 
 ## 数据范围与口径
 
@@ -60,3 +60,14 @@
 - 补充模型/接口/reasoning规则后：go test ./common ./service ./relay/channel ./controller -run 'Test(Text|ManagedRetry)' -count=1 -timeout=60s：全部通过。
 - go build -o /tmp/new-api-upstream-fix-local .：通过。
 - gofmt、git diff --check：通过。
+
+## 第一阶段发布记录
+
+- 用户已在当前会话明确确认上线，仅替换Oracle new-api-docker。
+- 代码提交：4e60731fb2803449a210161c9183c4679f491bd8，分支fix/upstream-retry-budget-20261009。
+- ARM64构建：[GitHub Actions 37883790003](https://github.com/CarminBack/new-api/actions/runs/37883790003)，成功。
+- 新镜像：ghcr.io/carminback/new-api@sha256:456f7b650eef1c03d8bb971533ace34389b46fc30422f17f28c83e4156090dc3，architecture=arm64，OCI revision与代码提交一致。
+- 配置：仅替换compose的镜像digest；单次首响应90秒、总预算0，无模型/推理规则覆盖；没有修改渠道优先级、数据库/Redis/代理配置。
+- 备份与回滚：/opt/docker/new-api/backups/upstream-retry-20261009T042550Z；恢复其中docker-compose.yml，执行docker compose up -d --no-deps new-api。旧镜像digest为a85b7eba497b0327975f223326b4075d63f7320d032cbdbbcbf9602dfea114d5，保留未清理。
+- 验证：容器healthy、restart_count=0、OOM=false，本机/api/status 200约2.5ms，公网200约96ms；启动至首轮核对无panic/fatal/数据库迁移或连接失败。已观察真实gpt-5.5、gpt-5.6-sol流式响应status=ok/completion_delivered=true。
+- 局限：部分真实请求仍有上游/流式错误，不能将HTTP200等同成功交付；发布不保证供应商故障消失。真实跨供应商重试链与更长观察窗口另行记录。
