@@ -62,6 +62,86 @@ func allowPrivateTaskMediaTest(t *testing.T) {
 	service.InitHttpClient()
 }
 
+func TestSunoLyricsQueryDoesNotCreateTasksOrCharges(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		owner          int
+		audioID        string
+		status         model.TaskStatus
+		snapshot       string
+		upstreamStatus int
+		upstreamBody   string
+		wantStatus     int
+		wantCalls      int
+	}{
+		{"raw success", 7, "song-1", model.TaskStatusSuccess, `{"data":{"response":{"sunoData":[{"id":"song-1"}]}}}`, 200, `{"code":200,"msg":"success","data":{"alignedWords":[{"word":"Hello","startS":1,"endS":2}],"waveformData":[0,1]}}`, 200, 1},
+		{"normalized instrumental", 7, "song-1", model.TaskStatusSuccess, `{"songs":[{"id":"song-1"}]}`, 200, `{"code":200,"data":{"alignedWords":[],"waveformData":[]}}`, 200, 1},
+		{"other owner", 8, "song-1", model.TaskStatusSuccess, `{"songs":[{"id":"song-1"}]}`, 200, `{}`, 404, 0},
+		{"other song", 7, "song-other", model.TaskStatusSuccess, `{"songs":[{"id":"song-1"}]}`, 200, `{}`, 400, 0},
+		{"pending music", 7, "song-1", model.TaskStatusInProgress, `{"songs":[{"id":"song-1"}]}`, 200, `{}`, 409, 0},
+		{"business failure", 7, "song-1", model.TaskStatusSuccess, `{"songs":[{"id":"song-1"}]}`, 200, `{"code":429,"msg":"upstream-secret"}`, 502, 1},
+		{"HTTP failure", 7, "song-1", model.TaskStatusSuccess, `{"songs":[{"id":"song-1"}]}`, 503, `secret-provider-error`, 502, 1},
+		{"redirect rejected", 7, "song-1", model.TaskStatusSuccess, `{"songs":[{"id":"song-1"}]}`, 302, `{}`, 502, 1},
+		{"malformed result", 7, "song-1", model.TaskStatusSuccess, `{"songs":[{"id":"song-1"}]}`, 200, `{"code":200,"data":{}}`, 502, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := setupGenericTaskTest(t)
+			require.NoError(t, model.DB.AutoMigrate(&model.Log{}))
+			t.Cleanup(func() { require.NoError(t, model.DB.Migrator().DropTable(&model.Log{})) })
+			var calls int
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				assert.Equal(t, "/api/v1/generate/get-timestamped-lyrics", r.URL.Path)
+				assert.Equal(t, "Bearer saved-provider-key", r.Header.Get("Authorization"))
+				var payload map[string]any
+				require.NoError(t, common.DecodeJson(r.Body, &payload))
+				assert.Equal(t, map[string]any{"taskId": "private-origin-id", "audioId": "song-1"}, payload)
+				w.Header().Set("Location", "/do-not-forward-credentials")
+				w.WriteHeader(tc.upstreamStatus)
+				_, _ = io.WriteString(w, tc.upstreamBody)
+			}))
+			defer upstream.Close()
+			service.InitHttpClient()
+			setting := `{"task_plugin_key":"sunoapi-org"}`
+			require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", 1).Updates(map[string]any{"base_url": upstream.URL, "type": constant.ChannelTypeTaskPlugin, "setting": setting}).Error)
+			task.Platform, task.Action, task.Status = "sunoapi-org", "MUSIC", tc.status
+			task.PrivateData.UpstreamTaskID, task.PrivateData.Key = "private-origin-id", "saved-provider-key"
+			task.Data = []byte(tc.snapshot)
+			require.NoError(t, model.DB.Save(task).Error)
+			var beforeTask model.Task
+			require.NoError(t, model.DB.First(&beforeTask, task.ID).Error)
+			var beforeUser model.User
+			require.NoError(t, model.DB.First(&beforeUser, 7).Error)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Set("id", tc.owner)
+			body, err := common.Marshal(map[string]any{"model": "sunoapi_music", "taskId": task.TaskID, "audioId": tc.audioID})
+			require.NoError(t, err)
+			c.Request = httptest.NewRequest(http.MethodPost, "/sunoapi-org/get-timestamped-lyrics", strings.NewReader(string(body)))
+			GetSunoTimestampedLyrics(c)
+			assert.Equal(t, tc.wantStatus, recorder.Code)
+			assert.Equal(t, tc.wantCalls, calls)
+			if tc.wantStatus == 200 {
+				assert.JSONEq(t, tc.upstreamBody, recorder.Body.String())
+			}
+			assert.NotContains(t, recorder.Body.String(), "saved-provider-key")
+			assert.NotContains(t, recorder.Body.String(), "private-origin-id")
+			assert.NotContains(t, recorder.Body.String(), "upstream-secret")
+			var taskCount, logCount int64
+			require.NoError(t, model.DB.Model(&model.Task{}).Count(&taskCount).Error)
+			require.NoError(t, model.DB.Model(&model.Log{}).Count(&logCount).Error)
+			assert.Equal(t, int64(1), taskCount)
+			assert.Zero(t, logCount)
+			var afterTask model.Task
+			require.NoError(t, model.DB.First(&afterTask, task.ID).Error)
+			assert.Equal(t, beforeTask, afterTask)
+			var afterUser model.User
+			require.NoError(t, model.DB.First(&afterUser, 7).Error)
+			assert.Equal(t, beforeUser, afterUser)
+		})
+	}
+}
+
 func TestGetTaskDoesNotProjectArtifacts(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	task.FailReason = "https://stale-upstream.invalid/video.mp4"

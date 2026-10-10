@@ -114,6 +114,15 @@ func productionPluginRouteHandlers(generation *jsplugin.RoutingGeneration, bindi
 			c.Writer.Status(),
 		)
 	}
+	if binding.Plugin.Meta.Key == "sunoapi-org" && binding.Route.Method == http.MethodPost && binding.Route.Path == "/sunoapi-org/get-timestamped-lyrics" {
+		return []gin.HandlerFunc{
+			pinRoute,
+			middleware.TokenAuth(),
+			middleware.SystemPerformanceCheck(),
+			middleware.ModelRequestRateLimit(),
+			controller.GetSunoTimestampedLyrics,
+		}
+	}
 	return []gin.HandlerFunc{
 		pinRoute,
 		middleware.TokenAuth(),
