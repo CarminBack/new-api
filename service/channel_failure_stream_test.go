@@ -64,6 +64,17 @@ func TestChannelResponseStartedRespectsTracking(t *testing.T) {
 
 // A failed stream that buffered only metadata must still be classified as
 // retryable, which is what allows failover to another channel.
+func TestContentReviewStatusDoesNotCountForCircuit(t *testing.T) {
+	c := newChannelFailureContext(t)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", nil)
+	err := types.NewOpenAIError(fmt.Errorf("上游图片任务失败或需要审核"), types.ErrorCodeBadResponseStatusCode, 477)
+	decision := DecideChannelFailureForModel(c, err, "gpt-image-2", 1, true, false)
+	assert.Equal(t, ChannelFailureTerminal, decision.Class)
+	assert.Contains(t, decision.Reason, "content_review_rejected")
+	assert.False(t, decision.CountForCircuit)
+	assert.False(t, decision.Retry)
+}
+
 func TestDecideChannelFailureBufferedMetadataStillRetries(t *testing.T) {
 	c := newChannelFailureContext(t)
 	common.SetContextKey(c, constant.ContextKeyStreamResponseTracking, true)

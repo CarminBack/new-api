@@ -54,6 +54,7 @@ const (
 	imageChannelHealthProbeMaxBackoff    = time.Hour
 
 	ginKeyChannelHealthReservation = "channel_health_reservation"
+	ginKeyChannelHealthExcluded    = "channel_health_excluded"
 )
 
 var channelCircuitNow = time.Now
@@ -533,6 +534,41 @@ func channelInImageGroup(channel *model.Channel) bool {
 	return false
 }
 
+func channelHealthContextExcluded(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	excluded, _ := c.Get(ginKeyChannelHealthExcluded)
+	return excluded == true
+}
+
+// channelHealthExcluded keeps image channels and image generation routes out of
+// the adaptive circuit. Prompt review and upstream image failures must not
+// open, probe, or block those channels.
+func channelHealthExcluded(channel *model.Channel, channelID int, requestPath string) bool {
+	if isImageGenerationPath(requestPath) || channelInImageGroup(channel) {
+		return true
+	}
+	return channel == nil && channelID > 0 && isImageChannel(channelID, "")
+}
+
+func clearExcludedAggregateHealthLocked(state *channelAggregateHealthState) {
+	state.Suspect = false
+	state.OpenUntil = time.Time{}
+	state.ProbeDue = time.Time{}
+	state.ProbeInFlight = false
+	state.ProbeLeaseUntil = time.Time{}
+}
+
+func clearExcludedRouteHealthLocked(state *channelRouteHealthState) {
+	state.Suspect = false
+	state.OpenUntil = time.Time{}
+	state.ProbeDue = time.Time{}
+	state.ProbeInFlight = false
+	state.ProbeLeaseUntil = time.Time{}
+	state.RecoveryTargetCapacity = 0
+}
+
 func isImageChannel(channelID int, fingerprint string) bool {
 	if channelID <= 0 {
 		return false
@@ -626,7 +662,7 @@ func restoreImageRouteImmediatelyLocked(state *channelRouteHealthState, now time
 // are selecting a candidate must still reserve capacity with
 // AllowChannelHealthAttempt before sending a request.
 func IsChannelHealthAvailable(channel *model.Channel, modelName string, requestPath string) bool {
-	if channel == nil {
+	if channel == nil || channelHealthExcluded(channel, channel.Id, requestPath) {
 		return true
 	}
 	now := channelCircuitNow()
@@ -647,7 +683,7 @@ func IsChannelHealthAvailable(channel *model.Channel, modelName string, requestP
 // IsChannelHealthCircuitClosed ignores transient capacity saturation and only
 // reports whether the channel remains eligible for affinity ownership.
 func IsChannelHealthCircuitClosed(channel *model.Channel, modelName string, requestPath string) bool {
-	if channel == nil {
+	if channel == nil || channelHealthExcluded(channel, channel.Id, requestPath) {
 		return true
 	}
 	now := channelCircuitNow()
@@ -978,7 +1014,7 @@ func recordAggregateFailure(identity channelHealthIdentity, now time.Time, class
 		return false
 	}
 	_, requestPath := splitChannelRouteLabel(identity.RouteLabel)
-	if !ChannelHealthProbeSupportsPath(requestPath) {
+	if channelHealthExcluded(nil, identity.ChannelID, requestPath) || !ChannelHealthProbeSupportsPath(requestPath) {
 		return false
 	}
 	shard := channelAggregateHealthShardFor(identity.ChannelKey)
@@ -1147,7 +1183,16 @@ func markAggregateRouteHealthy(identity channelHealthIdentity) {
 }
 
 func allowChannelHealthAttempt(c *gin.Context, channel *model.Channel, channelID int, modelName string, requestPath string) bool {
+	if channel != nil {
+		channelID = channel.Id
+	}
 	if channelID <= 0 && channel == nil {
+		return true
+	}
+	if channelHealthExcluded(channel, channelID, requestPath) {
+		if c != nil {
+			c.Set(ginKeyChannelHealthExcluded, true)
+		}
 		return true
 	}
 	now := channelCircuitNow()
@@ -1225,6 +1270,10 @@ func releaseRouteReservation(reservation channelHealthReservation) {
 
 func recordChannelCircuitFailure(c *gin.Context, channelID int, modelName string, requestPath string, class ChannelFailureClass, reason string, statusCode int) {
 	if channelID <= 0 {
+		return
+	}
+	if channelHealthContextExcluded(c) || channelHealthExcluded(nil, channelID, requestPath) {
+		ReleaseCurrentChannelHealthReservation(c)
 		return
 	}
 	now := channelCircuitNow()
@@ -1366,6 +1415,10 @@ func RecordChannelCircuitSuccess(c *gin.Context, channelID int, modelName string
 	if channelID <= 0 {
 		return
 	}
+	if channelHealthContextExcluded(c) || channelHealthExcluded(nil, channelID, requestPath) {
+		ReleaseCurrentChannelHealthReservation(c)
+		return
+	}
 	if IsTextRelayRequest(c) && c.Request.Context().Err() != nil && !RequestPolicy(c).Successful {
 		ReleaseCurrentChannelHealthReservation(c)
 		return
@@ -1489,7 +1542,7 @@ func ReleaseCurrentChannelHealthReservation(c *gin.Context) {
 }
 
 func ChannelHealthKeyExclusions(channel *model.Channel, modelName string, requestPath string, existing map[int]struct{}) map[int]struct{} {
-	if channel == nil {
+	if channel == nil || channelHealthExcluded(channel, channel.Id, requestPath) {
 		return existing
 	}
 	identity := buildChannelHealthIdentity(channel, 0, modelName, requestPath, channelCircuitNow())
@@ -1643,13 +1696,15 @@ func claimDueChannelHealthProbes(limit int, includePath channelHealthProbePathFi
 				continue
 			}
 			imageRoute := isImageHealthRoute(state.ChannelID, state.Fingerprint, requestPath)
+			if imageRoute {
+				clearExcludedAggregateHealthLocked(state)
+				deletePersistentHealthState(channelKey)
+				continue
+			}
 			if includePath != nil && !includePath(imageRoute) {
 				continue
 			}
 			probePath := requestPath
-			if imageRoute && !isImageGenerationPath(probePath) {
-				probePath = "/v1/images/generations"
-			}
 			probeType := state.ProbeType
 			if wasOpen || probeType == "" {
 				if wasOpen {
@@ -1708,13 +1763,15 @@ func claimDueChannelHealthProbes(limit int, includePath channelHealthProbePathFi
 				continue
 			}
 			imageRoute := isImageHealthRoute(state.ChannelID, state.Fingerprint, requestPath)
+			if imageRoute {
+				clearExcludedRouteHealthLocked(state)
+				deletePersistentHealthState(routeKey)
+				continue
+			}
 			if includePath != nil && !includePath(imageRoute) {
 				continue
 			}
 			probePath := requestPath
-			if imageRoute && !isImageGenerationPath(probePath) {
-				probePath = "/v1/images/generations"
-			}
 			identity := channelHealthIdentity{
 				ChannelID:       state.ChannelID,
 				Fingerprint:     state.Fingerprint,

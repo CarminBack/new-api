@@ -387,175 +387,36 @@ func TestExpiredProbeLeaseCanBeReclaimedAndOldResultIsIgnored(t *testing.T) {
 	require.False(t, routeStateForTest(37, "gpt-test", "/v1/responses").ProbeInFlight)
 }
 
-func TestImageRoutesScheduleAdaptiveHealthProbes(t *testing.T) {
+func TestImageRoutesDoNotEnterChannelHealth(t *testing.T) {
 	for _, requestPath := range []string{"/v1/images/generations", "/v1/images/edits", "/v1/images/variations"} {
 		t.Run(requestPath, func(t *testing.T) {
 			setupChannelHealthTest(t)
-			require.True(t, ChannelHealthProbeSupportsPath(requestPath))
-			require.Equal(t, imageChannelHealthProbeLease, channelHealthProbeLeaseForPath(requestPath))
-
-			scheduleRouteProbeForTest(t, nil, 37, "gpt-image-2", requestPath, ChannelFailureTransient)
-			require.True(t, HasDueChannelHealthProbe())
-			targets := ClaimDueChannelHealthProbes(2)
-			require.Len(t, targets, 1)
-			require.Equal(t, ChannelHealthProbeScopeRoute, targets[0].Scope)
-			require.Equal(t, "gpt-image-2", targets[0].ModelName)
-			require.Equal(t, requestPath, targets[0].RequestPath)
-			require.Empty(t, ClaimDueChannelHealthProbes(1))
-
-			CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
+			for i := 0; i < channelHealthSuspectMinimumSamples; i++ {
+				ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+				require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-image-2", requestPath))
+				RecordChannelCircuitFailure(ctx, 37, "gpt-image-2", requestPath, ChannelFailureTransient)
+			}
 			require.False(t, HasDueChannelHealthProbe())
+			require.Empty(t, ClaimDueChannelHealthProbes(2))
 			require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-image-2", requestPath))
 		})
 	}
 }
 
-func TestImageProbeFailureOpensRouteUntilRecoveryProbeSucceeds(t *testing.T) {
-	now := setupChannelHealthTest(t)
-	const requestPath = "/v1/images/generations"
-	scheduleRouteProbeForTest(t, nil, 37, "gpt-image-2", requestPath, ChannelFailureTransient)
-
-	initial := ClaimDueChannelHealthProbes(1)
-	require.Len(t, initial, 1)
-	CompleteChannelHealthProbe(initial[0], ChannelHealthProbeResult{
-		Class:      ChannelFailureTransient,
-		Reason:     "upstream 503",
-		StatusCode: http.StatusServiceUnavailable,
-	})
-	require.False(t, AllowChannelCircuitAttempt(nil, 37, "gpt-image-2", requestPath))
-
-	*now = routeStateForTest(37, "gpt-image-2", requestPath).OpenUntil
-	recovery := ClaimDueChannelHealthProbes(1)
-	require.Len(t, recovery, 1)
-	require.Equal(t, ChannelHealthProbeTypeRecovery, recovery[0].ProbeType)
-	CompleteChannelHealthProbe(recovery[0], ChannelHealthProbeResult{Success: true})
-	state := routeStateForTest(37, "gpt-image-2", requestPath)
-	require.True(t, state.OpenUntil.IsZero())
-	require.Zero(t, state.RecoveryTargetCapacity)
-	require.Zero(t, state.RecoverySuccesses)
-	require.Equal(t, state.InitialCapacity, state.Capacity)
-	require.True(t, AllowChannelCircuitAttempt(nil, 37, "gpt-image-2", requestPath))
-}
-
-func TestManualImageRecoveryRestoresFullCapacityAfterSuccessfulProbe(t *testing.T) {
-	setupChannelHealthTest(t)
-	const requestPath = "/v1/images/generations"
-	channel := &model.Channel{
-		Id:          37,
-		Type:        constant.ChannelTypeOpenAI,
-		Key:         "test-key",
-		Models:      "gpt-image-2",
-		CreatedTime: channelCircuitNow().Add(-time.Hour).Unix(),
-	}
-
-	scheduleRouteProbeForTest(t, channel, 0, "gpt-image-2", requestPath, ChannelFailureTransient)
-	initial := ClaimDueImageChannelHealthProbes(1)
-	require.Len(t, initial, 1)
-	CompleteChannelHealthProbe(initial[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
-	require.False(t, AllowChannelHealthAttempt(nil, channel, "gpt-image-2", requestPath))
-
-	result, err := RecoverChannelHealth(channel, ChannelHealthRecoveryRequest{
-		Scope:       ChannelHealthRecoveryScopeRoute,
-		ModelName:   "gpt-image-2",
-		RequestPath: requestPath,
-	})
-	require.NoError(t, err)
-	require.Equal(t, 1, result.ChangedItems)
-
-	recovery := ClaimDueImageChannelHealthProbes(1)
-	require.Len(t, recovery, 1)
-	require.Equal(t, ChannelHealthProbeTypeRecovery, recovery[0].ProbeType)
-	CompleteChannelHealthProbe(recovery[0], ChannelHealthProbeResult{Success: true})
-
-	state := routeStateForTestWithChannel(channel, "gpt-image-2", requestPath)
-	require.True(t, state.OpenUntil.IsZero())
-	require.Zero(t, state.RecoveryTargetCapacity)
-	require.Equal(t, state.InitialCapacity, state.Capacity)
-	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-image-2", requestPath))
-}
-
-func TestImageProbeBackoffIncreasesAndCapsAtOneHour(t *testing.T) {
-	now := setupChannelHealthTest(t)
-	const requestPath = "/v1/images/generations"
-	scheduleRouteProbeForTest(t, nil, 37, "gpt-image-2", requestPath, ChannelFailureTransient)
-
-	for attempt, expectedBackoff := range []time.Duration{
-		5 * time.Minute,
-		10 * time.Minute,
-		20 * time.Minute,
-		40 * time.Minute,
-		time.Hour,
-		time.Hour,
-	} {
-		targets := ClaimDueImageChannelHealthProbes(1)
-		require.Len(t, targets, 1)
-		CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{
-			Class:      ChannelFailureTransient,
-			Reason:     "upstream 503",
-			StatusCode: http.StatusServiceUnavailable,
-		})
-		state := routeStateForTest(37, "gpt-image-2", requestPath)
-		require.Equal(t, attempt+1, state.ProbeFailures)
-		actualBackoff := state.OpenUntil.Sub(*now)
-		require.Equal(t, expectedBackoff, actualBackoff)
-		*now = state.OpenUntil
-	}
-
-	targets := ClaimDueImageChannelHealthProbes(1)
-	require.Len(t, targets, 1)
-	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
-	require.Zero(t, routeStateForTest(37, "gpt-image-2", requestPath).ProbeFailures)
-}
-
-func TestRealImageSuccessResetsProbeBackoff(t *testing.T) {
-	setupChannelHealthTest(t)
-	const requestPath = "/v1/images/generations"
-	scheduleRouteProbeForTest(t, nil, 37, "gpt-image-2", requestPath, ChannelFailureTransient)
-
-	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	require.True(t, AllowChannelCircuitAttempt(ctx, 37, "gpt-image-2", requestPath))
-	targets := ClaimDueImageChannelHealthProbes(1)
-	require.Len(t, targets, 1)
-	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
-	require.Equal(t, 1, routeStateForTest(37, "gpt-image-2", requestPath).ProbeFailures)
-
-	RecordChannelCircuitSuccess(ctx, 37, "gpt-image-2", requestPath)
-	state := routeStateForTest(37, "gpt-image-2", requestPath)
-	require.Zero(t, state.ProbeFailures)
-	require.True(t, state.OpenUntil.IsZero())
-	require.Zero(t, state.RecoveryTargetCapacity)
-	require.Equal(t, state.InitialCapacity, state.Capacity)
-}
-
-func TestRealSuccessRestoresImageGroupChatRouteImmediately(t *testing.T) {
+func TestImageGroupChannelDoesNotEnterChannelHealth(t *testing.T) {
 	setupChannelHealthTest(t)
 	channel := &model.Channel{
 		Id: 38, Type: constant.ChannelTypeOpenAI, Key: "test-key", Models: "mapped-output",
 		Group: "Image", CreatedTime: channelCircuitNow().Add(-time.Hour).Unix(),
 	}
-	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	require.True(t, AllowChannelHealthAttempt(ctx, channel, "mapped-output", "/v1/chat/completions"))
-
-	identity := buildChannelHealthIdentity(channel, 0, "mapped-output", "/v1/chat/completions", channelCircuitNow())
-	shard := channelHealthShardFor(identity.RouteKey)
-	shard.Lock()
-	state := shard.Routes[identity.RouteKey]
-	if state == nil {
-		shard.Unlock()
-		require.NotNil(t, state)
-		return
+	for i := 0; i < channelHealthSuspectMinimumSamples; i++ {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelHealthAttempt(ctx, channel, "mapped-output", "/v1/chat/completions"))
+		RecordChannelCircuitFailure(ctx, channel.Id, "mapped-output", "/v1/chat/completions", ChannelFailureTransient)
 	}
-	state.OpenUntil = channelCircuitNow().Add(time.Minute)
-	state.CapacityBeforeOpen = state.InitialCapacity
-	state.Capacity = channelHealthMinCapacity
-	state.RecoveryTargetCapacity = state.InitialCapacity
-	shard.Unlock()
-
-	RecordChannelCircuitSuccess(ctx, channel.Id, "mapped-output", "/v1/chat/completions")
-	stateSnapshot := routeStateForTestWithChannel(channel, "mapped-output", "/v1/chat/completions")
-	require.True(t, stateSnapshot.OpenUntil.IsZero())
-	require.Zero(t, stateSnapshot.RecoveryTargetCapacity)
-	require.Equal(t, stateSnapshot.InitialCapacity, stateSnapshot.Capacity)
+	require.False(t, HasDueChannelHealthProbe())
+	require.True(t, IsChannelHealthAvailable(channel, "mapped-output", "/v1/chat/completions"))
+	require.True(t, IsChannelHealthCircuitClosed(channel, "mapped-output", "/v1/chat/completions"))
 }
 
 func TestImageAndStandardProbeQueuesClaimOnlyTheirOwnPaths(t *testing.T) {
@@ -585,30 +446,23 @@ func TestImageAndStandardProbeQueuesClaimOnlyTheirOwnPaths(t *testing.T) {
 	require.NoError(t, db.Create([]*model.Channel{imageGroupChannel, standardChannel}).Error)
 
 	scheduleRouteProbeForTest(t, nil, 29, "gpt-test", "/v1/responses", ChannelFailureTransient)
-	scheduleRouteProbeForTest(t, nil, 37, "gpt-image-2", "/v1/images/generations", ChannelFailureTransient)
-	scheduleRouteProbeForTest(t, imageGroupChannel, 0, "mapped-output", "/v1/chat/completions", ChannelFailureTransient)
-	scheduleRouteProbeForTest(t, standardChannel, 0, "gpt-image-2", "/v1/chat/completions", ChannelFailureTransient)
-	snapshots := GetChannelAdaptiveHealthSnapshots(true)
-	imageGroups := make(map[int]bool, len(snapshots))
-	for _, snapshot := range snapshots {
-		imageGroups[snapshot.ChannelID] = snapshot.ImageGroup
+	for i := 0; i < channelHealthSuspectMinimumSamples; i++ {
+		imageCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelCircuitAttempt(imageCtx, 37, "gpt-image-2", "/v1/images/generations"))
+		RecordChannelCircuitFailure(imageCtx, 37, "gpt-image-2", "/v1/images/generations", ChannelFailureTransient)
+		groupCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelHealthAttempt(groupCtx, imageGroupChannel, "mapped-output", "/v1/chat/completions"))
+		RecordChannelCircuitFailure(groupCtx, imageGroupChannel.Id, "mapped-output", "/v1/chat/completions", ChannelFailureTransient)
 	}
-	require.True(t, imageGroups[38])
-	require.False(t, imageGroups[39])
+	scheduleRouteProbeForTest(t, standardChannel, 0, "gpt-image-2", "/v1/chat/completions", ChannelFailureTransient)
 
 	standard := ClaimDueStandardChannelHealthProbes(10)
 	require.Len(t, standard, 2)
 	require.ElementsMatch(t, []int{29, 39}, []int{standard[0].ChannelID, standard[1].ChannelID})
-
-	image := ClaimDueImageChannelHealthProbes(10)
-	require.Len(t, image, 2)
-	require.ElementsMatch(t, []int{37, 38}, []int{image[0].ChannelID, image[1].ChannelID})
-	for _, target := range image {
-		require.Equal(t, "/v1/images/generations", target.RequestPath)
-	}
+	require.Empty(t, ClaimDueImageChannelHealthProbes(10))
+	require.False(t, HasDueChannelHealthProbeForImages(true))
 
 	CompleteChannelHealthProbe(standard[0], ChannelHealthProbeResult{Success: true})
-	CompleteChannelHealthProbe(image[0], ChannelHealthProbeResult{Success: true})
 }
 
 func TestRestorePersistentChannelHealthRestoresImageProbeState(t *testing.T) {
@@ -644,21 +498,10 @@ func TestRestorePersistentChannelHealthRestoresImageProbeState(t *testing.T) {
 	require.NoError(t, RestorePersistentChannelHealth())
 	records, err := model.ListChannelHealthStates()
 	require.NoError(t, err)
-	require.Len(t, records, 1)
+	require.Empty(t, records)
 	*now = now.Add(11 * time.Second)
-	require.True(t, HasDueChannelHealthProbe())
-	targets := ClaimDueChannelHealthProbes(1)
-	require.Len(t, targets, 1)
-	require.Equal(t, "/v1/images/edits", targets[0].RequestPath)
-	require.Equal(t, ChannelHealthProbeTypeInitial, targets[0].ProbeType)
-	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Class: ChannelFailureTransient})
-	state := routeStateForTestWithChannel(channel, "gpt-image-2", "/v1/images/edits")
-	require.Equal(t, 3, state.ProbeFailures)
-	require.Equal(t, 20*time.Minute, state.OpenUntil.Sub(*now))
-	*now = state.OpenUntil
-	targets = ClaimDueImageChannelHealthProbes(1)
-	require.Len(t, targets, 1)
-	CompleteChannelHealthProbe(targets[0], ChannelHealthProbeResult{Success: true})
+	require.False(t, HasDueChannelHealthProbe())
+	require.Empty(t, ClaimDueChannelHealthProbes(1))
 	require.True(t, AllowChannelHealthAttempt(nil, channel, "gpt-image-2", "/v1/images/edits"))
 }
 

@@ -146,6 +146,10 @@ func RestorePersistentChannelHealth() error {
 			_ = model.DeleteChannelHealthState(record.ScopeKey)
 			continue
 		}
+		if isImageGenerationPath(record.RequestPath) || channelInImageGroup(channel) {
+			_ = model.DeleteChannelHealthState(record.ScopeKey)
+			continue
+		}
 		if channel.Status != common.ChannelStatusEnabled {
 			continue
 		}

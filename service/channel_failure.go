@@ -232,6 +232,9 @@ func classifyChannelFailure(err *types.NewAPIError, message string, path string,
 			CountForCircuit: true,
 		}
 	}
+	if err.StatusCode == 477 {
+		return ChannelFailureDecision{Class: ChannelFailureTerminal, Reason: "content_review_rejected"}
+	}
 	if err.StatusCode >= 200 && err.StatusCode < 300 {
 		return ChannelFailureDecision{Class: ChannelFailureTerminal, Reason: "successful_status"}
 	}

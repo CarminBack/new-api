@@ -59,19 +59,20 @@ func TestCanceledTextStreamCannotAdvanceRecovery(t *testing.T) {
 	require.Equal(t, 1, state.Capacity)
 }
 
-func TestImageProbeLeaseDoesNotHideDueTextWork(t *testing.T) {
+func TestImageFailuresDoNotHideDueTextWork(t *testing.T) {
 	setupChannelHealthTest(t)
-	scheduleRouteProbeForTest(t, nil, 71, "image-model", "/v1/images/generations", ChannelFailureTransient)
+	for i := 0; i < channelHealthSuspectMinimumSamples; i++ {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		require.True(t, AllowChannelCircuitAttempt(ctx, 71, "image-model", "/v1/images/generations"))
+		RecordChannelCircuitFailure(ctx, 71, "image-model", "/v1/images/generations", ChannelFailureTransient)
+	}
 	scheduleRouteProbeForTest(t, nil, 72, "text-model", "/v1/responses", ChannelFailureTransient)
-	require.True(t, HasDueChannelHealthProbeForImages(true))
-	images := ClaimDueImageChannelHealthProbes(1)
-	require.Len(t, images, 1)
 	require.False(t, HasDueChannelHealthProbeForImages(true))
+	require.Empty(t, ClaimDueImageChannelHealthProbes(1))
 	require.True(t, HasDueChannelHealthProbeForImages(false))
 	texts := ClaimDueStandardChannelHealthProbes(1)
 	require.Len(t, texts, 1)
+	require.Equal(t, 72, texts[0].ChannelID)
 	CompleteChannelHealthProbe(texts[0], ChannelHealthProbeResult{Success: true})
 	require.False(t, HasDueChannelHealthProbeForImages(false))
-	// The image probe remains leased and does not participate in text completion.
-	require.Empty(t, ClaimDueImageChannelHealthProbes(1))
 }
