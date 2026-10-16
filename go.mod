@@ -177,3 +177,6 @@ require (
 )
 
 replace github.com/QuantumNous/new-api/relaykit => ./relaykit
+
+// Preserve tokenizer v0.6.2 token IDs with a bounded-complexity BPE merge.
+replace github.com/tiktoken-go/tokenizer => ./third_party/tokenizer

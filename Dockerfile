@@ -21,6 +21,7 @@ ADD go.mod go.sum ./
 # relaykit is a local submodule referenced via replace; its go.mod must be
 # present for go mod download to resolve the main module graph.
 ADD relaykit/go.mod ./relaykit/go.mod
+ADD third_party/tokenizer/go.mod ./third_party/tokenizer/go.mod
 RUN go mod download
 
 COPY . .
@@ -36,6 +37,7 @@ RUN apt-get update \
 
 COPY --from=builder2 /build/new-api /
 COPY LICENSE NOTICE THIRD-PARTY-LICENSES.md /licenses/
+COPY third_party/tokenizer/LICENSE /licenses/tokenizer-LICENSE
 EXPOSE 3000
 WORKDIR /data
 ENTRYPOINT ["/new-api"]
