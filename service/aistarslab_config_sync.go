@@ -298,7 +298,7 @@ func flattenAistarsLabSeedanceModels(configs []aistarsLabVideoConfig, creditRate
 				item := AistarsLabSeedanceModel{
 					PublicModel: alias, UpstreamModel: channel + ":" + configModel.Model, Channel: channel,
 					Quality: strings.ToLower(strings.TrimSpace(quality.Quality)), BillingUnit: unit, Price: price,
-					BillingExpression: fmt.Sprintf(`tier("base", u("%s") * %s)`, fact, strconv.FormatFloat(price, 'f', -1, 64)),
+					BillingExpression: fmt.Sprintf(`tier("base", u("%s") * %s * (u("video_input") == "video" ? 1.5 : 1))`, fact, strconv.FormatFloat(price, 'f', -1, 64)),
 					RawCredits:        quality.Pricing.Credits, Modes: append([]string(nil), configModel.Modes...),
 					AspectRatios: append([]string(nil), configModel.AspectRatios...), DurationMin: configModel.Duration.Min,
 					DurationMax: configModel.Duration.Max, InputImagesMax: configModel.InputImagesMax,

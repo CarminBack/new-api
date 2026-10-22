@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -51,14 +52,37 @@ func TestFlattenAistarsLabSeedanceModelsBuildsBillingExpressions(t *testing.T) {
 	perSecond := byName["seedance-720p-c47"]
 	assert.Equal(t, "per_second", perSecond.BillingUnit)
 	assert.Equal(t, 0.7, perSecond.Price)
-	assert.Equal(t, `tier("base", u("seconds") * 0.7)`, perSecond.BillingExpression)
+	assert.Equal(t, `tier("base", u("seconds") * 0.7 * (u("video_input") == "video" ? 1.5 : 1))`, perSecond.BillingExpression)
 	assert.Equal(t, "47:seedance-2.0", perSecond.UpstreamModel)
 	assert.Equal(t, 9, perSecond.InputImagesMax)
 
 	perItem := byName["seedance-4k-c47"]
 	assert.Equal(t, "per_item", perItem.BillingUnit)
 	assert.Equal(t, 3.51, perItem.Price)
-	assert.Equal(t, `tier("base", u("videos") * 3.51)`, perItem.BillingExpression)
+	assert.Equal(t, `tier("base", u("videos") * 3.51 * (u("video_input") == "video" ? 1.5 : 1))`, perItem.BillingExpression)
+	for _, item := range []AistarsLabSeedanceModel{perSecond, perItem} {
+		for _, input := range []string{"none", "video"} {
+			t.Run(item.BillingUnit+"/"+input, func(t *testing.T) {
+				usage := map[string]any{"seconds": 5.0, "videos": 1.0, "video_input": input}
+				want := item.Price
+				if item.BillingUnit == "per_second" {
+					want *= 5
+				}
+				if input == "video" {
+					want *= 1.5
+				}
+				cost, _, err := billingexpr.RunExprWithRequest(item.BillingExpression, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: usage})
+				require.NoError(t, err)
+				assert.InDelta(t, want, cost, 1e-9)
+				result, err := billingexpr.ComputeTieredQuotaWithRequest(&billingexpr.BillingSnapshot{
+					ExprString: item.BillingExpression, ExprHash: billingexpr.ExprHashString(item.BillingExpression),
+					GroupRatio: 1, QuotaPerUnit: 500000, ExprVersion: 1, TaskUsageBilling: true,
+				}, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: usage})
+				require.NoError(t, err)
+				assert.Equal(t, common.QuotaRound(want*500000), result.ActualQuotaAfterGroup)
+			})
+		}
+	}
 }
 
 func TestBuildAistarsLabSeedanceAlias(t *testing.T) {
@@ -118,13 +142,13 @@ func TestSyncAistarsLabConfigDryRun(t *testing.T) {
 	require.Len(t, result.Models, 1)
 	assert.True(t, result.DryRun)
 	assert.Equal(t, "seedance-720p-c47", result.Models[0].PublicModel)
-	assert.Equal(t, `tier("base", u("seconds") * 0.7)`, result.Models[0].BillingExpression)
+	assert.Equal(t, `tier("base", u("seconds") * 0.7 * (u("video_input") == "video" ? 1.5 : 1))`, result.Models[0].BillingExpression)
 	require.Len(t, result.PriceChanges, 1)
 	assert.Equal(t, "seedance-720p-c47", result.PriceChanges[0].Model)
 	require.NotNil(t, result.PriceChanges[0].New)
 	assert.InDelta(t, 0.7, *result.PriceChanges[0].New, 1e-9)
 	require.Len(t, result.ExpressionChanges, 1)
-	assert.Equal(t, `tier("base", u("seconds") * 0.7)`, result.ExpressionChanges[0].New)
+	assert.Equal(t, `tier("base", u("seconds") * 0.7 * (u("video_input") == "video" ? 1.5 : 1))`, result.ExpressionChanges[0].New)
 	require.Len(t, result.MappingChanges, 1)
 	assert.Equal(t, "47:seedance-2.0", result.MappingChanges[0].New)
 }

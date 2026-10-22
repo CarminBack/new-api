@@ -36,7 +36,7 @@ jobs:
           context: .
           platforms: linux/arm64
           push: true
-          tags: ghcr.io/carminback/new-api:test-token-failover-20260922
+          tags: ghcr.io/carminback/new-api:aistarslab-reference-20261022
           labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -48,7 +48,7 @@ jobs:
           {
             echo '### Isolated test image'
             echo '```'
-            echo 'ghcr.io/carminback/new-api:test-token-failover-20260922'
+            echo 'ghcr.io/carminback/new-api:aistarslab-reference-20261022'
             echo '${{ steps.build.outputs.digest }}'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -45,6 +45,11 @@ const USAGE_SCHEMA = {
     unit: "count",
     description: { en: "Video generation unit price", zh: "视频生成单价" },
   },
+  video_input: {
+    enum: ["none", "video"],
+    enumLabels: { none: { en: "No reference video", zh: "无参考视频" }, video: { en: "With reference video", zh: "有参考视频" } },
+    description: { en: "Reference video input", zh: "参考视频输入" },
+  },
 };
 
 export const meta = {
@@ -62,8 +67,9 @@ export const meta = {
   fetchMode: "per_task",
   usageSchema: USAGE_SCHEMA,
   usageExamples: [
-    { label: "5s video", facts: { seconds: 5, videos: 1 } },
-    { label: "10s video", facts: { seconds: 10, videos: 1 } },
+    { label: "5s video", facts: { seconds: 5, videos: 1, video_input: "none" } },
+    { label: "10s video", facts: { seconds: 10, videos: 1, video_input: "none" } },
+    { label: "5s video with reference video", facts: { seconds: 5, videos: 1, video_input: "video" } },
   ],
   protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
 };
@@ -297,7 +303,9 @@ export function parseTaskResult(_ctx, body) {
 export function extractUsage(ctx) {
   if (ctx.usagePurpose === "billing_ratios") return null;
   const body = normalizedRequest(ctx.requestBody || {}, ctx.upstreamModel);
-  return { seconds: Number(body.seconds), videos: 1 };
+  const facts = { seconds: Number(body.seconds), videos: 1 };
+  facts.video_input = body.metadata && Array.isArray(body.metadata.videos) && body.metadata.videos.length ? "video" : "none";
+  return facts;
 }
 
 export function extractUsageOnComplete() {

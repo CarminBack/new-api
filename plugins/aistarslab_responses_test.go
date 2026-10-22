@@ -27,7 +27,7 @@ func TestAistarsLabResponsesProtocol(t *testing.T) {
 			"seconds": float64(8),
 			"size":    "16:9",
 		},
-		wantUsageKeys:  []string{"seconds", "videos"},
+		wantUsageKeys:  []string{"seconds", "videos", "video_input"},
 		wantVendorName: "aistarslab",
 	})
 }
@@ -164,6 +164,37 @@ func TestAistarsLabParsesTaskResult(t *testing.T) {
 	assert.Equal(t, "SUCCESS", result["status"])
 	assert.Equal(t, "100%", result["progress"])
 	assert.Equal(t, "https://cdn.example/result.mp4", result["url"])
+}
+
+func TestAistarsLabReferenceVideoUsageFact(t *testing.T) {
+	plugin := compileAistarsLabPlugin(t)
+	for _, testCase := range []struct {
+		name      string
+		body      map[string]any
+		wantInput string
+	}{
+		{name: "without reference video", body: map[string]any{}, wantInput: "none"},
+		{name: "metadata video", body: map[string]any{"metadata": map[string]any{"videos": []string{"https://cdn.example/reference.mp4"}}}, wantInput: "video"},
+		{name: "top level videos", body: map[string]any{"videos": []string{"https://cdn.example/a.mp4", "https://cdn.example/b.mp4"}}, wantInput: "video"},
+		{name: "content video", body: map[string]any{"metadata": map[string]any{"content": []any{map[string]any{"type": "video_url", "video_url": map[string]any{"url": "https://cdn.example/reference.mp4"}}}}}, wantInput: "video"},
+		{name: "empty references", body: map[string]any{"videos": []string{"", " "}}, wantInput: "none"},
+		{name: "images and audio only", body: map[string]any{"images": []string{"https://cdn.example/a.png"}, "audios": []string{"https://cdn.example/a.mp3"}}, wantInput: "none"},
+		{name: "client cannot spoof usage", body: map[string]any{"video_input": "video", "metadata": map[string]any{"video_input": "video"}}, wantInput: "none"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			testCase.body["model"] = "seedance-720p-c47"
+			testCase.body["seconds"] = 5
+			value, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
+				"upstreamModel": "47:seedance-2.0",
+				"requestBody":   testCase.body,
+			})
+			require.NoError(t, err)
+			usage := decodePluginMap(t, value)
+			assert.Equal(t, testCase.wantInput, usage["video_input"])
+			assert.Equal(t, float64(5), usage["seconds"])
+			assert.Equal(t, float64(1), usage["videos"])
+		})
+	}
 }
 
 func compileAistarsLabPlugin(t *testing.T) *jsplugin.LoadedPlugin {
