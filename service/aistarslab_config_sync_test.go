@@ -59,6 +59,10 @@ func TestFlattenAistarsLabSeedanceModelsBuildsBillingExpressions(t *testing.T) {
 	perItem := byName["seedance-4k-c47"]
 	assert.Equal(t, "per_item", perItem.BillingUnit)
 	assert.Equal(t, 3.51, perItem.Price)
+	require.NoError(t, model.ValidateModelPricing("seedance-480p-c50", model.PricingValues{
+		"billing_setting.billing_mode": "tiered_expr",
+		"billing_setting.billing_expr": perSecond.BillingExpression,
+	}), "an enabled AistarsLab alias must resolve its usage schema when saving pricing")
 	assert.Equal(t, `tier("base", u("videos") * 3.51 * (u("video_input") == "video" ? 1.5 : 1))`, perItem.BillingExpression)
 	for _, item := range []AistarsLabSeedanceModel{perSecond, perItem} {
 		for _, input := range []string{"none", "video"} {

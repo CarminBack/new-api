@@ -11,6 +11,7 @@ const MODELS = [
   "seedance-1080p-seedance-2.5-c54",
   "seedance-480p-c47",
   "seedance-480p-c48",
+  "seedance-480p-c50",
   "seedance-480p-c53",
   "seedance-480p-c64",
   "seedance-480p-fast-c47",
