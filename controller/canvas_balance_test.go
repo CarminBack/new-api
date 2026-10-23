@@ -7,6 +7,9 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCanvasAccountBalanceUsesAuthenticatedOwnerQuota(t *testing.T) {
@@ -70,6 +73,35 @@ func TestBuildTokenVideoModelsReturnsSafePriceAndLimits(t *testing.T) {
 		if strings.Contains(strings.ToLower(string(encoded)), private) {
 			t.Fatalf("catalog exposes private field %q: %s", private, encoded)
 		}
+	}
+}
+
+func TestTokenVideoCatalogIncludesPublicCapabilities(t *testing.T) {
+	original := jsplugin.DefaultRegistry
+	jsplugin.DefaultRegistry = jsplugin.NewRegistry()
+	t.Cleanup(func() { jsplugin.DefaultRegistry = original })
+	_, err := jsplugin.DefaultRegistry.RegisterFactory(`
+export const meta = {apiVersion:1,key:"catalog-caps",name:"Catalog",version:"1.0.0",author:{name:"Test"},models:["cinema-pro"],fetchMode:"per_task",protocols:["openai_video"],videoCapabilities:{"cinema-pro":{requestFormat:"unified_video_v1",resolutions:["768p"],ratios:["8:5"],minSeconds:2,maxSeconds:120,frames:false,maxVideos:0}}};
+export function buildSubmitRequest(){return {}};
+export function parseSubmitResponse(){return {}};
+export function buildQueryRequest(){return {}};
+export function parseTaskResult(){return {}};
+export function listArtifacts(){return []};
+export function buildContentRequest(){return {}};
+export const protocols={openai_video:{decodeRequest:function(ctx){return ctx},render:function(ctx,task){return task}}};
+`, jsplugin.Options{})
+	require.NoError(t, err)
+	entries := buildTokenVideoModels([]model.Pricing{{ModelName: "cinema-pro", EnableGroup: []string{"default"}, ModelPrice: 0.2, QuotaType: 1}}, "default", 1)
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Capabilities)
+	assert.Equal(t, 120, *entries[0].Capabilities.MaxSeconds)
+	assert.Zero(t, *entries[0].Capabilities.MaxVideos)
+	assert.Contains(t, strings.Join(entries[0].Limitations, " "), "768p")
+	assert.Contains(t, strings.Join(entries[0].Limitations, " "), "不支持首尾帧")
+	encoded, err := common.Marshal(entries)
+	require.NoError(t, err)
+	for _, private := range []string{"apiKey", "baseUrl", "plugin_key", "billing_expr"} {
+		assert.NotContains(t, string(encoded), private)
 	}
 }
 

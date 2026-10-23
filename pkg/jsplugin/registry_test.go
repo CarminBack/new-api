@@ -1074,6 +1074,73 @@ func TestPluginModelDiscoveryMetadata(t *testing.T) {
 	}
 }
 
+func TestVideoCapabilityDeclarations(t *testing.T) {
+	source := func(key, declaration string) string {
+		return routingTestPluginSource(key, 0, `["model"]`, `protocols: ["openai_video"], videoCapabilities: `+declaration+",", videoProtocolExport)
+	}
+	registry := NewRegistry()
+	plugin, err := registry.RegisterFactory(source("caps", `{model:{requestFormat:"unified_video_v1",resolutions:["720p","1080p"],ratios:["16:9","9:16"],minSeconds:4,maxSeconds:15,secondsSteps:[5,10,15],frames:false,maxImages:1,maxVideos:0,maxAudios:0}}`), Options{})
+	require.NoError(t, err)
+	snapshot := registry.Snapshot()
+	caps := snapshot.Factory[0].VideoCapabilities["model"]
+	require.NotNil(t, caps.MaxVideos)
+	assert.Zero(t, *caps.MaxVideos)
+	require.NotNil(t, caps.Frames)
+	assert.False(t, *caps.Frames)
+	caps.Ratios[0] = "changed"
+	*caps.MaxVideos = 99
+	*caps.Frames = true
+	actual := registry.Generation().VideoCapabilitiesForModel("model")
+	require.NotNil(t, actual)
+	assert.Equal(t, "16:9", actual.Ratios[0])
+	assert.Zero(t, *actual.MaxVideos)
+	assert.False(t, *actual.Frames)
+	assert.Equal(t, plugin.Meta.Models[0], "model")
+	for _, invalid := range []string{
+		"null", `{other:{requestFormat:"unified_video_v1"}}`,
+		`{model:null}`, `{model:{requestFormat:"unknown"}}`,
+		`{model:{requestFormat:"unified_video_v1",apiKey:"private"}}`,
+		`{model:{requestFormat:"unified_video_v1",frames:null}}`,
+		`{model:{requestFormat:"unified_video_v1",maxVideos:-1}}`,
+		`{model:{requestFormat:"unified_video_v1",maxImages:1.5}}`,
+		`{model:{requestFormat:"unified_video_v1",minSeconds:0}}`,
+		`{model:{requestFormat:"unified_video_v1",maxSeconds:3601}}`,
+		`{model:{requestFormat:"unified_video_v1",minSeconds:10,maxSeconds:5}}`,
+		`{model:{requestFormat:"unified_video_v1",ratios:[]}}`,
+		`{model:{requestFormat:"unified_video_v1",ratios:["16:9","16:9"]}}`,
+		`{model:{requestFormat:"unified_video_v1",resolutions:["720"]}}`,
+		`{model:{requestFormat:"unified_video_v1",secondsSteps:[10,5]}}`,
+		`{model:{requestFormat:"unified_video_v1",minSeconds:5,secondsSteps:[4]}}`,
+		`{model:{requestFormat:"unified_video_v1",frames:true,maxImages:1}}`,
+		`{model:{requestFormat:"unified_video_v1",requiredImages:2,maxImages:1}}`,
+	} {
+		_, err := NewRegistry().RegisterFactory(source("invalid-caps", invalid), Options{})
+		assert.Error(t, err, invalid)
+	}
+	t.Run("shared models use common capabilities", func(t *testing.T) {
+		_, err := registry.RegisterFactory(source("other-caps", `{model:{requestFormat:"unified_video_v1",resolutions:["720p"],ratios:["9:16"],minSeconds:5,maxSeconds:10,frames:false,maxImages:1}}`), Options{})
+		require.NoError(t, err)
+		common := registry.Generation().VideoCapabilitiesForModel("MODEL")
+		require.NotNil(t, common)
+		assert.Equal(t, []string{"720p"}, common.Resolutions)
+		assert.Equal(t, []string{"9:16"}, common.Ratios)
+		assert.Equal(t, []int{5, 10}, common.SecondsSteps)
+		assert.Equal(t, 5, *common.MinSeconds)
+		assert.Equal(t, 10, *common.MaxSeconds)
+		_, err = registry.RegisterFactory(routingTestPluginSource("undeclared", 0, `["model"]`, `protocols:["openai_video"],`, videoProtocolExport), Options{})
+		require.NoError(t, err)
+		assert.Nil(t, registry.Generation().VideoCapabilitiesForModel("model"))
+	})
+	t.Run("incompatible option sets suppress declarations", func(t *testing.T) {
+		registry := NewRegistry()
+		for _, entry := range []struct{ key, resolution string }{{"a", "720p"}, {"b", "1080p"}} {
+			_, err := registry.RegisterFactory(source(entry.key, fmt.Sprintf(`{model:{requestFormat:"unified_video_v1",resolutions:[%q]}}`, entry.resolution)), Options{})
+			require.NoError(t, err)
+		}
+		assert.Nil(t, registry.Generation().VideoCapabilitiesForModel("model"))
+	})
+}
+
 func TestPluginDisplayMetadata(t *testing.T) {
 	for _, tc := range []struct {
 		name, fields string

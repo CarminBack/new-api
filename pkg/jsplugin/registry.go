@@ -84,30 +84,31 @@ func (t *LocalizedText) UnmarshalJSON(data []byte) error {
 }
 
 type Meta struct {
-	RequiredCapabilities []string                    `json:"requiredCapabilities,omitempty"`
-	SubmitResponseTypes  []string                    `json:"submitResponseTypes,omitempty"`
-	SortPriority         int                         `json:"sortPriority,omitempty"`
-	Website              string                      `json:"website,omitempty"`
-	APIVersion           int                         `json:"apiVersion"`
-	Key                  string                      `json:"key"`
-	Name                 string                      `json:"name"`
-	Icon                 string                      `json:"icon,omitempty"`
-	Description          LocalizedText               `json:"description,omitempty"`
-	Version              string                      `json:"version"`
-	Author               AuthorMeta                  `json:"author"`
-	BaseURL              string                      `json:"baseUrl,omitempty"`
-	ChannelTypes         []int                       `json:"channelTypes,omitempty"`
-	Models               []string                    `json:"models"`
-	FetchMode            string                      `json:"fetchMode"`
-	ModelDiscovery       string                      `json:"modelDiscovery,omitempty"`
-	AllowedHosts         []string                    `json:"allowedHosts"`
-	Upstreams            []string                    `json:"upstreams,omitempty"`
-	Routes               []Route                     `json:"routes"`
-	Protocols            []ProtocolClaim             `json:"protocols"`
-	UsageSchema          map[string]UsageFieldSchema `json:"usageSchema,omitempty"`
-	UsageExamples        []UsageExample              `json:"usageExamples,omitempty"`
-	UsageProfiles        []UsageProfile              `json:"usageProfiles,omitempty"`
-	Auth                 AuthMeta                    `json:"auth"`
+	RequiredCapabilities []string                     `json:"requiredCapabilities,omitempty"`
+	SubmitResponseTypes  []string                     `json:"submitResponseTypes,omitempty"`
+	SortPriority         int                          `json:"sortPriority,omitempty"`
+	Website              string                       `json:"website,omitempty"`
+	APIVersion           int                          `json:"apiVersion"`
+	Key                  string                       `json:"key"`
+	Name                 string                       `json:"name"`
+	Icon                 string                       `json:"icon,omitempty"`
+	Description          LocalizedText                `json:"description,omitempty"`
+	Version              string                       `json:"version"`
+	Author               AuthorMeta                   `json:"author"`
+	BaseURL              string                       `json:"baseUrl,omitempty"`
+	ChannelTypes         []int                        `json:"channelTypes,omitempty"`
+	Models               []string                     `json:"models"`
+	FetchMode            string                       `json:"fetchMode"`
+	ModelDiscovery       string                       `json:"modelDiscovery,omitempty"`
+	AllowedHosts         []string                     `json:"allowedHosts"`
+	Upstreams            []string                     `json:"upstreams,omitempty"`
+	Routes               []Route                      `json:"routes"`
+	Protocols            []ProtocolClaim              `json:"protocols"`
+	UsageSchema          map[string]UsageFieldSchema  `json:"usageSchema,omitempty"`
+	UsageExamples        []UsageExample               `json:"usageExamples,omitempty"`
+	UsageProfiles        []UsageProfile               `json:"usageProfiles,omitempty"`
+	VideoCapabilities    map[string]VideoCapabilities `json:"videoCapabilities,omitempty"`
+	Auth                 AuthMeta                     `json:"auth"`
 }
 
 // Upstream kinds a plugin driver can address. Every driver speaks to its
@@ -875,6 +876,13 @@ func cloneMeta(meta Meta) Meta {
 	if meta.Description != nil {
 		meta.Description = maps.Clone(meta.Description)
 	}
+	if meta.VideoCapabilities != nil {
+		cloned := make(map[string]VideoCapabilities, len(meta.VideoCapabilities))
+		for model, caps := range meta.VideoCapabilities {
+			cloned[model] = caps.Clone()
+		}
+		meta.VideoCapabilities = cloned
+	}
 	meta.UsageSchema = CloneUsageSchema(meta.UsageSchema)
 	meta.UsageExamples = CloneUsageExamples(meta.UsageExamples)
 	meta.UsageProfiles = append([]UsageProfile(nil), meta.UsageProfiles...)
@@ -1004,7 +1012,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "modelDiscovery", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
+		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "modelDiscovery", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "videoCapabilities", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, &UnknownMetaFieldError{Field: field}
 		}
@@ -1120,6 +1128,12 @@ func decodeMeta(value any) (Meta, error) {
 	meta.Protocols, err = decodeProtocolClaims(object, "protocols")
 	if err != nil {
 		return Meta{}, err
+	}
+	if value, present := object["videoCapabilities"]; present {
+		meta.VideoCapabilities, err = decodeVideoCapabilities(value, meta)
+		if err != nil {
+			return Meta{}, err
+		}
 	}
 	if usageSchema, exists := object["usageSchema"]; exists {
 		meta.UsageSchema, err = decodeUsageSchema(usageSchema)

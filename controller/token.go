@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -249,10 +250,11 @@ func GetTokenUserBalance(c *gin.Context) {
 }
 
 type tokenVideoModelInfo struct {
-	ID          string   `json:"id"`
-	Description string   `json:"description,omitempty"`
-	PriceLabel  string   `json:"price_label,omitempty"`
-	Limitations []string `json:"limitations,omitempty"`
+	ID           string                      `json:"id"`
+	Description  string                      `json:"description,omitempty"`
+	PriceLabel   string                      `json:"price_label,omitempty"`
+	Limitations  []string                    `json:"limitations,omitempty"`
+	Capabilities *jsplugin.VideoCapabilities `json:"capabilities,omitempty"`
 }
 
 func GetTokenVideoModels(c *gin.Context) {
@@ -273,16 +275,44 @@ func GetTokenVideoModels(c *gin.Context) {
 
 func buildTokenVideoModels(pricing []model.Pricing, group string, groupRatio float64) []tokenVideoModelInfo {
 	result := make([]tokenVideoModelInfo, 0)
+	generation := jsplugin.DefaultRegistry.Generation()
 	for _, item := range pricing {
 		if !common.StringsContains(item.EnableGroup, "all") && !common.StringsContains(item.EnableGroup, group) {
 			continue
 		}
-		if !common.StringsContains(item.EnableGroup, "Video") && !strings.Contains(strings.ToLower(item.ModelName), "video") && !strings.Contains(strings.ToLower(item.ModelName), "seedance") {
+		declared, registered := generation.CanonicalModel(item.ModelName)
+		pluginKey := ""
+		if !registered && model.DB != nil {
+			if target, resolved := model.ResolveTaskModelAlias(generation, item.ModelName); resolved && target.Declared != "" {
+				declared, pluginKey = target.Declared, target.PluginKey
+			}
+		}
+		candidates := generation.LookupEndpointCandidates("POST", "/v1/videos", declared)
+		if len(candidates) == 0 && !common.StringsContains(item.EnableGroup, "Video") && !strings.Contains(strings.ToLower(item.ModelName), "video") && !strings.Contains(strings.ToLower(item.ModelName), "seedance") {
 			continue
+		}
+		caps := generation.VideoCapabilitiesForModel(item.ModelName)
+		if pluginKey != "" {
+			// A resolved alias is pinned to its provider, not every provider sharing the target name.
+			for _, candidate := range candidates {
+				if candidate.Plugin.Meta.Key != pluginKey {
+					continue
+				}
+				if declaredCaps, exists := candidate.Plugin.Meta.VideoCapabilities[declared]; exists {
+					cloned := declaredCaps.Clone()
+					caps = &cloned
+				}
+				break
+			}
+		}
+		limits := videoModelLimitations(item.ModelName)
+		if caps != nil {
+			limits = videoCapabilityLimitations(caps)
 		}
 		result = append(result, tokenVideoModelInfo{
 			ID: item.ModelName, Description: strings.TrimSpace(item.Description),
-			PriceLabel: tokenVideoPriceLabel(item, groupRatio), Limitations: videoModelLimitations(item.ModelName),
+			PriceLabel: tokenVideoPriceLabel(item, groupRatio), Limitations: limits,
+			Capabilities: caps,
 		})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
@@ -320,6 +350,47 @@ func tokenVideoPriceLabel(item model.Pricing, groupRatio float64) string {
 	default:
 		return "$" + value
 	}
+}
+
+func videoCapabilityLimitations(caps *jsplugin.VideoCapabilities) []string {
+	limits := []string{"单次生成 1 条"}
+	if caps.MaxPromptChars != nil {
+		limits = append(limits, fmt.Sprintf("提示词最多 %d 字", *caps.MaxPromptChars))
+	}
+	if len(caps.Resolutions) > 0 {
+		limits = append(limits, "分辨率 "+strings.Join(caps.Resolutions, "/"))
+	}
+	if len(caps.Ratios) > 0 {
+		limits = append(limits, "比例 "+strings.Join(caps.Ratios, "/"))
+	}
+	if len(caps.SecondsSteps) > 0 {
+		steps := make([]string, len(caps.SecondsSteps))
+		for i, seconds := range caps.SecondsSteps {
+			steps[i] = strconv.Itoa(seconds)
+		}
+		limits = append(limits, "时长 "+strings.Join(steps, "/")+" 秒")
+	} else if caps.MinSeconds != nil && caps.MaxSeconds != nil {
+		limits = append(limits, fmt.Sprintf("时长 %d–%d 秒", *caps.MinSeconds, *caps.MaxSeconds))
+	}
+	if caps.Frames != nil {
+		if *caps.Frames {
+			limits = append(limits, "支持首尾帧")
+		} else {
+			limits = append(limits, "不支持首尾帧")
+		}
+	}
+	for _, field := range []struct {
+		label string
+		value *int
+	}{{"参考图", caps.MaxImages}, {"参考视频", caps.MaxVideos}, {"参考音频", caps.MaxAudios}} {
+		if field.value != nil {
+			limits = append(limits, fmt.Sprintf("%s最多 %d", field.label, *field.value))
+		}
+	}
+	if caps.ReferenceDurationRequired != nil && *caps.ReferenceDurationRequired {
+		limits = append(limits, "参考视频须提供源片时长")
+	}
+	return append(limits, "其他限制以模型接口校验为准")
 }
 
 func videoModelLimitations(modelName string) []string {

@@ -62,9 +62,32 @@ export const meta = {
     en: "AistarsLab Seedance video generation",
     zh: "AistarsLab Seedance 视频生成",
   },
-  version: "1.0.1",
+  version: "1.0.2",
   author: { name: "Carmin" },
   models: MODELS,
+  videoCapabilities: MODELS.reduce(function (result, model) {
+    const caps = staticCapability(model);
+    // Preserve existing runtime defaults; migrate only the Canvas operator limits into metadata.
+    const channel = (model.match(/-c(\d+)$/) || [])[1] || "";
+    if (["53", "54", "58", "63", "64"].includes(channel)) caps.modes = ["text2video", "image2video"];
+    if (["54", "63"].includes(channel)) {
+      caps.maxSeconds = 30;
+      caps.maxImages = 30;
+      caps.maxVideos = 10;
+      caps.maxAudios = 10;
+      if (channel === "63") caps.ratios = ["16:9", "9:16", "1:1"];
+    }
+    if (channel === "58") {
+      caps.minSeconds = 5;
+      caps.secondsSteps = [5, 10, 15];
+      caps.ratios = ["16:9", "9:16"];
+      caps.maxVideos = 0;
+      caps.maxAudios = 0;
+    }
+    result[model] = { requestFormat: "unified_video_v1", maxPromptChars: 2000, resolutions: [caps.resolution], ratios: caps.ratios, minSeconds: caps.minSeconds, maxSeconds: caps.maxSeconds, frames: caps.modes.includes("frames2video"), maxImages: caps.maxImages, maxVideos: caps.maxVideos, maxAudios: caps.maxAudios };
+    if (caps.secondsSteps) result[model].secondsSteps = caps.secondsSteps;
+    return result;
+  }, {}),
   fetchMode: "per_task",
   usageSchema: USAGE_SCHEMA,
   usageExamples: [
@@ -74,6 +97,9 @@ export const meta = {
   ],
   protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
 };
+
+// Keep aligned with relay/common.MaxTaskDurationSeconds.
+const MAX_SECONDS = 3600;
 
 function trimmed(value) {
   return String(value || "").trim();
@@ -128,15 +154,51 @@ function mediaFromContent(metadata) {
 function normalizeMetadata(req) {
   const source = req.metadata || {};
   if (!source || typeof source !== "object" || Array.isArray(source)) throw new Error("metadata must be an object");
+  const referenceMedia = { images: [], videos: [], audios: [] };
+  let referenceMode = "";
+  if (req.references !== undefined) {
+    if (!Array.isArray(req.references)) throw new Error("references must be an array");
+    if (["image", "images", "videos", "audios", "input_reference"].some(function (key) { return req[key] !== undefined; }) ||
+        ["images", "videos", "audios", "content"].some(function (key) { return source[key] !== undefined; })) {
+      throw new Error("references cannot be combined with legacy reference media");
+    }
+    const frames = {};
+    for (const ref of req.references) {
+      if (!ref || typeof ref !== "object" || Array.isArray(ref)) throw new Error("each reference must be an object");
+      if (!["image", "video", "audio"].includes(ref.type)) throw new Error("reference type must be image, video or audio");
+      if (!["reference", "first_frame", "last_frame"].includes(ref.role)) throw new Error("reference role must be reference, first_frame or last_frame");
+      if (ref.type !== "image" && ref.role !== "reference") throw new Error("only images support frame roles");
+      if (typeof ref.url !== "string" || !/^https?:\/\/[^\s]+$/i.test(ref.url.trim())) throw new Error("reference media must use public HTTP(S) URLs");
+      if (ref.duration_seconds !== undefined && (ref.type !== "video" || typeof ref.duration_seconds !== "number" || !Number.isFinite(ref.duration_seconds) || ref.duration_seconds <= 0 || ref.duration_seconds > MAX_SECONDS)) {
+        throw new Error("reference duration_seconds must be between 0 and 3600 for video media");
+      }
+      if (ref.role !== "reference") {
+        if (frames[ref.role]) throw new Error("frame references require one first_frame and at most one last_frame");
+        frames[ref.role] = ref.url.trim();
+      } else {
+        const key = { image: "images", video: "videos", audio: "audios" }[ref.type];
+        referenceMedia[key].push(ref.url.trim());
+      }
+    }
+    if (frames.last_frame && !frames.first_frame) throw new Error("last_frame requires first_frame");
+    if (frames.first_frame) {
+      if (referenceMedia.images.length) throw new Error("frame roles cannot be mixed with ordinary image references");
+      referenceMedia.images = [frames.first_frame];
+      if (frames.last_frame) referenceMedia.images.push(frames.last_frame);
+      referenceMode = frames.last_frame ? "frames2video" : "image2video";
+      const mode = trimmed(req.mode_type) || trimmed(source.mode_type);
+      if (mode && mode !== referenceMode) throw new Error("mode_type must agree with reference frame roles");
+    }
+  }
   const contentMedia = mediaFromContent(source);
-  const images = uniqueURLs([req.image].concat(req.images || [], source.images || [], contentMedia.images), "image");
-  const videos = uniqueURLs([].concat(req.videos || [], source.videos || [], contentMedia.videos), "video");
-  const audios = uniqueURLs([].concat(req.audios || [], source.audios || [], contentMedia.audios), "audio");
+  const images = uniqueURLs([req.image].concat(req.images || [], source.images || [], contentMedia.images, referenceMedia.images), "image");
+  const videos = uniqueURLs([].concat(req.videos || [], source.videos || [], contentMedia.videos, referenceMedia.videos), "video");
+  const audios = uniqueURLs([].concat(req.audios || [], source.audios || [], contentMedia.audios, referenceMedia.audios), "audio");
   return {
     resolution: trimmed(req.resolution) || trimmed(source.resolution),
     size: trimmed(source.size),
     ratio: trimmed(source.ratio),
-    mode_type: trimmed(req.mode_type) || trimmed(source.mode_type),
+    mode_type: referenceMode || trimmed(req.mode_type) || trimmed(source.mode_type),
     images: images,
     videos: videos,
     audios: audios,
@@ -188,7 +250,8 @@ function normalizedRequest(req, upstreamModel) {
   const n = integer(req.n, 1);
   if (n !== 1) throw new Error("only n=1 is supported");
   const metadata = normalizeMetadata(req);
-  const capability = staticCapability(req.model || model);
+  const capability = staticCapability(model) || staticCapability(req.model);
+  if (req.seconds !== undefined && req.duration !== undefined && integer(req.seconds) !== integer(req.duration)) throw new Error("duration and seconds must match");
   let seconds = integer(req.seconds !== undefined ? req.seconds : req.duration, capability ? capability.minSeconds : 4);
   if (seconds <= 0) throw new Error("seconds must be a positive integer");
   let mode = metadata.mode_type;
@@ -197,6 +260,20 @@ function normalizedRequest(req, upstreamModel) {
   if (!resolution && capability) resolution = capability.resolution;
   if (/^4k$/i.test(resolution)) resolution = "4K";
   let size = trimmed(req.size) || metadata.size || metadata.ratio || "16:9";
+  let standardRatio = "";
+  for (const key of ["aspect_ratio", "ratio"]) {
+    if (req[key] === undefined) continue;
+    if (typeof req[key] !== "string" || !/^[1-9][0-9]{0,3}:[1-9][0-9]{0,3}$/.test(req[key].trim())) throw new Error("aspect_ratio must be a ratio such as 16:9");
+    const ratio = req[key].trim();
+    if (standardRatio && standardRatio !== ratio) throw new Error("aspect_ratio and ratio must match");
+    standardRatio = ratio;
+  }
+  if (standardRatio) {
+    for (const value of [trimmed(req.size), metadata.size, metadata.ratio]) {
+      if (value && value !== standardRatio) throw new Error("size and aspect_ratio must match");
+    }
+    size = standardRatio;
+  }
 
   if (capability && capability.strict) {
     if (seconds < capability.minSeconds || seconds > capability.maxSeconds) {
@@ -422,12 +499,15 @@ export const protocols = {
         if (req.metadata !== undefined) {
           try {
             req.metadata = JSON.parse(req.metadata);
-          } catch (_error) {
+          } catch {
             throw new Error("metadata must be a JSON object string");
           }
           if (!req.metadata || typeof req.metadata !== "object" || Array.isArray(req.metadata)) {
             throw new Error("metadata must be a JSON object string");
           }
+        }
+        if (req.references !== undefined) {
+          try { req.references = JSON.parse(req.references); } catch { throw new Error("references must be a JSON array string"); }
         }
         if (req.seconds !== undefined) req.seconds = Number(req.seconds);
         if (req.duration !== undefined) req.duration = Number(req.duration);

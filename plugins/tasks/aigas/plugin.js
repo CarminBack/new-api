@@ -1,19 +1,27 @@
 // Video-capable public models advertising openai-video in /api/pricing, 2026-10-23.
-export const meta = {
-  apiVersion: 1, key: "aigas", name: "AIGAS Video", icon: "text:AG",
-  description: { en: "AIGAS video generation with structured reference assets", zh: "AIGAS 视频生成与结构化参考素材" },
-  version: "1.0.1", author: { name: "Carmin" }, baseUrl: "https://www.aigasapi.com",
-  website: "https://www.aigasapi.com/docs/api/videos",
-  models: [
+const MODELS = [
     "sd-2-vip-480", "sd-2.5-官方版-480p", "sd-2.0-fast-官方版-480p", "wan3.0-1080p-prime-官方版",
     "grok-video-1.5", "minimax-h3-官方版-768p", "sd-2.0-720P-官转版", "sd-2.5-1080P",
     "sd-2.0-mini-官方版-720p", "sd-2.0-官方版-480p", "wan3.0-480p-prime-官方版", "sd-2.5-480P",
     "sd-2.0-720-900", "minimax-h3-768P", "wan3.0-720p-prime-官方版", "sd-2.0-官方版-720p",
     "sd-2.5-官方版-720p", "minimax-h3-官方版-1080p", "sd-2.5-720-900vip", "sd-2.0-fast-官方版-720p",
     "sd-2.5-720P", "sd-2-vip-720", "sd-2.0-mini-官方版-480p",
-  ],
+  ];
+
+export const meta = {
+  apiVersion: 1, key: "aigas", name: "AIGAS Video", icon: "text:AG",
+  description: { en: "AIGAS video generation with structured reference assets", zh: "AIGAS 视频生成与结构化参考素材" },
+  version: "1.0.2", author: { name: "Carmin" }, baseUrl: "https://www.aigasapi.com",
+  website: "https://www.aigasapi.com/docs/api/videos",
+  models: MODELS,
   fetchMode: "per_task",
   modelDiscovery: "openai",
+  videoCapabilities: Object.fromEntries(MODELS.map(function (model) {
+    // Unpublished provider limits are intentionally not inferred from the model name.
+    return [model, model === "grok-video-1.5"
+      ? { requestFormat: "unified_video_v1", resolutions: ["720p"], ratios: ["16:9", "9:16"], minSeconds: 4, maxSeconds: 15, frames: false, maxImages: 1, maxVideos: 0, maxAudios: 0, requiredImages: 1 }
+      : { requestFormat: "unified_video_v1" }];
+  })),
   usageSchema: {
     seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
     videos: { type: "number", unit: "count", description: { en: "Video generation unit price", zh: "视频生成单价" } },
@@ -89,6 +97,9 @@ function normalizedRequest(req, model) {
       if (!["image", "video", "audio"].includes(ref.type)) throw new Error("reference type must be image, video or audio");
       if (!["reference", "first_frame", "last_frame"].includes(ref.role)) throw new Error("reference role must be reference, first_frame or last_frame");
       if (ref.type !== "image" && ref.role !== "reference") throw new Error("only images support frame roles");
+      if (ref.duration_seconds !== undefined && (ref.type !== "video" || typeof ref.duration_seconds !== "number" || !Number.isFinite(ref.duration_seconds) || ref.duration_seconds <= 0 || ref.duration_seconds > MAX_SECONDS)) {
+        throw new Error("reference duration_seconds must be between 0 and 3600 for video media");
+      }
       const item = { type: ref.type, role: ref.role };
       if (ref.url && typeof ref.url === "object" && ref.url.__fileRef && ref.url.encoding === "publicUrl") {
         item.url = { __fileRef: ref.url.__fileRef, encoding: "publicUrl", mediaKind: ref.type };

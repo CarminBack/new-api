@@ -1,5 +1,8 @@
 package constant
 
+// MaxTaskDurationSeconds is the shared video-duration ceiling for relay and plugin metadata.
+const MaxTaskDurationSeconds = 3600
+
 type TaskPlatform string
 
 const (
