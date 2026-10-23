@@ -1264,7 +1264,10 @@ test('quick options show only applicable shortcuts when the provider changes', a
   await user.click(screen.getByRole('button', { name: 'Change provider' }))
   await user.click(screen.getByRole('option', { name: /Video A/ }))
   quick = within(screen.getByRole('group', { name: 'Quick options' }))
-  expect(quick.getAllByRole('switch')).toHaveLength(1)
+  expect(quick.getAllByRole('switch')).toHaveLength(2)
+  expect(
+    quick.getByRole('switch', { name: 'Detect model updates' })
+  ).toBeVisible()
   expect(
     quick.getByRole('switch', { name: 'Auto-disable channel' })
   ).toBeChecked()
@@ -1557,7 +1560,7 @@ test.each([
   }
 )
 
-test('configuration from fields unsupported by the selected provider stays unmarked', async () => {
+test('plugin model discovery settings are marked while unrelated unsupported fields stay unmarked', async () => {
   editingChannel = {
     ...editingChannel,
     type: 61,
@@ -1573,7 +1576,10 @@ test('configuration from fields unsupported by the selected provider stays unmar
   ).not.toHaveAccessibleName(/Configured/)
   expect(
     screen.getByRole('tab', { name: /Other Settings/ })
-  ).not.toHaveAccessibleName(/Configured/)
+  ).toHaveAccessibleName(/Configured/)
+  expect(
+    screen.getByRole('switch', { name: 'Detect model updates' })
+  ).toBeChecked()
   expect(
     screen.queryByRole('switch', {
       name: 'Use OpenAI-compatible Ollama chat API',
@@ -1872,15 +1878,32 @@ test('model configuration keeps unchecked candidates searchable and supports cat
   expect(trigger).toBeDisabled()
 })
 
-test('model configuration is available for a plugin channel without upstream discovery and is disabled when its model list is empty', async () => {
+test('plugin channels can fetch models using the selected plugin and retain manual model configuration', async () => {
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValue({ data: { success: true, data: ['video-a-1'] } })
   const user = userEvent.setup()
   render(<ConfigurationHarness />)
   await user.click(await screen.findByRole('option', { name: /Video A/ }))
   const trigger = screen.getByRole('button', { name: 'Configure Models' })
   expect(trigger).toBeEnabled()
+  fireEvent.change(screen.getByLabelText('API Key *'), {
+    target: { value: 'plugin-discovery-key' },
+  })
+  await user.click(screen.getByRole('button', { name: 'Fetch from Upstream' }))
   expect(
-    screen.queryByRole('button', { name: 'Fetch from Upstream' })
-  ).not.toBeInTheDocument()
+    await screen.findByRole('checkbox', { name: 'video-a-1' })
+  ).toBeVisible()
+  expect(post).toHaveBeenCalledWith(
+    '/api/channel/fetch_models',
+    expect.objectContaining({
+      type: 61,
+      task_plugin_key: 'video-a',
+      key: 'plugin-discovery-key',
+      base_url: 'https://a.example',
+    }),
+    expect.anything()
+  )
   await user.click(trigger)
   const dialog = within(
     screen.getByRole('dialog', { name: 'Configure Models' })
@@ -1890,6 +1913,42 @@ test('model configuration is available for a plugin channel without upstream dis
   await user.click(screen.getByRole('button', { name: 'Clear All' }))
 
   expect(trigger).toBeDisabled()
+})
+
+test('plugin channel edits fetch with the selected plugin and draft URL without exposing saved credentials', async () => {
+  editingChannel = {
+    ...editingChannel,
+    type: 61,
+    setting: JSON.stringify({ task_plugin_key: 'video-a' }),
+  }
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValue({ data: { success: true, data: ['video-a-1'] } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  fireEvent.change(screen.getByDisplayValue('https://saved.example'), {
+    target: { value: 'https://draft.example/v1' },
+  })
+  await user.click(screen.getByRole('button', { name: 'Fetch from Upstream' }))
+  expect(
+    await screen.findByRole('checkbox', { name: 'video-a-1' })
+  ).toBeVisible()
+  expect(post).toHaveBeenCalledWith(
+    '/api/channel/fetch_models',
+    expect.objectContaining({
+      type: 61,
+      task_plugin_key: 'video-a',
+      channel_id: 42,
+      base_url: 'https://draft.example/v1',
+      key: undefined,
+    }),
+    expect.anything()
+  )
+  expect(api.get).not.toHaveBeenCalledWith(
+    '/api/channel/fetch_models/42',
+    expect.anything()
+  )
 })
 
 test('advanced custom edits preview draft connection settings with the saved key', async () => {

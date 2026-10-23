@@ -99,6 +99,7 @@ type Meta struct {
 	ChannelTypes         []int                       `json:"channelTypes,omitempty"`
 	Models               []string                    `json:"models"`
 	FetchMode            string                      `json:"fetchMode"`
+	ModelDiscovery       string                      `json:"modelDiscovery,omitempty"`
 	AllowedHosts         []string                    `json:"allowedHosts"`
 	Upstreams            []string                    `json:"upstreams,omitempty"`
 	Routes               []Route                     `json:"routes"`
@@ -1003,7 +1004,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
+		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "modelDiscovery", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, &UnknownMetaFieldError{Field: field}
 		}
@@ -1069,6 +1070,12 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	if meta.FetchMode, err = stringMetaField(object, "fetchMode"); err != nil {
 		return Meta{}, err
+	}
+	if meta.ModelDiscovery, err = stringMetaField(object, "modelDiscovery"); err != nil {
+		return Meta{}, err
+	}
+	if _, exists := object["modelDiscovery"]; exists && meta.ModelDiscovery != "openai" {
+		return Meta{}, fmt.Errorf("plugin meta modelDiscovery must be openai when provided")
 	}
 	meta.SubmitResponseTypes = []string{"json"}
 	if _, present := object["submitResponseTypes"]; present {
@@ -1283,6 +1290,9 @@ func normalizeV1Meta(meta *Meta) error {
 	}
 	if meta.FetchMode != "per_task" && meta.FetchMode != "batch" {
 		return fmt.Errorf("plugin meta fetchMode must be per_task or batch")
+	}
+	if meta.ModelDiscovery != "" && meta.ModelDiscovery != "openai" {
+		return fmt.Errorf("plugin meta modelDiscovery must be openai when provided")
 	}
 	if len(meta.Models) == 0 {
 		return fmt.Errorf("plugin meta models must contain at least one model")

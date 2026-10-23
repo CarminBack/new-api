@@ -1407,6 +1407,7 @@ func equalStringPtr(a, b *string) bool {
 
 type fetchModelsRequest struct {
 	ChannelID      int     `json:"channel_id"`
+	TaskPluginKey  *string `json:"task_plugin_key"`
 	BaseURL        *string `json:"base_url"`
 	Type           int     `json:"type"`
 	Key            string  `json:"key"`
@@ -1483,6 +1484,52 @@ func buildAdvancedCustomModelPreviewChannel(req fetchModelsRequest) (*model.Chan
 	return channel, nil
 }
 
+func buildTaskPluginModelPreviewChannel(req fetchModelsRequest) (*model.Channel, error) {
+	var channel *model.Channel
+	if req.ChannelID > 0 {
+		var err error
+		channel, err = model.GetChannelById(req.ChannelID, true)
+		if err != nil {
+			return nil, err
+		}
+		if channel.Type != constant.ChannelTypeTaskPlugin {
+			return nil, fmt.Errorf("channel %d is not a task plugin channel", req.ChannelID)
+		}
+	} else {
+		channel = &model.Channel{Type: constant.ChannelTypeTaskPlugin, Key: strings.TrimSpace(strings.Split(req.Key, "\n")[0])}
+	}
+	settings := channel.GetSetting()
+	if req.TaskPluginKey != nil {
+		settings.TaskPluginKey = strings.TrimSpace(*req.TaskPluginKey)
+	}
+	plugin, ok := jsplugin.DefaultRegistry.Get(settings.TaskPluginKey)
+	if !ok {
+		return nil, fmt.Errorf("task plugin %q is not registered", settings.TaskPluginKey)
+	}
+	if req.Proxy != nil {
+		settings.Proxy = strings.TrimSpace(*req.Proxy)
+	}
+	channel.SetSetting(settings)
+	if req.BaseURL != nil {
+		baseURL := strings.TrimSpace(*req.BaseURL)
+		channel.BaseURL = &baseURL
+	}
+	if channel.GetBaseURL() == "" {
+		channel.BaseURL = &plugin.Meta.BaseURL
+	}
+	if req.HeaderOverride != nil {
+		raw := strings.TrimSpace(*req.HeaderOverride)
+		if raw != "" {
+			var headers map[string]any
+			if err := common.UnmarshalJsonStr(raw, &headers); err != nil {
+				return nil, fmt.Errorf("header_override must be a JSON object: %w", err)
+			}
+		}
+		channel.HeaderOverride = &raw
+	}
+	return channel, nil
+}
+
 func FetchModels(c *gin.Context) {
 	var req fetchModelsRequest
 
@@ -1495,7 +1542,14 @@ func FetchModels(c *gin.Context) {
 	}
 
 	var channel *model.Channel
-	if req.Type == constant.ChannelTypeAdvancedCustom || req.ChannelID > 0 {
+	if req.Type == constant.ChannelTypeTaskPlugin {
+		var err error
+		channel, err = buildTaskPluginModelPreviewChannel(req)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+	} else if req.Type == constant.ChannelTypeAdvancedCustom || req.ChannelID > 0 {
 		var err error
 		channel, err = buildAdvancedCustomModelPreviewChannel(req)
 		if err != nil {

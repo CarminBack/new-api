@@ -362,12 +362,16 @@ func getFetchModelsResponseBody(method string, requestURL string, channel *model
 }
 
 func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
+	var pluginModels []string
 	if channel.Type == constant.ChannelTypeTaskPlugin {
 		plugin, ok := jsplugin.DefaultRegistry.Get(channel.GetSetting().TaskPluginKey)
 		if !ok {
 			return nil, fmt.Errorf("task plugin %q is not registered", channel.GetSetting().TaskPluginKey)
 		}
-		return normalizeModelNames(plugin.Meta.Models), nil
+		if plugin.Meta.ModelDiscovery == "" {
+			return normalizeModelNames(plugin.Meta.Models), nil
+		}
+		pluginModels = plugin.Meta.Models
 	}
 	baseURL := constant.GetChannelBaseURL(channel.Type)
 	if channel.GetBaseURL() != "" {
@@ -408,6 +412,8 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 
 	var url string
 	switch channel.Type {
+	case constant.ChannelTypeTaskPlugin:
+		url = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1") + "/v1/models"
 	case constant.ChannelTypeAli:
 		url = fmt.Sprintf("%s/compatible-mode/v1/models", baseURL)
 	case constant.ChannelTypeZhipu_v4:
@@ -461,7 +467,14 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		}
 		return item.ID
 	})
-	return normalizeModelNames(ids), nil
+	ids = normalizeModelNames(ids)
+	if pluginModels != nil {
+		if result.Data == nil {
+			return nil, fmt.Errorf("invalid OpenAI Models response: data is required")
+		}
+		ids = slices.DeleteFunc(ids, func(id string) bool { return !slices.Contains(pluginModels, id) })
+	}
+	return ids, nil
 }
 
 func fetchAdvancedCustomUpstreamModelIDs(channel *model.Channel, baseURL string) ([]string, error) {

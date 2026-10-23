@@ -1050,6 +1050,30 @@ func TestDecodeIconDataURI(t *testing.T) {
 	}
 }
 
+func TestPluginModelDiscoveryMetadata(t *testing.T) {
+	for _, test := range []struct {
+		name, fields, want string
+		invalid            bool
+	}{
+		{name: "omitted keeps static discovery"},
+		{name: "OpenAI discovery", fields: `modelDiscovery: "openai",`, want: "openai"},
+		{name: "unsupported mode", fields: `modelDiscovery: "vendor",`, invalid: true},
+		{name: "explicit empty", fields: `modelDiscovery: "",`, invalid: true},
+		{name: "wrong type", fields: `modelDiscovery: true,`, invalid: true},
+		{name: "null", fields: `modelDiscovery: null,`, invalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			loaded, err := CompilePlugin(routingTestPluginSource("discovery", 0, `["model"]`, test.fields, ""), Options{})
+			if test.invalid {
+				require.ErrorContains(t, err, "modelDiscovery")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.want, loaded.Meta.ModelDiscovery)
+		})
+	}
+}
+
 func TestPluginDisplayMetadata(t *testing.T) {
 	for _, tc := range []struct {
 		name, fields string

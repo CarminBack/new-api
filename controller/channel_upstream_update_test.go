@@ -6,11 +6,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +39,152 @@ func newAdvancedCustomModelListChannel(baseURL string, key string, upstreamPath 
 	}
 	channel.SetOtherSettings(dto.ChannelOtherSettings{AdvancedCustom: config})
 	return channel
+}
+
+func registerAIGASModelDiscoveryPlugin(t *testing.T) {
+	t.Helper()
+	previous := jsplugin.DefaultRegistry
+	jsplugin.DefaultRegistry = jsplugin.NewRegistry()
+	t.Cleanup(func() { jsplugin.DefaultRegistry = previous })
+	source, err := plugins.Source("aigas")
+	require.NoError(t, err)
+	_, err = jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+}
+
+func TestFetchAIGASModelsQueriesUpstreamAndFiltersUnsupportedModels(t *testing.T) {
+	registerAIGASModelDiscoveryPlugin(t)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		assert.Equal(t, "/v1/models", r.URL.Path)
+		assert.Equal(t, "Bearer discovery-key", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"sd-2.5-官方版-720p"},{"id":"text-only-model"},{"id":" sd-2.5-官方版-720p "}]}`))
+	}))
+	defer server.Close()
+	baseURL := server.URL + "/v1/"
+	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, Key: "discovery-key", BaseURL: &baseURL}
+	settings := channel.GetSetting()
+	settings.TaskPluginKey = "aigas"
+	channel.SetSetting(settings)
+	models, err := fetchChannelUpstreamModelIDs(channel)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"sd-2.5-官方版-720p"}, models)
+	assert.EqualValues(t, 1, requests.Load())
+}
+
+func TestFetchAIGASModelsResponseAndKeyBoundaries(t *testing.T) {
+	registerAIGASModelDiscoveryPlugin(t)
+	for _, test := range []struct {
+		name      string
+		status    int
+		body      string
+		wantError string
+	}{
+		{name: "empty upstream list", status: 200, body: `{"data":[]}`},
+		{name: "no supported models", status: 200, body: `{"data":[{"id":"text-only"}]}`},
+		{name: "missing data", status: 200, body: `{}`, wantError: "data is required"},
+		{name: "null data", status: 200, body: `{"data":null}`, wantError: "data is required"},
+		{name: "malformed JSON", status: 200, body: `{"data":`, wantError: "unexpected end"},
+		{name: "unauthorized", status: 401, body: `secret-key`, wantError: "401"},
+		{name: "forbidden", status: 403, body: `secret-key`, wantError: "403"},
+		{name: "missing endpoint", status: 404, body: `secret-key`, wantError: "404"},
+		{name: "upstream failure", status: 500, body: `secret-key`, wantError: "500"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "Bearer enabled-key", r.Header.Get("Authorization"))
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, BaseURL: &server.URL, Key: "disabled-key\nenabled-key"}
+			channel.ChannelInfo = model.ChannelInfo{IsMultiKey: true, MultiKeyStatusList: map[int]int{0: common.ChannelStatusManuallyDisabled, 1: common.ChannelStatusEnabled}, MultiKeySize: 2}
+			settings := channel.GetSetting()
+			settings.TaskPluginKey = "aigas"
+			channel.SetSetting(settings)
+			models, err := fetchChannelUpstreamModelIDs(channel)
+			if test.wantError != "" {
+				require.ErrorContains(t, err, test.wantError)
+				assert.NotContains(t, err.Error(), "secret-key")
+				assert.NotContains(t, err.Error(), "enabled-key")
+				assert.Nil(t, models)
+				return
+			}
+			require.NoError(t, err)
+			assert.Empty(t, models)
+		})
+	}
+}
+
+func TestFetchModelsTaskPluginCreateAndSavedPreview(t *testing.T) {
+	registerAIGASModelDiscoveryPlugin(t)
+	db := setupModelListControllerTestDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/models", r.URL.Path)
+		assert.Equal(t, "Bearer preview-key", r.Header.Get("Authorization"))
+		assert.Equal(t, "draft-header", r.Header.Get("X-Preview"))
+		_, _ = w.Write([]byte(`{"data":[{"id":"grok-video-1.5"},{"id":"text-only"}]}`))
+	}))
+	defer server.Close()
+	pluginKey := "aigas"
+	savedBase := "http://127.0.0.1:1"
+	saved := &model.Channel{Type: constant.ChannelTypeTaskPlugin, Name: "saved AIGAS", BaseURL: &savedBase, Key: "preview-key", Models: "original-model"}
+	settings := saved.GetSetting()
+	settings.TaskPluginKey = pluginKey
+	saved.SetSetting(settings)
+	require.NoError(t, db.Create(saved).Error)
+	headers := `{"X-Preview":"draft-header"}`
+	for _, channelID := range []int{0, saved.Id} {
+		req := fetchModelsRequest{Type: constant.ChannelTypeTaskPlugin, TaskPluginKey: &pluginKey, ChannelID: channelID, BaseURL: &server.URL, HeaderOverride: &headers}
+		if channelID == 0 {
+			req.Key = "preview-key"
+		}
+		body, err := common.Marshal(req)
+		require.NoError(t, err)
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/fetch_models", bytes.NewReader(body))
+		ctx.Request.Header.Set("Content-Type", "application/json")
+		FetchModels(ctx)
+		var response struct {
+			Success bool     `json:"success"`
+			Message string   `json:"message"`
+			Data    []string `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.True(t, response.Success, response.Message)
+		assert.Equal(t, []string{"grok-video-1.5"}, response.Data)
+		assert.NotContains(t, recorder.Body.String(), "preview-key")
+	}
+	var persisted model.Channel
+	require.NoError(t, db.First(&persisted, saved.Id).Error)
+	assert.Equal(t, savedBase, persisted.GetBaseURL())
+	assert.Equal(t, "original-model", persisted.Models)
+	assert.Equal(t, "preview-key", persisted.Key)
+	_, err := buildTaskPluginModelPreviewChannel(fetchModelsRequest{Type: constant.ChannelTypeTaskPlugin})
+	require.ErrorContains(t, err, "not registered")
+	preview, err := buildTaskPluginModelPreviewChannel(fetchModelsRequest{Type: constant.ChannelTypeTaskPlugin, TaskPluginKey: &pluginKey})
+	require.NoError(t, err)
+	assert.Equal(t, "https://www.aigasapi.com", preview.GetBaseURL())
+}
+
+func TestTaskPluginWithoutModelDiscoveryKeepsStaticModels(t *testing.T) {
+	registerAIGASModelDiscoveryPlugin(t)
+	source, err := plugins.Source("aigas")
+	require.NoError(t, err)
+	source = strings.Replace(source, `modelDiscovery: "openai",`, "", 1)
+	_, err = jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	baseURL := "http://127.0.0.1:1"
+	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin, BaseURL: &baseURL}
+	settings := channel.GetSetting()
+	settings.TaskPluginKey = "aigas"
+	channel.SetSetting(settings)
+	models, err := fetchChannelUpstreamModelIDs(channel)
+	require.NoError(t, err)
+	assert.Contains(t, models, "grok-video-1.5")
 }
 
 func TestParseOpenAIModelIDsStrictResponseContract(t *testing.T) {
