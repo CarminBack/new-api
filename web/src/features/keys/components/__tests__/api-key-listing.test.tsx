@@ -356,6 +356,19 @@ async function renderKeysPage(
   return { post, put }
 }
 
+it('keeps the date filter and scrollable list within the fixed page height', async () => {
+  await renderKeysPage()
+
+  const dateForm = screen.getByLabelText('Start date').closest('form')
+  const dateFilter = dateForm?.parentElement
+  const page = dateFilter?.parentElement
+  expect(page).toHaveClass('h-full', 'min-h-0', 'flex-col')
+
+  const toolbar = screen.getByPlaceholderText('Filter by name...')
+  const tablePage = toolbar.closest('div.flex.h-full')
+  expect(tablePage).toHaveClass('flex-1', 'min-h-0')
+})
+
 it('combines creation and last use while keeping expiry, models and IP restrictions separate', async () => {
   await renderKeysPage()
   for (const name of ['Name', 'API Key', 'Group', 'Models', 'IP Restriction']) {

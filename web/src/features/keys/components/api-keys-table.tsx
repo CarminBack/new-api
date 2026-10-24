@@ -355,7 +355,7 @@ export function ApiKeysTable() {
   }, [columnVisibility, table])
 
   return (
-    <div className='flex min-h-0 min-w-0 flex-1 flex-col gap-3'>
+    <div className='flex h-full min-h-0 min-w-0 flex-1 flex-col gap-3'>
       <ApiKeyUsageFilter
         range={usageRange}
         onApply={(range) => {
@@ -375,6 +375,7 @@ export function ApiKeysTable() {
         />
       ) : (
         <DataTablePage
+          className='flex-1'
           table={table}
           columns={columns}
           isLoading={isLoading}
