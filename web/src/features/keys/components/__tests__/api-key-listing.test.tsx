@@ -32,6 +32,7 @@ import {
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   within,
@@ -50,6 +51,7 @@ import {
   useSystemConfigStore,
 } from '@/stores/system-config-store'
 
+import { getApiKeys, searchApiKeys } from '../../api'
 import { apiKeySchema, type ApiKey } from '../../types'
 import { ApiKeyQuotaCell } from '../api-key-quota-cell'
 import { useApiKeysColumns } from '../api-keys-columns'
@@ -303,12 +305,17 @@ function KeysPage() {
   )
 }
 
-async function renderKeysPage(status = 1, overrides: Partial<ApiKey> = {}) {
+async function renderKeysPage(
+  status = 1,
+  overrides: Partial<ApiKey> = {},
+  initialPath = '/keys/',
+  total = 1
+) {
   let currentKey = { ...key, status, ...overrides }
   vi.mocked(api.get).mockImplementation(async (url) => {
     if (url.startsWith('/api/token/')) {
       return {
-        data: { success: true, data: { items: [currentKey], total: 1 } },
+        data: { success: true, data: { items: [currentKey], total } },
       }
     }
     return { data: { success: true, data: { default: { ratio: 1 } } } }
@@ -335,7 +342,7 @@ async function renderKeysPage(status = 1, overrides: Partial<ApiKey> = {}) {
   })
   const router = createRouter({
     routeTree: root.addChildren([auth.addChildren([keysRoute])]),
-    history: createMemoryHistory({ initialEntries: ['/keys/'] }),
+    history: createMemoryHistory({ initialEntries: [initialPath] }),
   })
   await router.load()
   render(
@@ -524,4 +531,209 @@ it('keeps mobile quota readable and opens complete model and IP restrictions by 
   details = await screen.findByRole('dialog')
   expect(within(details).getByText('192.0.2.1')).toBeVisible()
   expect(within(details).getByText('2001:db8::1')).toBeVisible()
+})
+
+function enterUsageDates(start: string, end: string) {
+  fireEvent.change(screen.getByLabelText('Start date'), {
+    target: { value: start },
+  })
+  fireEvent.change(screen.getByLabelText('End date'), {
+    target: { value: end },
+  })
+}
+
+it('validates both calendar dates and includes the full end day without replacing cumulative quota', async () => {
+  await renderKeysPage(1, { period_used_quota: 0 })
+  const query = screen.getByRole('button', { name: 'Query usage' })
+  expect(query.closest('form')).toHaveClass('grid', 'grid-cols-2', 'sm:flex')
+  expect(query).toBeDisabled()
+  expect(
+    screen.queryByRole('columnheader', { name: 'Period used quota' })
+  ).not.toBeInTheDocument()
+  enterUsageDates('2026-03-08', '')
+  expect(screen.getByRole('alert')).toHaveTextContent('Select both')
+  expect(screen.getByLabelText('End date')).toHaveAttribute(
+    'aria-invalid',
+    'true'
+  )
+  expect(query).toBeDisabled()
+  enterUsageDates('2026-03-09', '2026-03-08')
+  expect(screen.getByRole('alert')).toHaveTextContent('The end date must')
+  expect(query).toBeDisabled()
+  enterUsageDates('2026-03-08', '2026-03-08')
+  await userEvent.click(query)
+  await screen.findByRole('columnheader', { name: 'Period used quota' })
+  const expectedStart = String(new Date(2026, 2, 8).getTime() / 1000)
+  const expectedEnd = String(new Date(2026, 2, 9).getTime() / 1000)
+  await waitFor(() =>
+    expect(
+      vi.mocked(api.get).mock.calls.some(([url]) => {
+        const parsed = new URL(url, 'http://localhost')
+        return (
+          parsed.searchParams.get('start_timestamp') === expectedStart &&
+          parsed.searchParams.get('end_timestamp') === expectedEnd
+        )
+      })
+    ).toBe(true)
+  )
+  expect(screen.getByLabelText('Period used quota')).toHaveTextContent('$0')
+  expect(
+    screen.getByRole('button', {
+      name: /Remaining 80; Remaining percentage 40%; Used amount 120/,
+    })
+  ).toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent(
+    '2026-03-08 to 2026-03-08'
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Clear dates' }))
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('columnheader', { name: 'Period used quota' })
+    ).not.toBeInTheDocument()
+  )
+  expect(screen.getByLabelText('Start date')).toHaveValue('')
+  expect(screen.getByLabelText('End date')).toHaveValue('')
+  expect(screen.getByRole('status')).toHaveTextContent('All-time usage')
+})
+
+it('applies a date range from a later page to page one and keeps the range when searching', async () => {
+  await renderKeysPage(1, { period_used_quota: 500000 }, '/keys/?page=2', 40)
+  enterUsageDates('2026-10-01', '2026-10-24')
+  await userEvent.click(screen.getByRole('button', { name: 'Query usage' }))
+  await screen.findByRole('columnheader', { name: 'Period used quota' })
+  await waitFor(() =>
+    expect(
+      vi.mocked(api.get).mock.calls.some(([url]) => {
+        const params = new URL(url, 'http://localhost').searchParams
+        return params.has('start_timestamp') && params.get('p') === '1'
+      })
+    ).toBe(true)
+  )
+  await userEvent.type(
+    screen.getByPlaceholderText('Filter by name...'),
+    'production'
+  )
+  await waitFor(() =>
+    expect(
+      vi.mocked(api.get).mock.calls.some(([url]) => {
+        const parsed = new URL(url, 'http://localhost')
+        return (
+          parsed.pathname === '/api/token/search' &&
+          parsed.searchParams.get('keyword') === 'production' &&
+          parsed.searchParams.has('start_timestamp') &&
+          parsed.searchParams.has('end_timestamp')
+        )
+      })
+    ).toBe(true)
+  )
+})
+
+it.each([false, true])(
+  'shows an error instead of zero or an empty list when range query fails (network=%s)',
+  async (network) => {
+    await renderKeysPage()
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      if (url.includes('start_timestamp')) {
+        if (network) throw new Error('network unavailable')
+        return { data: { success: false, message: 'query failed' } }
+      }
+      return { data: { success: true, data: { items: [key], total: 1 } } }
+    })
+    enterUsageDates('2026-10-01', '2026-10-24')
+    await userEvent.click(screen.getByRole('button', { name: 'Query usage' }))
+    await screen.findByText('Failed to load API key usage')
+    expect(screen.queryByText('No API Keys Found')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Period used quota')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Clear dates' }))
+    await screen.findByText(key.name)
+  }
+)
+
+it.each([0, -500000, undefined])(
+  'shows range usage %s separately on mobile and never replaces missing data with zero',
+  async (quota) => {
+    const matchMedia = window.matchMedia
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      ...matchMedia(query),
+      matches: query.includes('max-width'),
+    }))
+    await renderKeysPage(1, { period_used_quota: quota })
+    enterUsageDates('2026-10-01', '2026-10-24')
+    await userEvent.click(screen.getByRole('button', { name: 'Query usage' }))
+    const period = await screen.findByLabelText('Period used quota')
+    let expected = 'Unavailable'
+    if (quota === 0) expected = '$0'
+    else if (quota === -500000) expected = '-$1'
+    expect(period).toHaveTextContent(expected)
+    expect(
+      screen.getByRole('button', {
+        name: /Remaining 80; Remaining percentage 40%; Used amount 120/,
+      })
+    ).toBeInTheDocument()
+  }
+)
+
+it('propagates range bounds including epoch zero through list and paginated search requests', async () => {
+  await getApiKeys({ p: 2, size: 20, start_timestamp: 0, end_timestamp: 86400 })
+  await searchApiKeys({
+    keyword: 'same-name',
+    token: 'masked',
+    p: 3,
+    size: 10,
+    start_timestamp: 0,
+    end_timestamp: 86400,
+  })
+  const calls = vi.mocked(api.get).mock.calls
+  const list = new URL(calls[0][0], 'http://localhost')
+  const search = new URL(calls[1][0], 'http://localhost')
+  expect(Object.fromEntries(list.searchParams)).toEqual({
+    p: '2',
+    size: '20',
+    start_timestamp: '0',
+    end_timestamp: '86400',
+  })
+  expect(Object.fromEntries(search.searchParams)).toEqual({
+    keyword: 'same-name',
+    token: 'masked',
+    p: '3',
+    size: '10',
+    start_timestamp: '0',
+    end_timestamp: '86400',
+  })
+})
+
+it('does not show the previous period usage under new dates while the new request is pending', async () => {
+  await renderKeysPage(1, { period_used_quota: 500000 })
+  enterUsageDates('2026-10-01', '2026-10-02')
+  await userEvent.click(screen.getByRole('button', { name: 'Query usage' }))
+  expect(await screen.findByLabelText('Period used quota')).toHaveTextContent(
+    '$1'
+  )
+  let resolveRequest: (value: unknown) => void = () => {}
+  const pending = new Promise((resolve) => {
+    resolveRequest = resolve
+  })
+  vi.mocked(api.get).mockImplementation(async (url) => {
+    if (url.includes('start_timestamp')) return pending
+    return { data: { success: true, data: {} } }
+  })
+  enterUsageDates('2026-10-03', '2026-10-04')
+  await userEvent.click(screen.getByRole('button', { name: 'Query usage' }))
+  expect(screen.queryByLabelText('Period used quota')).not.toBeInTheDocument()
+  expect(screen.queryByText('No API Keys Found')).not.toBeInTheDocument()
+  await act(async () =>
+    resolveRequest({
+      data: {
+        success: true,
+        data: { items: [{ ...key, period_used_quota: 1500000 }], total: 1 },
+      },
+    })
+  )
+  expect(await screen.findByLabelText('Period used quota')).toHaveTextContent(
+    '$3'
+  )
+  expect(screen.getByRole('status')).toHaveTextContent(
+    '2026-10-03 to 2026-10-04'
+  )
 })

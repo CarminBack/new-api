@@ -30,6 +30,7 @@ import {
   useDebouncedColumnFilter,
   useDataTable,
 } from '@/components/data-table'
+import { ErrorState } from '@/components/error-state'
 import { StatusBadge } from '@/components/status-badge'
 import {
   Empty,
@@ -51,9 +52,11 @@ import {
   API_KEY_STATUSES,
   ERROR_MESSAGES,
 } from '../constants'
-import type { ApiKey } from '../types'
+import type { ApiKey, ApiKeyUsageRange } from '../types'
+import { ApiKeyPeriodUsage } from './api-key-period-usage'
 import { ApiKeyQuotaCell } from './api-key-quota-cell'
 import { ApiKeyActivityCell } from './api-key-timestamp-cell'
+import { ApiKeyUsageFilter } from './api-key-usage-filter'
 import {
   ApiKeyCell,
   ModelLimitsCell,
@@ -102,10 +105,12 @@ function ApiKeysMobileList({
   table,
   isLoading,
   now,
+  showPeriodUsage,
 }: {
   table: TanstackTable<ApiKey>
   isLoading: boolean
   now: number
+  showPeriodUsage: boolean
 }) {
   const { t } = useTranslation()
   const rows = table.getRowModel().rows
@@ -184,6 +189,14 @@ function ApiKeysMobileList({
                   )}
               </div>
               <ApiKeyQuotaCell apiKey={apiKey} now={now} variant='card' />
+              {showPeriodUsage && (
+                <div className='flex items-baseline justify-between gap-2 text-sm'>
+                  <span className='text-muted-foreground'>
+                    {t('Period used quota')}
+                  </span>
+                  <ApiKeyPeriodUsage apiKey={apiKey} />
+                </div>
+              )}
             </div>
 
             <div className='flex flex-wrap items-center gap-x-5 gap-y-1'>
@@ -219,7 +232,8 @@ export function ApiKeysTable() {
   const { t } = useTranslation()
   const { refreshTrigger } = useApiKeys()
   const [now, setNow] = useState(() => Date.now())
-  const columns = useApiKeysColumns(now)
+  const [usageRange, setUsageRange] = useState<ApiKeyUsageRange>()
+  const columns = useApiKeysColumns(now, Boolean(usageRange))
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -261,7 +275,7 @@ export function ApiKeysTable() {
 
   // Fetch data with React Query
   // eslint-disable-next-line @tanstack/query/exhaustive-deps
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [
       'keys',
       pagination.pageIndex + 1,
@@ -269,16 +283,19 @@ export function ApiKeysTable() {
       globalFilter,
       tokenFilter,
       refreshTrigger,
+      usageRange,
     ],
     queryFn: async () => {
       const result = shouldSearch
         ? await searchApiKeys({
+            ...usageRange,
             keyword: globalFilter,
             token: tokenFilter,
             p: pagination.pageIndex + 1,
             size: pagination.pageSize,
           })
         : await getApiKeys({
+            ...usageRange,
             p: pagination.pageIndex + 1,
             size: pagination.pageSize,
           })
@@ -299,7 +316,6 @@ export function ApiKeysTable() {
         total: result.data?.total || 0,
       }
     },
-    placeholderData: (previousData) => previousData,
   })
 
   const apiKeys = data?.items || []
@@ -339,45 +355,71 @@ export function ApiKeysTable() {
   }, [columnVisibility, table])
 
   return (
-    <DataTablePage
-      table={table}
-      columns={columns}
-      isLoading={isLoading}
-      isFetching={isFetching}
-      emptyTitle={t('No API Keys Found')}
-      emptyDescription={t(
-        'No API keys available. Create your first API key to get started.'
+    <div className='flex min-h-0 min-w-0 flex-1 flex-col gap-3'>
+      <ApiKeyUsageFilter
+        range={usageRange}
+        onApply={(range) => {
+          setUsageRange(range)
+          onPaginationChange({ ...pagination, pageIndex: 0 })
+        }}
+      />
+      {isError ? (
+        <ErrorState
+          title={t('Failed to load API key usage')}
+          description={t(
+            'Usage could not be loaded. Retry or clear the date filter.'
+          )}
+          onRetry={() => {
+            void refetch()
+          }}
+        />
+      ) : (
+        <DataTablePage
+          table={table}
+          columns={columns}
+          isLoading={isLoading}
+          isFetching={isFetching}
+          emptyTitle={t('No API Keys Found')}
+          emptyDescription={t(
+            'No API keys available. Create your first API key to get started.'
+          )}
+          skeletonKeyPrefix='api-keys-skeleton'
+          applyHeaderSize
+          toolbarProps={{
+            searchPlaceholder: t('Filter by name...'),
+            searchDebounceMs: 500,
+            additionalSearch: (
+              <Input
+                placeholder={t('Filter by API key...')}
+                aria-label={t('Filter by API key...')}
+                value={tokenFilterInput}
+                onChange={(e) => setTokenFilterInput(e.target.value)}
+                className='w-full sm:w-50 lg:w-60'
+              />
+            ),
+            filters: [
+              {
+                columnId: 'status',
+                title: t('Status'),
+                options: API_KEY_STATUS_OPTIONS,
+                singleSelect: true,
+              },
+            ],
+          }}
+          mobile={
+            <ApiKeysMobileList
+              table={table}
+              isLoading={isLoading}
+              now={now}
+              showPeriodUsage={Boolean(usageRange)}
+            />
+          }
+          getRowClassName={(row) =>
+            isDisabledApiKeyRow(row.original) ? DISABLED_ROW_DESKTOP : undefined
+          }
+          bulkActions={<DataTableBulkActions table={table} />}
+        />
       )}
-      skeletonKeyPrefix='api-keys-skeleton'
-      applyHeaderSize
-      toolbarProps={{
-        searchPlaceholder: t('Filter by name...'),
-        searchDebounceMs: 500,
-        additionalSearch: (
-          <Input
-            placeholder={t('Filter by API key...')}
-            aria-label={t('Filter by API key...')}
-            value={tokenFilterInput}
-            onChange={(e) => setTokenFilterInput(e.target.value)}
-            className='w-full sm:w-50 lg:w-60'
-          />
-        ),
-        filters: [
-          {
-            columnId: 'status',
-            title: t('Status'),
-            options: API_KEY_STATUS_OPTIONS,
-            singleSelect: true,
-          },
-        ],
-      }}
-      mobile={
-        <ApiKeysMobileList table={table} isLoading={isLoading} now={now} />
-      }
-      getRowClassName={(row) =>
-        isDisabledApiKeyRow(row.original) ? DISABLED_ROW_DESKTOP : undefined
-      }
-      bulkActions={<DataTableBulkActions table={table} />}
-    />
+    </div>
   )
 }

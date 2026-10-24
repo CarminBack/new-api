@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Period used quota": "Period used quota",
+    "Start date": "Start date",
+    "End date": "End date",
+    "Query usage": "Query usage",
+    "Clear dates": "Clear dates",
+    "Select both a start date and an end date.": "Select both a start date and an end date.",
+    "Select valid usage dates on or after 1970-01-01.": "Select valid usage dates on or after 1970-01-01.",
+    "The end date must be on or after the start date.": "The end date must be on or after the start date.",
+    "Applied range: {{start}} to {{end}}": "Applied range: {{start}} to {{end}}",
+    "All-time usage. Select dates to view period usage.": "All-time usage. Select dates to view period usage.",
+    "Dates use {{timezone}} and include the entire end date. Period usage is consumption minus refunds, based on retained logs.": "Dates use {{timezone}} and include the entire end date. Period usage is consumption minus refunds, based on retained logs.",
+    "Failed to load API key usage": "Failed to load API key usage",
+    "Usage could not be loaded. Retry or clear the date filter.": "Usage could not be loaded. Retry or clear the date filter.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

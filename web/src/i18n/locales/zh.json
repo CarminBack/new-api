@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Period used quota": "区间已用额度",
+    "Start date": "开始日期",
+    "End date": "结束日期",
+    "Query usage": "查询用量",
+    "Clear dates": "清除日期",
+    "Select both a start date and an end date.": "请选择开始日期和结束日期。",
+    "Select valid usage dates on or after 1970-01-01.": "请选择不早于 1970-01-01 的有效日期。",
+    "The end date must be on or after the start date.": "结束日期不能早于开始日期。",
+    "Applied range: {{start}} to {{end}}": "当前统计区间：{{start}} 至 {{end}}",
+    "All-time usage. Select dates to view period usage.": "当前显示累计用量，选择日期可查看区间已用额度。",
+    "Dates use {{timezone}} and include the entire end date. Period usage is consumption minus refunds, based on retained logs.": "按 {{timezone}} 时区统计，包含结束日期全天。区间额度为消费减去退款，仅统计已保留的日志。",
+    "Failed to load API key usage": "密钥用量加载失败",
+    "Usage could not be loaded. Retry or clear the date filter.": "未能加载用量，请重试或清除日期筛选。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

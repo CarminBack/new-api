@@ -33,6 +33,7 @@ import { useSystemConfigStore } from '@/stores/system-config-store'
 import { API_KEY_STATUSES } from '../constants'
 import type { ApiKey } from '../types'
 import { ApiKeyGroupCell } from './api-key-group-cell'
+import { ApiKeyPeriodUsage } from './api-key-period-usage'
 import { ApiKeyQuotaCell } from './api-key-quota-cell'
 import {
   ApiKeyActivityCell,
@@ -67,7 +68,10 @@ function useGroupRatios(): Record<string, number | string> {
   return data ?? EMPTY_GROUP_RATIOS
 }
 
-export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
+export function useApiKeysColumns(
+  now: number,
+  showPeriodUsage = false
+): ColumnDef<ApiKey>[] {
   const { t, i18n } = useTranslation()
   useSystemConfigStore((state) => state.config.currency)
   const { meta: currency } = getCurrencyDisplay()
@@ -148,6 +152,19 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         size: 260,
         minSize: 260,
       },
+      ...(showPeriodUsage
+        ? [
+            {
+              id: 'period_used_quota',
+              accessorKey: 'period_used_quota',
+              header: t('Period used quota'),
+              cell: ({ row }) => <ApiKeyPeriodUsage apiKey={row.original} />,
+              enableSorting: false,
+              enableHiding: false,
+              size: 180,
+            } satisfies ColumnDef<ApiKey>,
+          ]
+        : []),
       {
         accessorKey: 'group',
         header: t('Group'),
@@ -233,6 +250,15 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         meta: { pinned: 'right' as const },
       },
     ],
-    [t, quotaUnit, now, groupRatios, shouldReduceMotion, locale, justNowLabel]
+    [
+      t,
+      quotaUnit,
+      now,
+      groupRatios,
+      shouldReduceMotion,
+      locale,
+      justNowLabel,
+      showPeriodUsage,
+    ]
   )
 }

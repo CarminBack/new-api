@@ -29,6 +29,7 @@ export const apiKeySchema = z.object({
   status: z.number(), // 1: enabled, 2: disabled, 3: expired, 4: exhausted
   remain_quota: z.number(),
   used_quota: z.number(),
+  period_used_quota: z.number().nullish(),
   unlimited_quota: z.boolean(),
   expired_time: z.number(), // -1 for never expires
   created_time: z.number(),
@@ -60,7 +61,12 @@ export interface ApiResponse<T = unknown> {
   data?: T
 }
 
-export interface GetApiKeysParams {
+export interface ApiKeyUsageRange {
+  start_timestamp: number
+  end_timestamp: number
+}
+
+export interface GetApiKeysParams extends Partial<ApiKeyUsageRange> {
   p?: number
   size?: number
 }
@@ -76,7 +82,7 @@ export interface GetApiKeysResponse {
   }
 }
 
-export interface SearchApiKeysParams {
+export interface SearchApiKeysParams extends GetApiKeysParams {
   keyword?: string
   token?: string
   p?: number

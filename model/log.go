@@ -605,6 +605,34 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	return logs, total, err
 }
 
+// SumTokenQuotaInRange sums retained consume/refund logs in [start, end).
+// Refund logs store positive quota, so subtract them rather than counting them as consumption.
+// Restrict by both user and token IDs: names may change or be shared by multiple tokens.
+func SumTokenQuotaInRange(ctx context.Context, userID int, tokenIDs []int, start, end int64) (map[int]int64, error) {
+	usage := make(map[int]int64, len(tokenIDs))
+	if len(tokenIDs) == 0 {
+		return usage, nil
+	}
+	var rows []struct {
+		TokenID int   `gorm:"column:token_id"`
+		Quota   int64 `gorm:"column:quota"`
+	}
+	err := LOG_DB.WithContext(ctx).Model(&Log{}).
+		Select("token_id, SUM(CASE WHEN type = ? THEN -quota ELSE quota END) AS quota", LogTypeRefund).
+		Where("user_id = ? AND token_id IN ?", userID, tokenIDs).
+		Where("created_at >= ? AND created_at < ?", start, end).
+		Where("type IN ?", []int{LogTypeConsume, LogTypeRefund}).
+		Group("token_id").Scan(&rows).Error
+	if err != nil {
+		common.SysError("failed to query token range usage: " + err.Error())
+		return nil, errors.New("查询密钥区间用量失败")
+	}
+	for _, row := range rows {
+		usage[row.TokenID] = row.Quota
+	}
+	return usage, nil
+}
+
 type Stat struct {
 	Quota int `json:"quota"`
 	Rpm   int `json:"rpm"`

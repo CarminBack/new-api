@@ -43,7 +43,8 @@ type tokenRequest struct {
 
 type tokenResponse struct {
 	*model.Token
-	AutoGroups []string `json:"auto_groups"`
+	AutoGroups      []string `json:"auto_groups"`
+	PeriodUsedQuota *int64   `json:"period_used_quota,omitempty"`
 }
 
 func maxTokenQuota() int {
@@ -131,7 +132,46 @@ func setTokenAutoGroups(c *gin.Context, token *model.Token, groups []string) boo
 	return true
 }
 
+// parseTokenUsageRange uses a half-open interval so adjacent calendar days do not overlap.
+func parseTokenUsageRange(c *gin.Context) (start, end int64, err error) {
+	query := c.Request.URL.Query()
+	if !query.Has("start_timestamp") && !query.Has("end_timestamp") {
+		return 0, 0, nil
+	}
+	start, startErr := strconv.ParseInt(query.Get("start_timestamp"), 10, 64)
+	end, endErr := strconv.ParseInt(query.Get("end_timestamp"), 10, 64)
+	if startErr != nil || endErr != nil || start < 0 || end <= start {
+		return 0, 0, fmt.Errorf("invalid usage date range: provide start_timestamp and end_timestamp with 0 <= start < end")
+	}
+	return start, end, nil
+}
+
+func buildTokenResponsesWithUsage(c *gin.Context, tokens []*model.Token, start, end int64) ([]*tokenResponse, error) {
+	items := buildMaskedTokenResponses(tokens)
+	if end == 0 {
+		return items, nil
+	}
+	ids := make([]int, 0, len(tokens))
+	for _, token := range tokens {
+		ids = append(ids, token.Id)
+	}
+	usage, err := model.SumTokenQuotaInRange(c.Request.Context(), c.GetInt("id"), ids, start, end)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		quota := usage[item.Id]
+		item.PeriodUsedQuota = &quota
+	}
+	return items, nil
+}
+
 func GetAllTokens(c *gin.Context) {
+	start, end, err := parseTokenUsageRange(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	userId := c.GetInt("id")
 	pageInfo := common.GetPageQuery(c)
 	tokens, err := model.GetAllUserTokens(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
@@ -139,13 +179,23 @@ func GetAllTokens(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	items, err := buildTokenResponsesWithUsage(c, tokens, start, end)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	total, _ := model.CountUserTokens(userId)
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	pageInfo.SetItems(items)
 	common.ApiSuccess(c, pageInfo)
 }
 
 func SearchTokens(c *gin.Context) {
+	start, end, err := parseTokenUsageRange(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	userId := c.GetInt("id")
 	keyword := c.Query("keyword")
 	token := c.Query("token")
@@ -157,8 +207,13 @@ func SearchTokens(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	items, err := buildTokenResponsesWithUsage(c, tokens, start, end)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	pageInfo.SetItems(items)
 	common.ApiSuccess(c, pageInfo)
 }
 
