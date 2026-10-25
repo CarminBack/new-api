@@ -54,7 +54,44 @@ func TestJunliVideoContract(t *testing.T) {
 		assert.NotContains(t, outbound, "reference_mode")
 		assert.NotContains(t, outbound, "references")
 		facts := call("extractUsage", map[string]any{"requestBody": body})
-		assert.Equal(t, map[string]any{"seconds": float64(8), "videos": float64(1), "video_input": "none"}, facts)
+		assert.Equal(t, map[string]any{"seconds": float64(8), "videos": float64(1), "video_input": "none", "resolution": "720p"}, facts)
+	})
+	t.Run("resolution priced model bills the selected tier", func(t *testing.T) {
+		usage := func(patch map[string]any) (map[string]any, error) {
+			req := base()
+			for key, value := range patch {
+				if value == nil {
+					delete(req, key)
+				} else {
+					req[key] = value
+				}
+			}
+			body, decodeErr := decode(req)
+			require.NoError(t, decodeErr)
+			value, callErr := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{"requestBody": body})
+			if callErr != nil {
+				return nil, callErr
+			}
+			return decodePluginMap(t, value), nil
+		}
+		facts, err := usage(map[string]any{"resolution": "480p"})
+		require.NoError(t, err)
+		assert.Equal(t, "480p", facts["resolution"])
+		facts, err = usage(map[string]any{"resolution": nil, "size": "1280x720"})
+		require.NoError(t, err)
+		assert.Equal(t, "720p", facts["resolution"], "size alone selects the tier by its short side")
+		facts, err = usage(map[string]any{"resolution": "720p", "size": "720x1280"})
+		require.NoError(t, err)
+		assert.Equal(t, "720p", facts["resolution"])
+		_, err = usage(map[string]any{"resolution": "480p", "size": "1280x720"})
+		require.ErrorContains(t, err, "same resolution tier")
+		_, err = usage(map[string]any{"resolution": nil})
+		require.ErrorContains(t, err, "provide resolution")
+		_, err = usage(map[string]any{"resolution": "1080p"})
+		require.ErrorContains(t, err, "provide resolution")
+		other, decodeErr := decode(map[string]any{"model": "grok-video", "prompt": "waves", "seconds": 6})
+		require.NoError(t, decodeErr)
+		assert.Equal(t, map[string]any{"seconds": float64(6), "videos": float64(1), "video_input": "none"}, call("extractUsage", map[string]any{"requestBody": other}), "other models keep the flat usage schema")
 	})
 	t.Run("ordinary references use asset mode", func(t *testing.T) {
 		req := base()

@@ -19,24 +19,41 @@ const CAPABILITIES = {
 };
 const MODELS = Object.keys(CAPABILITIES);
 
+const USAGE = {
+  seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
+  videos: { type: "number", unit: "count", description: { en: "Video generation unit price", zh: "视频生成单价" } },
+  video_input: {
+    enum: ["none", "video"], description: { en: "Reference video input", zh: "参考视频输入" },
+    enumLabels: { none: { en: "No reference video", zh: "无参考视频" }, video: { en: "With reference video", zh: "有参考视频" } },
+  },
+};
+// Junli prices these models per second by resolution (seedance-2.5: 480p and 720p differ), so billing needs the tier.
+const RESOLUTION_PRICED = ["seedance-2.5"];
+const RESOLUTION_USAGE = Object.assign({}, USAGE, {
+  resolution: {
+    enum: ["480p", "720p"], description: { en: "Output resolution", zh: "输出分辨率" },
+    enumLabels: { "480p": { en: "480p", zh: "480p" }, "720p": { en: "720p", zh: "720p" } },
+  },
+});
+
 export const meta = {
   apiVersion: 1, key: "junli", name: "Junli Studio Video", icon: "text:JL",
   description: { en: "Junli Studio video generation with structured reference assets", zh: "Junli Studio 视频生成与结构化参考素材" },
-  version: "1.0.0", author: { name: "Carmin" }, baseUrl: "https://y.junlistudio.com",
+  version: "1.1.0", author: { name: "Carmin" }, baseUrl: "https://y.junlistudio.com",
   website: "https://y.junlistudio.com/docs/video",
   models: MODELS,
   fetchMode: "per_task",
   modelDiscovery: "openai",
   videoCapabilities: CAPABILITIES,
-  usageSchema: {
-    seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
-    videos: { type: "number", unit: "count", description: { en: "Video generation unit price", zh: "视频生成单价" } },
-    video_input: {
-      enum: ["none", "video"], description: { en: "Reference video input", zh: "参考视频输入" },
-      enumLabels: { none: { en: "No reference video", zh: "无参考视频" }, video: { en: "With reference video", zh: "有参考视频" } },
-    },
-  },
+  usageSchema: USAGE,
   usageExamples: [{ label: "8s video", facts: { seconds: 8, videos: 1, video_input: "none" } }],
+  usageProfiles: [{
+    models: RESOLUTION_PRICED, schema: RESOLUTION_USAGE,
+    examples: [
+      { label: "480p · 8s video", facts: { seconds: 8, videos: 1, video_input: "none", resolution: "480p" } },
+      { label: "720p · 8s video", facts: { seconds: 8, videos: 1, video_input: "none", resolution: "720p" } },
+    ],
+  }],
   protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
 };
 
@@ -188,11 +205,26 @@ export function parseTaskResult(_ctx, body) {
   if (status === "FAILURE") result.reason = failureReason(body);
   return result;
 }
+// The tier a resolution-priced model is billed at. Junli lets size win over resolution, so a conflict is rejected
+// instead of guessing which one the supplier will charge.
+function billedResolution(body) {
+  let tier = body.resolution;
+  if (body.size !== undefined) {
+    const sides = body.size.split("x").map(Number);
+    const fromSize = Math.min(sides[0], sides[1]) + "p";
+    if (tier !== undefined && tier !== fromSize) throw new Error("size and resolution must select the same resolution tier");
+    tier = fromSize;
+  }
+  if (tier !== "480p" && tier !== "720p") throw new Error("this model is billed by resolution; provide resolution 480p or 720p");
+  return tier;
+}
 export function extractUsage(ctx) {
   if (ctx.usagePurpose === "billing_ratios") return null;
   const body = normalizedRequest(ctx.requestBody, ctx.upstreamModel);
   if (body.duration === undefined) throw new Error("provide duration or seconds explicitly so billing never guesses the model default");
-  return { seconds: body.duration, videos: 1, video_input: (body.references || []).some(function (ref) { return ref.type === "video"; }) ? "video" : "none" };
+  const facts = { seconds: body.duration, videos: 1, video_input: (body.references || []).some(function (ref) { return ref.type === "video"; }) ? "video" : "none" };
+  if (RESOLUTION_PRICED.includes(body.model)) facts.resolution = billedResolution(body);
+  return facts;
 }
 export function extractUsageOnComplete(_ctx, result, body) {
   if (!result || result.status !== "SUCCESS" || !body) return null;
