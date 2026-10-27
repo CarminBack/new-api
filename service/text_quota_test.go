@@ -29,6 +29,42 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestCalculateTextQuotaSummaryBillsCacheCreationInputTokens(t *testing.T) {
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	relayInfo := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatOpenAI,
+		OriginModelName: "cache-creation-input",
+		PriceData: hosttypes.PriceData{
+			ModelRatio: 1, CompletionRatio: 1, CacheRatio: 0.1, CacheCreationRatio: 1.25,
+			GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+	for _, tc := range []struct {
+		name                    string
+		details                 string
+		wantCreation, wantQuota int
+	}{
+		{"creation scalar", `"cached_tokens":1200,"cache_creation_input_tokens":300`, 300, 525},
+		{"missing creation field", `"cached_tokens":1200`, 0, 450},
+		{"duplicate reports take maximum", `"cached_tokens":1200,"cache_write_tokens":100,"cache_creation_input_tokens":300`, 300, 525},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var usage dto.Usage
+			require.NoError(t, common.Unmarshal([]byte(`{"prompt_tokens":1510,"completion_tokens":20,"total_tokens":1530,"prompt_tokens_details":{`+tc.details+`}}`), &usage))
+			summary := calculateTextQuotaSummary(ctx, relayInfo, &usage)
+			assert.Equal(t, tc.wantCreation, summary.CacheCreationTokens)
+			assert.Zero(t, summary.CacheCreationTokens5m)
+			assert.Zero(t, summary.CacheCreationTokens1h)
+			assert.Equal(t, tc.wantQuota, summary.Quota)
+			params := BuildTieredTokenParams(&usage, false, billingexpr.UsedVars(`tier("base", p + c + cr * 0.1 + cc * 1.25)`))
+			assert.Equal(t, float64(tc.wantCreation), params.CC)
+			assert.Equal(t, float64(1510), params.Len)
+		})
+	}
+}
+
 // The configured DSNs must point at isolated test databases. Each dialect runs
 // the real reservation, settlement and log paths with the same billing cases.
 func TestFixedPriceBillingDatabaseMatrix(t *testing.T) {

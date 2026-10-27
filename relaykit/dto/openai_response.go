@@ -271,6 +271,9 @@ type InputTokenDetails struct {
 	TextTokens       int `json:"text_tokens"`
 	AudioTokens      int `json:"audio_tokens"`
 	ImageTokens      int `json:"image_tokens"`
+	// CacheCreationInputTokens is included in prompt_tokens; alternate cache-write
+	// reports are combined by maximum, not added, to prevent double billing.
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 }
 
 // CachedTokenDetails describes subsets of cached_tokens. Pointers distinguish
@@ -308,13 +311,12 @@ func (d InputTokenDetails) Clone() InputTokenDetails {
 }
 
 // CacheCreationTokensTotal returns the cache-write token count regardless of
-// which field the upstream reported it in: Claude-derived conversions populate
-// CachedCreationTokens while OpenAI reports cache_write_tokens natively. Both
-// are billed at the cache-creation price; when both are present the larger
-// value wins so the same tokens are never double-counted. Negative upstream
+// which field the upstream reported it in: cached_creation_tokens,
+// cache_write_tokens, or cache_creation_input_tokens. When multiple reports are
+// present, the largest value wins so tokens are never double-counted. Negative upstream
 // values are clamped to zero so they can never lower a charge.
 func (d InputTokenDetails) CacheCreationTokensTotal() int {
-	total := max(d.CacheWriteTokens, d.CachedCreationTokens)
+	total := max(d.CacheWriteTokens, d.CachedCreationTokens, d.CacheCreationInputTokens)
 	if total < 0 {
 		return 0
 	}

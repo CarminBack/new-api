@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 )
 
@@ -34,6 +35,9 @@ func SetUpLogger(server *gin.Engine) {
 		if strings.HasPrefix(path, "/api/oauth/") || strings.HasPrefix(path, "/oauth/") ||
 			strings.HasPrefix(path, "/api/image-generations/") || strings.HasPrefix(path, "/api/reference-media/") {
 			path, _, _ = strings.Cut(path, "?")
+		} else if param.Request.URL.RawQuery != "" {
+			query := param.Request.URL.Query().Encode()
+			path = param.Request.URL.EscapedPath() + relaycommon.SanitizeURLForLog("?"+query)
 		}
 		return fmt.Sprintf("[GIN] %s | %s | %s | %3d | %13v | %15s | %7s %s\n",
 			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
