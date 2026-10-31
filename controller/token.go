@@ -378,12 +378,33 @@ func tokenVideoPriceLabel(item model.Pricing, groupRatio float64) string {
 	unitPrice := item.ModelPrice
 	usageKeys := billingexpr.UsedUsageKeys(item.BillingExpr)
 	// Task billing evaluates the usage expression, so show the cost of one unit from the
-	// same expression; fall back to ModelPrice when it depends on more than one usage fact.
-	if len(usageKeys) == 1 {
+	// same expression. Only the unit fact is set: optional facts such as video_input stay
+	// absent and select the plain-request branch, as on a request without references.
+	// An expression needing any other numeric fact fails and falls back to ModelPrice.
+	unitKey := ""
+	if usageKeys["seconds"] {
+		unitKey = "seconds"
+	} else if usageKeys["videos"] {
+		unitKey = "videos"
+	} else if len(usageKeys) == 1 {
 		for key := range usageKeys {
-			if cost, _, err := billingexpr.RunExprWithRequest(item.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: map[string]any{key: 1}}); err == nil {
-				unitPrice = cost
-			}
+			unitKey = key
+		}
+	}
+	evaluate := func(usage map[string]any) (decimal.Decimal, bool) {
+		cost, _, err := billingexpr.RunExprWithRequest(item.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: usage})
+		if err != nil || cost <= 0 {
+			return decimal.Zero, false
+		}
+		return decimal.NewFromFloat(cost), true
+	}
+	format := func(price decimal.Decimal) string {
+		price = price.Mul(decimal.NewFromFloat(groupRatio))
+		return strings.TrimRight(strings.TrimRight(price.StringFixed(4), "0"), ".")
+	}
+	if unitKey != "" {
+		if cost, ok := evaluate(map[string]any{unitKey: 1}); ok {
+			unitPrice = cost.InexactFloat64()
 		}
 	}
 	price := decimal.NewFromFloat(unitPrice).Mul(decimal.NewFromFloat(groupRatio))
@@ -391,11 +412,44 @@ func tokenVideoPriceLabel(item model.Pricing, groupRatio float64) string {
 		return "按量计费"
 	}
 	value := strings.TrimRight(strings.TrimRight(price.StringFixed(4), "0"), ".")
-	if _, ok := usageKeys["seconds"]; ok {
-		return "$" + value + "/秒"
+	suffix := ""
+	switch {
+	case unitKey == "seconds":
+		suffix = "/秒"
+	case unitKey == "videos":
+		suffix = "/条"
 	}
-	if _, ok := usageKeys["videos"]; ok {
-		return "$" + value + "/条"
+	if suffix != "" {
+		label := "$" + value + suffix
+		// Reference-video requests may bill at a different rate; show it when the
+		// expression branches on video_input, plus any per-reference-second charge.
+		if usageKeys["video_input"] {
+			usage := map[string]any{unitKey: 1, "video_input": "video"}
+			if usageKeys["reference_seconds"] {
+				usage["reference_seconds"] = 0
+			}
+			if cost, ok := evaluate(usage); ok {
+				referenceLabel := ""
+				if !cost.Equal(decimal.NewFromFloat(unitPrice)) {
+					referenceLabel = "$" + format(cost) + suffix
+				}
+				if usageKeys["reference_seconds"] {
+					usage["reference_seconds"] = 1
+					if withReference, ok := evaluate(usage); ok && withReference.GreaterThan(cost) {
+						extra := "$" + format(withReference.Sub(cost)) + "/参考秒"
+						if referenceLabel == "" {
+							referenceLabel = "另加 " + extra
+						} else {
+							referenceLabel += " + " + extra
+						}
+					}
+				}
+				if referenceLabel != "" {
+					label += "，参考视频 " + referenceLabel
+				}
+			}
+		}
+		return label
 	}
 	switch item.QuotaType {
 	case 2:

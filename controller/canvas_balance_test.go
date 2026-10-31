@@ -126,3 +126,24 @@ func TestTokenVideoPriceLabelSupportsPerVideoPricing(t *testing.T) {
 		t.Fatalf("unexpected label %q", got)
 	}
 }
+
+func TestTokenVideoPriceLabelHandlesReferenceVideoBranches(t *testing.T) {
+	// Per-second models branching on video_input used to render "按量计费".
+	item := model.Pricing{QuotaType: 1, BillingExpr: `u("video_input") == "video" ? tier("with_video", u("seconds") * 1.5) : tier("base", u("seconds") * 1.2)`}
+	assert.Equal(t, "$1.2/秒，参考视频 $1.5/秒", tokenVideoPriceLabel(item, 1))
+	assert.Equal(t, "$2.4/秒，参考视频 $3/秒", tokenVideoPriceLabel(item, 2))
+
+	// Equal rates need no second price.
+	item.BillingExpr = `u("video_input") == "video" ? tier("with_video", u("seconds") * 0.3) : tier("base", u("seconds") * 0.3)`
+	assert.Equal(t, "$0.3/秒", tokenVideoPriceLabel(item, 1))
+
+	// Reference seconds are billed on top of the output seconds.
+	item.BillingExpr = `u("video_input") == "video" ? tier("with_video", u("seconds") * 0.7 + u("reference_seconds") * 0.7) : tier("base", u("seconds") * 0.7)`
+	assert.Equal(t, "$0.7/秒，参考视频 另加 $0.7/参考秒", tokenVideoPriceLabel(item, 1))
+	item.BillingExpr = `u("video_input") == "video" ? tier("with_video", u("seconds") * 0.8 + u("reference_seconds") * 0.5) : tier("base", u("seconds") * 0.7)`
+	assert.Equal(t, "$0.7/秒，参考视频 $0.8/秒 + $0.5/参考秒", tokenVideoPriceLabel(item, 1))
+
+	// A missing unit price still falls back honestly.
+	item = model.Pricing{QuotaType: 1, BillingExpr: `tier("base", u("frames") * u("steps") * 2)`}
+	assert.Equal(t, "按量计费", tokenVideoPriceLabel(item, 1))
+}
