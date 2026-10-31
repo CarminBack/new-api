@@ -91,6 +91,14 @@ function wholeSeconds(raw) {
   }
   return Number(raw);
 }
+function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+// "1280x720" means a 16:9 request at the 720p tier (short side), the same reading the other video plugins use.
+function sizeTraits(raw) {
+  const match = /^([1-9][0-9]{0,4})x([1-9][0-9]{0,4})$/i.exec(trimmed(raw));
+  if (!match) throw new Error("size must look like 1280x720");
+  const width = Number(match[1]), height = Number(match[2]), divisor = gcd(width, height);
+  return { ratio: width / divisor + ":" + height / divisor, resolution: Math.min(width, height) + "p" };
+}
 function mediaRef(ref) {
   if (!ref || typeof ref !== "object" || Array.isArray(ref)) throw new Error("each reference must be an object");
   if (!["image", "video", "audio"].includes(ref.type)) throw new Error("reference type must be image, video or audio");
@@ -111,14 +119,13 @@ function mediaRef(ref) {
   return item;
 }
 // Normalizes unified and legacy request bodies. Output is itself valid input, so decode, billing and submit agree.
-// Yeepay says not to combine size with ratio/resolution, so size is rejected rather than silently reinterpreted.
+// Yeepay does not accept size next to ratio/resolution, so size is translated into them here and never sent.
 function normalizedRequest(req, model) {
   if (!req || typeof req !== "object" || Array.isArray(req)) throw new Error("request body must be an object");
   const body = { model: trimmed(model) || trimmed(req.model), prompt: trimmed(req.prompt) };
   if (!body.model) throw new Error("model is required");
   if (!body.prompt) throw new Error("prompt is required");
   if (req.n !== undefined && req.n !== 1 && req.n !== "1") throw new Error("only n=1 is supported");
-  if (req.size !== undefined) throw new Error("size is not supported; use aspect_ratio and resolution");
   for (const key of ["duration", "seconds"]) {
     if (req[key] === undefined) continue;
     const value = wholeSeconds(req[key]);
@@ -136,6 +143,13 @@ function normalizedRequest(req, model) {
     const resolution = trimmed(req.resolution);
     if (!/^(?:[1-9][0-9]*p|[1-9]k)$/i.test(resolution)) throw new Error("resolution must be a tier such as 720p");
     body.resolution = resolution;
+  }
+  if (req.size !== undefined) {
+    const traits = sizeTraits(req.size);
+    if (body.ratio && body.ratio !== traits.ratio) throw new Error("size conflicts with aspect_ratio");
+    if (body.resolution && body.resolution.toLowerCase() !== traits.resolution) throw new Error("size conflicts with resolution");
+    body.ratio = traits.ratio;
+    body.resolution = body.resolution || traits.resolution;
   }
   for (const key of ["quality", "negative_prompt"]) {
     if (req[key] === undefined) continue;

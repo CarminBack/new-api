@@ -73,6 +73,25 @@ func TestYeepayVideoContract(t *testing.T) {
 		assert.Equal(t, "https://cdn.example/last.png", outbound["end_frame"])
 		assert.NotContains(t, outbound, "images")
 	})
+	t.Run("size becomes ratio and resolution and is never sent", func(t *testing.T) {
+		req := map[string]any{"model": "Xseadanco2.0", "prompt": "waves", "seconds": 8, "size": "1280x720"}
+		body, decodeErr := decode(req)
+		require.NoError(t, decodeErr)
+		outbound := submit(body)
+		assert.Equal(t, "16:9", outbound["ratio"])
+		assert.Equal(t, "720p", outbound["resolution"])
+		assert.NotContains(t, outbound, "size")
+		req["size"] = "720x1280"
+		body, decodeErr = decode(req)
+		require.NoError(t, decodeErr)
+		outbound = submit(body)
+		assert.Equal(t, "9:16", outbound["ratio"])
+		assert.Equal(t, "720p", outbound["resolution"], "the short side names the tier")
+		req["resolution"] = "720P"
+		req["aspect_ratio"] = "9:16"
+		_, decodeErr = decode(req)
+		require.NoError(t, decodeErr, "a matching explicit ratio and resolution is not a conflict")
+	})
 	t.Run("optional fields are forwarded only when supplied", func(t *testing.T) {
 		req := base("Xseadanco2.0")
 		req["generate_audio"] = false
@@ -90,7 +109,9 @@ func TestYeepayVideoContract(t *testing.T) {
 			patch map[string]any
 			want  string
 		}{
-			{"size", map[string]any{"size": "1280x720"}, "size is not supported"},
+			{"malformed size", map[string]any{"size": "big"}, "size must look like"},
+			{"size conflicts with ratio", map[string]any{"size": "720x1280"}, "conflicts with aspect_ratio"},
+			{"size conflicts with resolution", map[string]any{"size": "1920x1080"}, "conflicts with resolution"},
 			{"plain http media", map[string]any{"references": []any{ref("image", "reference", "http://cdn.example/a.png")}}, "HTTPS"},
 			{"file url", map[string]any{"references": []any{ref("image", "reference", "file:///etc/passwd")}}, "HTTPS"},
 			{"last without first", map[string]any{"references": []any{ref("image", "last_frame", "https://cdn.example/a.png")}}, "first_frame"},
