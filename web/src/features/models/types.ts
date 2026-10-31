@@ -96,6 +96,8 @@ export interface PrefillGroup {
 export interface GetModelsParams {
   square_state?: ModelSquareState
   include_channel_models?: boolean
+  // Only names a channel exposes and can bill; hides upstream names behind aliases.
+  channel_scope?: boolean
   p?: number
   page_size?: number
   vendor?: string // vendor ID to filter by
@@ -109,6 +111,8 @@ export interface GetModelsParams {
 export interface SearchModelsParams {
   square_state?: ModelSquareState
   include_channel_models?: boolean
+  // Only names a channel exposes and can bill; hides upstream names behind aliases.
+  channel_scope?: boolean
   keyword?: string
   vendor?: string // vendor ID to filter by
   status?: string // filter by status

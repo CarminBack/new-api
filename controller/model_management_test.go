@@ -490,6 +490,120 @@ export function parseTaskResult() { return {}; }
 			}
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
 
+			t.Run("channel_scope_lists_only_exposed_priced_names", func(t *testing.T) {
+				// Prices: scope-priced and scope-upstream have their own; the alias
+				// has none and must inherit its mapping tail's price, like relay.
+				require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"scope-priced":0.1,"scope-upstream":0.2,"scope-direct-target":0.3,"scope-orphan":0.4,"scope-disabled-channel":0.5}`))
+				require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"scope-ratio":1.5}`))
+				config.UpdateConfigFromMap(config.GlobalConfig.Get("billing_setting"), map[string]string{
+					"billing_mode":        `{"scope-expr":"tiered_expr","scope-empty-expr":"tiered_expr"}`,
+					"billing_expr":        `{"scope-expr":"tier(\"base\", u(\"videos\") * 1)"}`,
+					"plugin_billing_expr": `{"model-management-task::scope-plugin":"tier(\"base\", u(\"videos\") * 1)"}`,
+				})
+				mapping := `{"scope-alias":"scope-upstream","scope-chain":"scope-middle","scope-middle":"scope-upstream","scope-unpriced-alias":"scope-unpriced-target","scope-cycle-a":"scope-cycle-b","scope-cycle-b":"scope-cycle-a","scope-to-direct":"scope-direct-target"}`
+				active := model.Channel{Name: "Scope active", Type: 1, Key: "fixture", Group: "default", Status: common.ChannelStatusEnabled, ModelMapping: &mapping,
+					Models: "scope-priced,scope-ratio,scope-expr,scope-empty-expr,scope-plugin,scope-unpriced,scope-alias,scope-chain,scope-unpriced-alias,scope-cycle-a,scope-to-direct,scope-direct-target"}
+				disabled := model.Channel{Name: "Scope disabled", Type: 1, Key: "fixture", Group: "default", Status: common.ChannelStatusManuallyDisabled,
+					Models: "scope-disabled-channel"}
+				for _, channel := range []*model.Channel{&active, &disabled} {
+					require.NoError(t, channel.Insert())
+				}
+				// Metadata-only records that no channel exposes must disappear; a
+				// name-rule policy row must stay reachable for editing.
+				records := []model.Model{
+					{ModelName: "scope-orphan", Status: 1},
+					{ModelName: "scope-priced", Status: 1, Description: "kept metadata"},
+					{ModelName: "scope-rule-", NameRule: model.NameRulePrefix, Status: 1},
+				}
+				ids := make([]int, 0, len(records))
+				for i := range records {
+					require.NoError(t, records[i].Insert())
+					ids = append(ids, records[i].Id)
+				}
+				t.Cleanup(func() {
+					require.NoError(t, db.Where("channel_id IN ?", []int{active.Id, disabled.Id}).Delete(&model.Ability{}).Error)
+					require.NoError(t, db.Where("id IN ?", []int{active.Id, disabled.Id}).Delete(&model.Channel{}).Error)
+					require.NoError(t, db.Unscoped().Where("id IN ?", ids).Delete(&model.Model{}).Error)
+				})
+				type listResponse struct {
+					Success bool
+					Message string
+					Data    struct {
+						Items []model.Model
+						Total int
+					}
+				}
+				namesOf := func(response listResponse) []string {
+					names := []string{}
+					for _, row := range response.Data.Items {
+						names = append(names, row.ModelName)
+					}
+					return names
+				}
+				expected := []string{
+					"scope-priced", "scope-ratio", "scope-expr", "scope-plugin",
+					"scope-alias", "scope-chain", "scope-to-direct", "scope-direct-target",
+					"scope-disabled-channel", "scope-rule-",
+				}
+
+				var scoped listResponse
+				modelManagementRequest(t, SearchModelsMeta, "GET", "/api/models/search?include_channel_models=true&channel_scope=true&keyword=scope-&page_size=100", nil, &scoped)
+				require.True(t, scoped.Success, scoped.Message)
+				assert.ElementsMatch(t, expected, namesOf(scoped))
+				assert.Equal(t, len(expected), scoped.Data.Total)
+				for _, row := range scoped.Data.Items {
+					if row.ModelName == "scope-priced" {
+						assert.Equal(t, "kept metadata", row.Description, "scope must not drop existing metadata")
+					}
+				}
+				// Hidden: upstream names reached only through an alias, unpriced
+				// names (an empty tiered expression is not a price), names whose
+				// alias tail is unpriced, cyclic mappings, and channel-less records.
+				for _, hidden := range []string{"scope-upstream", "scope-middle", "scope-unpriced-target", "scope-unpriced", "scope-empty-expr", "scope-unpriced-alias", "scope-cycle-a", "scope-orphan"} {
+					assert.NotContains(t, namesOf(scoped), hidden)
+				}
+
+				t.Run("pagination_counts_after_filtering", func(t *testing.T) {
+					collected := []string{}
+					for page := 1; page <= (len(expected)+2)/3; page++ {
+						var response listResponse
+						modelManagementRequest(t, SearchModelsMeta, "GET", fmt.Sprintf("/api/models/search?include_channel_models=true&channel_scope=true&keyword=scope-&page_size=3&p=%d", page), nil, &response)
+						require.True(t, response.Success, response.Message)
+						assert.Equal(t, len(expected), response.Data.Total)
+						assert.LessOrEqual(t, len(response.Data.Items), 3)
+						collected = append(collected, namesOf(response)...)
+					}
+					assert.ElementsMatch(t, expected, collected)
+				})
+
+				t.Run("combines_with_square_state", func(t *testing.T) {
+					var response listResponse
+					modelManagementRequest(t, SearchModelsMeta, "GET", "/api/models/search?include_channel_models=true&channel_scope=true&keyword=scope-&square_state=unavailable&page_size=100", nil, &response)
+					require.True(t, response.Success, response.Message)
+					assert.Contains(t, namesOf(response), "scope-disabled-channel")
+					assert.NotContains(t, namesOf(response), "scope-orphan")
+					for _, row := range response.Data.Items {
+						assert.Equal(t, model.ModelSquareUnavailable, row.SquareState, row.ModelName)
+					}
+				})
+
+				t.Run("omitted_parameter_keeps_previous_listing", func(t *testing.T) {
+					var response listResponse
+					modelManagementRequest(t, SearchModelsMeta, "GET", "/api/models/search?include_channel_models=true&keyword=scope-&page_size=100", nil, &response)
+					require.True(t, response.Success, response.Message)
+					for _, name := range []string{"scope-orphan", "scope-unpriced", "scope-cycle-a"} {
+						assert.Contains(t, namesOf(response), name)
+					}
+				})
+
+				t.Run("rejects_invalid_pagination", func(t *testing.T) {
+					var response listResponse
+					recorder := modelManagementRequest(t, SearchModelsMeta, "GET", "/api/models/search?include_channel_models=true&channel_scope=true&page_size=-1", nil, &response)
+					assert.Equal(t, http.StatusBadRequest, recorder.Code)
+					assert.False(t, response.Success)
+				})
+			})
+
 			t.Run("square_states_follow_catalog_policy", func(t *testing.T) {
 				records := []model.Model{
 					{ModelName: "square-visible", Status: 1},

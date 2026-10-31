@@ -131,6 +131,7 @@ export function ModelsTable() {
   const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: modelsQueryKeys.list({
       include_channel_models: true,
+      channel_scope: true,
       keyword: globalFilter,
       vendor: activeVendorFilter,
       status: statusFilterValue,
@@ -144,6 +145,7 @@ export function ModelsTable() {
         return requireServerSuccess(
           await searchModels({
             include_channel_models: true,
+            channel_scope: true,
             keyword: globalFilter,
             vendor: activeVendorFilter,
             status: statusFilterValue,
@@ -157,6 +159,7 @@ export function ModelsTable() {
       return requireServerSuccess(
         await getModels({
           include_channel_models: true,
+          channel_scope: true,
           p: pagination.pageIndex + 1,
           page_size: pagination.pageSize,
         })

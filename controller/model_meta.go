@@ -32,12 +32,16 @@ func listModelsMeta(c *gin.Context, keyword, vendor string) {
 	}
 
 	pageInfo := common.GetPageQuery(c)
-	if squareState != "" && (pageInfo.GetPage() < 1 || pageInfo.GetPageSize() < 1) {
+	// channel_scope narrows the management list to names channels expose and
+	// can bill, hiding upstream names that are reachable only through an alias.
+	channelScope := c.Query("channel_scope") == "true"
+	filterBeforePaging := squareState != "" || channelScope
+	if filterBeforePaging && (pageInfo.GetPage() < 1 || pageInfo.GetPageSize() < 1) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid pagination"})
 		return
 	}
 	offset, limit := pageInfo.GetStartIdx(), pageInfo.GetPageSize()
-	if squareState != "" {
+	if filterBeforePaging {
 		// Visibility depends on live channels and metadata rules. Filter the
 		// enriched candidate set before counting and paginating the results.
 		offset, limit = 0, -1
@@ -55,12 +59,28 @@ func listModelsMeta(c *gin.Context, keyword, vendor string) {
 		common.ApiError(c, err)
 		return
 	}
-	if squareState != "" {
+	if filterBeforePaging {
+		var scope *model.ChannelModelScope
+		var pluginExprModels map[string]struct{}
+		if channelScope {
+			scope, err = model.BuildChannelModelScope()
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			pluginExprModels = model.PluginBillingExprModels()
+		}
 		filtered := make([]*model.Model, 0, len(modelsMeta))
 		for _, metadata := range modelsMeta {
-			if metadata.SquareState == squareState {
-				filtered = append(filtered, metadata)
+			if squareState != "" && metadata.SquareState != squareState {
+				continue
 			}
+			// Name-rule rows are policies, not models; keep them reachable so
+			// they can still be edited or removed.
+			if scope != nil && metadata.NameRule == model.NameRuleExact && !scope.Includes(metadata.ModelName, pluginExprModels) {
+				continue
+			}
+			filtered = append(filtered, metadata)
 		}
 		total = int64(len(filtered))
 		start := len(filtered)
