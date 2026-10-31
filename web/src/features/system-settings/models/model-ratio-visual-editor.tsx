@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -48,6 +48,15 @@ import {
   useDataTable,
 } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { getChannels } from '@/features/channels/api'
 import { useModelPricing } from '@/features/model-pricing/api'
 import {
   applyPriceSyncSelections,
@@ -86,6 +95,16 @@ import {
   pickOfficialPrices,
   type OfficialPriceSelection,
 } from './upstream-ratio-sync-helpers'
+import {
+  buildVideoChannelOptions,
+  VIDEO_CHANNEL_GROUP,
+  videoChannelMissingModels,
+} from './video-channel-filter'
+
+const ALL_VIDEO_CHANNELS = 'all'
+// The channel list API caps page_size at 100, which comfortably covers the
+// Video group; a larger group would only lose options, never misfilter.
+const VIDEO_CHANNEL_PAGE_SIZE = 100
 
 type ModelRatioVisualEditorProps = {
   savedModelPrice: string
@@ -174,6 +193,30 @@ const ModelRatioVisualEditorComponent = forwardRef<
     Boolean(editData?.name)
   )
   const [sorting, setSorting] = useState<SortingState>([])
+  const [videoChannelId, setVideoChannelId] = useState(ALL_VIDEO_CHANNELS)
+  // Only the full pricing list offers the channel filter; the unset view is
+  // already scoped to candidate models.
+  const videoChannelsQuery = useQuery({
+    queryKey: ['channels', 'pricing-video-filter'],
+    queryFn: () =>
+      getChannels({
+        group: VIDEO_CHANNEL_GROUP,
+        page_size: VIDEO_CHANNEL_PAGE_SIZE,
+        id_sort: true,
+      }),
+    enabled: filterMode === 'all',
+    staleTime: 60_000,
+  })
+  const videoChannelOptions = useMemo(
+    () => buildVideoChannelOptions(videoChannelsQuery.data?.data?.items ?? []),
+    [videoChannelsQuery.data]
+  )
+  const selectedVideoChannel =
+    filterMode === 'all'
+      ? videoChannelOptions.find(
+          (option) => String(option.id) === videoChannelId
+        )
+      : undefined
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
@@ -325,6 +368,33 @@ const ModelRatioVisualEditorComponent = forwardRef<
     pluginBillingExpr,
   ])
 
+  // Narrow to one Video channel's billable names. Channel models with no saved
+  // price are added as plain rows so they can be priced from here directly.
+  const visibleModels = useMemo(() => {
+    if (!selectedVideoChannel) return models
+    const inChannel = models.filter((row) =>
+      selectedVideoChannel.modelNames.has(row.name)
+    )
+    const missing = videoChannelMissingModels(
+      selectedVideoChannel,
+      models.map((row) => row.name)
+    ).map(
+      (name): ModelRow => ({
+        name,
+        billingMode: 'per-token',
+        hasConflict: false,
+        saved: undefined,
+        draft: undefined,
+        isDraftChanged: false,
+        isDraftDeleted: false,
+        isDraftNew: false,
+      })
+    )
+    return [...inChannel, ...missing].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )
+  }, [models, selectedVideoChannel])
+
   const modeCounts = useMemo(() => {
     const counts = {
       'per-token': 0,
@@ -332,7 +402,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       tiered_expr: 0,
       [TASK_PRICING_MODE_FILTER]: 0,
     }
-    for (const model of models) {
+    for (const model of visibleModels) {
       const mode =
         model.billingMode === 'per-request' ||
         model.billingMode === 'tiered_expr'
@@ -348,7 +418,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       }
     }
     return counts
-  }, [models, taskModelNames])
+  }, [visibleModels, taskModelNames])
 
   const handleEdit = useCallback(
     (model: ModelRow) => {
@@ -531,7 +601,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
   }, [])
 
   const { table } = useDataTable({
-    data: models,
+    data: visibleModels,
     columns,
     getRowId: (row) => row.name,
     ensurePageInRange,
@@ -744,6 +814,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
   let emptyStateText = t('No models configured. Use Add model to get started.')
   if (table.getState().globalFilter) {
     emptyStateText = t('No models match your search')
+  } else if (selectedVideoChannel) {
+    emptyStateText = t('This video channel has no models')
   } else if (filterMode === 'unset') {
     emptyStateText = candidateModelsLoading
       ? t('Loading...')
@@ -802,13 +874,76 @@ const ModelRatioVisualEditorComponent = forwardRef<
                     : t('Fetch official prices')}
                 </Button>
               ) : (
-                <Button onClick={handleAdd}>
-                  <Plus data-icon='inline-start' />
-                  {t('Add model')}
-                </Button>
+                <>
+                  <Select
+                    items={[
+                      {
+                        value: ALL_VIDEO_CHANNELS,
+                        label: t('All video channels'),
+                      },
+                      ...videoChannelOptions.map((option) => ({
+                        value: String(option.id),
+                        label: option.enabled
+                          ? option.name
+                          : t('{{name}} (disabled)', { name: option.name }),
+                      })),
+                    ]}
+                    value={
+                      selectedVideoChannel
+                        ? String(selectedVideoChannel.id)
+                        : ALL_VIDEO_CHANNELS
+                    }
+                    onValueChange={(value) => {
+                      setVideoChannelId(String(value ?? ALL_VIDEO_CHANNELS))
+                      setPagination((prev) => ({ ...prev, pageIndex: 0 }))
+                    }}
+                    disabled={videoChannelOptions.length === 0}
+                  >
+                    <SelectTrigger
+                      className='w-48'
+                      aria-label={t('Filter by video channel')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      <SelectGroup>
+                        <SelectItem value={ALL_VIDEO_CHANNELS}>
+                          {t('All video channels')}
+                        </SelectItem>
+                        {videoChannelOptions.map((option) => (
+                          <SelectItem key={option.id} value={String(option.id)}>
+                            {option.enabled
+                              ? option.name
+                              : t('{{name}} (disabled)', {
+                                  name: option.name,
+                                })}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={handleAdd}>
+                    <Plus data-icon='inline-start' />
+                    {t('Add model')}
+                  </Button>
+                </>
               )
             }
           />
+
+          {selectedVideoChannel &&
+          selectedVideoChannel.aliasTargets.size > 0 ? (
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Mapped names without their own price are billed at the upstream model price: {{pairs}}',
+                {
+                  pairs: [...selectedVideoChannel.aliasTargets]
+                    .map(([alias, target]) => `${alias} → ${target}`)
+                    .join(', '),
+                }
+              )}
+            </p>
+          ) : null}
 
           {!hasRows ? (
             <div className='text-muted-foreground rounded-lg border border-dashed p-8 text-center'>

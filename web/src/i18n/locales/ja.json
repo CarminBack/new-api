@@ -6840,6 +6840,11 @@
     "Fetch official prices": "Fetch official prices",
     "Fetching official prices...": "Fetching official prices...",
     "No official prices found for these models": "No official prices found for these models",
-    "{{count}} models have no official price and are skipped": "{{count}} models have no official price and are skipped"
+    "{{count}} models have no official price and are skipped": "{{count}} models have no official price and are skipped",
+    "All video channels": "すべての動画チャネル",
+    "{{name}} (disabled)": "{{name}}（無効）",
+    "Filter by video channel": "動画チャネルで絞り込む",
+    "This video channel has no models": "この動画チャネルにはモデルがありません",
+    "Mapped names without their own price are billed at the upstream model price: {{pairs}}": "個別の価格がないマッピング名は上流モデルの価格で課金されます：{{pairs}}"
   }
 }

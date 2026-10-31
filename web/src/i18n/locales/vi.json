@@ -6840,6 +6840,11 @@
     "Fetch official prices": "Fetch official prices",
     "Fetching official prices...": "Fetching official prices...",
     "No official prices found for these models": "No official prices found for these models",
-    "{{count}} models have no official price and are skipped": "{{count}} models have no official price and are skipped"
+    "{{count}} models have no official price and are skipped": "{{count}} models have no official price and are skipped",
+    "All video channels": "Tất cả kênh video",
+    "{{name}} (disabled)": "{{name}} (đã tắt)",
+    "Filter by video channel": "Lọc theo kênh video",
+    "This video channel has no models": "Kênh video này không có mô hình",
+    "Mapped names without their own price are billed at the upstream model price: {{pairs}}": "Tên ánh xạ chưa có giá riêng sẽ tính theo giá mô hình gốc: {{pairs}}"
   }
 }

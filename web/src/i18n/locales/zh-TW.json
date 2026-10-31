@@ -6840,6 +6840,11 @@
     "Fetch official prices": "一键获取官方价格",
     "Fetching official prices...": "正在获取官方价格...",
     "No official prices found for these models": "这些模型没有找到官方价格",
-    "{{count}} models have no official price and are skipped": "{{count}} 个模型没有官方价格，已跳过"
+    "{{count}} models have no official price and are skipped": "{{count}} 个模型没有官方价格，已跳过",
+    "All video channels": "全部影片渠道",
+    "{{name}} (disabled)": "{{name}}（已停用）",
+    "Filter by video channel": "依影片渠道篩選",
+    "This video channel has no models": "該影片渠道沒有模型",
+    "Mapped names without their own price are billed at the upstream model price: {{pairs}}": "映射名稱未單獨定價時，依上游模型價格計費：{{pairs}}"
   }
 }

@@ -6840,6 +6840,11 @@
     "Fetch official prices": "Fetch official prices",
     "Fetching official prices...": "Fetching official prices...",
     "No official prices found for these models": "No official prices found for these models",
-    "{{count}} models have no official price and are skipped": "{{count}} models have no official price and are skipped"
+    "{{count}} models have no official price and are skipped": "{{count}} models have no official price and are skipped",
+    "All video channels": "Tous les canaux vidéo",
+    "{{name}} (disabled)": "{{name}} (désactivé)",
+    "Filter by video channel": "Filtrer par canal vidéo",
+    "This video channel has no models": "Ce canal vidéo n'a aucun modèle",
+    "Mapped names without their own price are billed at the upstream model price: {{pairs}}": "Les noms mappés sans prix propre sont facturés au prix du modèle amont : {{pairs}}"
   }
 }
