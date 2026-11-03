@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -222,4 +223,59 @@ func TestRedisFailurePolicies(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, userResponse.Code)
 	assert.Empty(t, userResponse.Body.String())
 	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/email", "192.0.2.62:12345").Code)
+}
+
+func TestTokenCriticalRateLimitIsPerTokenNotPerIP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousEnable, previousNum, previousDuration := common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration
+	common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = true, 2, 41
+	t.Cleanup(func() {
+		common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = previousEnable, previousNum, previousDuration
+	})
+
+	for _, backend := range []string{"redis", "memory"} {
+		t.Run(backend, func(t *testing.T) {
+			var redisServer *miniredis.Miniredis
+			if backend == "redis" {
+				redisServer, _ = useRateLimitMiniRedis(t)
+			} else {
+				previousRedisEnabled := common.RedisEnabled
+				common.RedisEnabled = false
+				t.Cleanup(func() { common.RedisEnabled = previousRedisEnabled })
+			}
+			router := gin.New()
+			require.NoError(t, router.SetTrustedProxies(nil))
+			router.GET("/usage", func(c *gin.Context) {
+				if id, err := strconv.Atoi(c.Query("token")); err == nil {
+					// Separate token ids per backend so the shared in-memory limiter
+					// does not leak counts between subtests.
+					if backend == "memory" {
+						id += 1000
+					}
+					c.Set("token_id", id)
+				}
+			}, TokenCriticalRateLimit("usage"), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+			// One shared egress IP, as with a backend serving many users.
+			shared := "203.0.113.5:4000"
+			assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/usage?token=1", shared).Code)
+			assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/usage?token=1", shared).Code)
+			limited := performRateLimitRequest(router, "/usage?token=1", shared)
+			assert.Equal(t, http.StatusTooManyRequests, limited.Code)
+			assert.Equal(t, "41", limited.Header().Get("Retry-After"))
+			// Another token from the same IP keeps its own budget.
+			assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/usage?token=2", shared).Code)
+			// The same token from another IP stays limited.
+			assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequest(router, "/usage?token=1", "198.51.100.9:4000").Code)
+			// Without authentication context the limiter fails closed.
+			assert.Equal(t, http.StatusUnauthorized, performRateLimitRequest(router, "/usage", shared).Code)
+			if redisServer != nil {
+				key := redisRateLimitNamespace + ":token:TC:usage:1"
+				count, err := redisServer.Get(key)
+				require.NoError(t, err)
+				assert.Equal(t, "4", count)
+				assert.Equal(t, 41*time.Second, redisServer.TTL(key))
+			}
+		})
+	}
 }
