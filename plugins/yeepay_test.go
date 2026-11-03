@@ -44,6 +44,16 @@ func TestYeepayVideoContract(t *testing.T) {
 		return map[string]any{"type": kind, "role": role, "url": url}
 	}
 
+	t.Run("submit and query use bearer auth for vendor and gateway contexts", func(t *testing.T) {
+		for _, authHeader := range []string{"", "key", "Bearer key"} {
+			ctx := map[string]any{"baseUrl": "https://www.yeepay.top", "apiKey": "key", "authHeader": authHeader, "taskId": "vid_1", "requestBody": base("Xseadanco2.0")}
+			for _, hook := range []string{"buildSubmitRequest", "buildQueryRequest"} {
+				request := call(hook, ctx)
+				assert.Equal(t, "Bearer key", request["headers"].(map[string]any)["Authorization"], "%s with authHeader %q", hook, authHeader)
+			}
+		}
+	})
+
 	t.Run("text request uses the platform field names", func(t *testing.T) {
 		body, decodeErr := decode(base("Xseadanco2.0"))
 		require.NoError(t, decodeErr)

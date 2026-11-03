@@ -57,7 +57,7 @@ const REFERENCE_USAGE = Object.assign({}, SECOND_USAGE, {
 export const meta = {
   apiVersion: 1, key: "yeepay", name: "Yeepay Video", icon: "text:YP",
   description: { en: "Yeepay video generation with structured reference assets", zh: "Yeepay 视频生成与结构化参考素材" },
-  version: "1.0.0", author: { name: "Carmin" }, baseUrl: "https://www.yeepay.top",
+  version: "1.0.1", author: { name: "Carmin" }, baseUrl: "https://www.yeepay.top",
   website: "https://www.yeepay.top/api-docs",
   models: MODELS,
   fetchMode: "per_task",
@@ -204,7 +204,7 @@ function wireBody(request) {
   return body;
 }
 function authHeaders(ctx, extra) {
-  return Object.assign({ Authorization: ctx.authHeader || "Bearer " + ctx.apiKey, Accept: "application/json" }, extra || {});
+  return Object.assign({ Authorization: "Bearer " + ctx.apiKey, Accept: "application/json" }, extra || {});
 }
 function failureMessage(body) {
   const error = body && body.error;
