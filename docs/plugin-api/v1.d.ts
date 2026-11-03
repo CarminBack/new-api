@@ -58,6 +58,7 @@ export interface VideoCapabilities {
   ratios?: readonly string[];
   minSeconds?: number;
   maxSeconds?: number;
+  modes?: readonly ("text2video" | "image2video" | "frames2video" | "first-frame-to-video")[];
   secondsSteps?: readonly number[];
   frames?: boolean;
   maxImages?: number;

@@ -31,9 +31,10 @@
       "type": "object", "additionalProperties": false, "required": ["requestFormat"],
       "properties": {
         "requestFormat": {"const": "unified_video_v1"}, "maxPromptChars": {"type": "integer", "minimum": 1},
-        "resolutions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:[1-9][0-9]*p|4K)$"}},
+        "resolutions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:[1-9][0-9]*p|[24]K)$"}},
         "ratios": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[1-9][0-9]{0,3}:[1-9][0-9]{0,3}$"}},
         "minSeconds": {"type": "integer", "minimum": 1, "maximum": 3600}, "maxSeconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "modes": {"type":"array", "minItems":1, "uniqueItems":true, "items":{"enum":["text2video","image2video","frames2video","first-frame-to-video"]}},
         "secondsSteps": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 3600}},
         "frames": {"type": "boolean"}, "maxImages": {"type": "integer", "minimum": 0}, "maxVideos": {"type": "integer", "minimum": 0}, "maxAudios": {"type": "integer", "minimum": 0}, "requiredImages": {"type": "integer", "minimum": 0}, "referenceDurationRequired": {"type": "boolean"}
       }

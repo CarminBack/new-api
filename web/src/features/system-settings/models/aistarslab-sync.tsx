@@ -58,9 +58,11 @@ export function AistarsLabSync() {
         dry_run: dryRun,
         markup_rate: 1 + profit / 100,
         channel_id: 17,
+        ...(!dryRun ? { preview_token: result?.preview_token } : {}),
       })
-      if (!response.success || !response.data)
+      if (!response.success || !response.data) {
         throw new Error(response.message || t('AistarsLab price sync failed'))
+      }
       return response.data
     },
     onSuccess: async (data, dryRun) => {
@@ -88,7 +90,75 @@ export function AistarsLabSync() {
     if (!result) return []
     const value = (input: number | string | undefined) =>
       input == null || input === '' ? t('Not set') : String(input)
+    const capabilityValue = (input?: string) => {
+      if (!input) return t('Not set')
+      try {
+        const caps = JSON.parse(input) as Record<string, unknown>
+        const parts: string[] = []
+        for (const [key, label] of Object.entries({
+          resolutions: t('Resolution'),
+          ratios: t('Aspect ratio'),
+          modes: t('Generation mode'),
+          secondsSteps: t('Duration options'),
+          minSeconds: t('Minimum duration'),
+          maxSeconds: t('Maximum duration'),
+          maxImages: t('Maximum reference images'),
+          maxVideos: t('Maximum reference videos'),
+          maxAudios: t('Maximum reference audios'),
+        })) {
+          const entry = caps[key]
+          if (entry !== undefined) {
+            parts.push(
+              `${label}: ${Array.isArray(entry) ? entry.join(' / ') : String(entry)}`
+            )
+          }
+        }
+        return parts.join('; ')
+      } catch {
+        return input
+      }
+    }
     return [
+      ...(result.plugin_version &&
+      result.plugin_version !== result.previous_plugin_version
+        ? [
+            {
+              key: 'plugin',
+              type: t('Task plugin version'),
+              model: 'AistarsLab',
+              oldValue: value(result.previous_plugin_version),
+              newValue: value(result.plugin_version),
+            },
+          ]
+        : []),
+      ...(result.capability_changes ?? []).map((item) => ({
+        key: `capability-${item.model}`,
+        type: t('Model capabilities'),
+        model: item.model,
+        oldValue: capabilityValue(item.old),
+        newValue: capabilityValue(item.new),
+      })),
+      ...(result.added_models ?? []).map((model) => ({
+        key: `added-${model}`,
+        type: t('Added models'),
+        model,
+        oldValue: t('Not set'),
+        newValue: t('Models'),
+      })),
+      ...(result.removed_models ?? []).map((model) => ({
+        key: `removed-${model}`,
+        type: t('Removed models'),
+        model,
+        oldValue: t('Models'),
+        newValue: t('Not set'),
+      })),
+      ...(result.mode_changes ?? []).map((item) => ({
+        key: `mode-${item.model}`,
+        type: t('Billing mode'),
+        model: item.model,
+        oldValue: value(item.old),
+        newValue: value(item.new),
+      })),
       ...(result.price_changes ?? []).map((item) => ({
         key: `price-${item.model}`,
         type: t('Unit price'),
@@ -122,7 +192,7 @@ export function AistarsLabSync() {
           </h3>
           <p className='text-muted-foreground text-xs'>
             {t(
-              'Synchronize Channel 17 models, mappings, billing formulas, and model prices from AistarsLab'
+              'Synchronize Channel 17 models, mappings, billing formulas, model prices, and capabilities from AistarsLab'
             )}
           </p>
         </div>
@@ -154,7 +224,13 @@ export function AistarsLabSync() {
           </Button>
           <Button
             onClick={() => setConfirmOpen(true)}
-            disabled={!valid || syncMutation.isPending}
+            disabled={
+              !valid ||
+              syncMutation.isPending ||
+              !result?.dry_run ||
+              !result.preview_token ||
+              result.markup_rate !== 1 + profit / 100
+            }
           >
             <CheckSquare className='size-4' />
             {t('Sync Channel 17')}
@@ -163,6 +239,11 @@ export function AistarsLabSync() {
       </div>
       {result && (
         <div className='space-y-2'>
+          {(result.warnings ?? []).map((warning) => (
+            <p key={warning} className='text-sm'>
+              {t(warning)}
+            </p>
+          ))}
           <div className='flex flex-wrap gap-2 text-xs'>
             <Badge variant='secondary'>
               {t('Models')}: {result.total_models}
@@ -204,7 +285,7 @@ export function AistarsLabSync() {
         onOpenChange={setConfirmOpen}
         title={t('Confirm Channel 17 price sync')}
         desc={t(
-          'This updates Channel 17 mappings and model prices using a {{profit}}% profit margin. Preview before applying.',
+          'This applies the previewed model additions, removals, prices, mappings, and capabilities to Channel 17 using a {{profit}}% profit margin. Changed upstream data requires a new preview.',
           { profit: displayedProfit }
         )}
         confirmText={t('Apply Sync')}

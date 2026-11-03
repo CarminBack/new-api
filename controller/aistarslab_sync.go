@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
@@ -22,6 +23,17 @@ func SyncAistarsLabConfig(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": err.Error()})
 		return
+	}
+	if !request.DryRun {
+		if err := syncTaskPluginsOnceContext(c.Request.Context()); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "configuration saved, but plugin publication failed; check runtime status before retrying"})
+			return
+		}
+		plugin, ok := jsplugin.DefaultRegistry.Get("aistarslab")
+		if !ok || plugin.Meta.Version != result.PluginVersion {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "configuration saved, but the expected AistarsLab plugin is not active; inspect plugin runtime status"})
+			return
+		}
 	}
 	recordManageAudit(c, "aistarslab.config.sync", map[string]any{
 		"dry_run": request.DryRun, "channel_id": result.ChannelID, "models": result.TotalModels,

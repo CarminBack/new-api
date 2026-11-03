@@ -18,6 +18,7 @@ type VideoCapabilities struct {
 	Ratios                    []string `json:"ratios,omitempty"`
 	MinSeconds                *int     `json:"minSeconds,omitempty"`
 	MaxSeconds                *int     `json:"maxSeconds,omitempty"`
+	Modes                     []string `json:"modes,omitempty"`
 	SecondsSteps              []int    `json:"secondsSteps,omitempty"`
 	Frames                    *bool    `json:"frames,omitempty"`
 	MaxImages                 *int     `json:"maxImages,omitempty"`
@@ -36,6 +37,7 @@ func copyVideoPointer[T int | bool](value *T) *T {
 }
 
 func (v VideoCapabilities) Clone() VideoCapabilities {
+	v.Modes = slices.Clone(v.Modes)
 	v.Resolutions = slices.Clone(v.Resolutions)
 	v.Ratios = slices.Clone(v.Ratios)
 	v.SecondsSteps = slices.Clone(v.SecondsSteps)
@@ -76,7 +78,7 @@ func decodeVideoCapabilities(value any, meta Meta) (map[string]VideoCapabilities
 				return nil, fmt.Errorf("videoCapabilities %q field %q must not be null", name, key)
 			}
 			switch key {
-			case "maxPromptChars", "requestFormat", "resolutions", "ratios", "minSeconds", "maxSeconds", "secondsSteps", "frames", "maxImages", "maxVideos", "maxAudios", "requiredImages", "referenceDurationRequired":
+			case "maxPromptChars", "modes", "requestFormat", "resolutions", "ratios", "minSeconds", "maxSeconds", "secondsSteps", "frames", "maxImages", "maxVideos", "maxAudios", "requiredImages", "referenceDurationRequired":
 			default:
 				return nil, fmt.Errorf("videoCapabilities %q has unknown field %q", name, key)
 			}
@@ -109,7 +111,7 @@ func decodeVideoCapabilities(value any, meta Meta) (map[string]VideoCapabilities
 		if caps.Frames != nil && *caps.Frames && caps.MaxImages != nil && *caps.MaxImages < 2 {
 			return nil, fmt.Errorf("videoCapabilities %q frames require two images", name)
 		}
-		for key, pattern := range map[string]string{"resolutions": `^(?:[1-9][0-9]*p|4K)$`, "ratios": `^[1-9][0-9]{0,3}:[1-9][0-9]{0,3}$`} {
+		for key, pattern := range map[string]string{"resolutions": `^(?:[1-9][0-9]*p|[24]K)$`, "ratios": `^[1-9][0-9]{0,3}:[1-9][0-9]{0,3}$`} {
 			if _, present := fields[key]; !present {
 				continue
 			}
@@ -123,6 +125,17 @@ func decodeVideoCapabilities(value any, meta Meta) (map[string]VideoCapabilities
 					return nil, fmt.Errorf("videoCapabilities %q invalid or duplicate %s value", name, key)
 				}
 				seen[item] = true
+			}
+		}
+		if _, present := fields["modes"]; present {
+			modes, err := strictStringSlice(fields, "modes")
+			if err != nil || len(modes) == 0 {
+				return nil, fmt.Errorf("videoCapabilities %q modes must not be empty", name)
+			}
+			for i, mode := range modes {
+				if !slices.Contains([]string{"text2video", "image2video", "frames2video", "first-frame-to-video"}, mode) || slices.Contains(modes[:i], mode) {
+					return nil, fmt.Errorf("videoCapabilities %q invalid mode", name)
+				}
 			}
 		}
 		if _, present := fields["secondsSteps"]; present {
@@ -159,6 +172,14 @@ func (g *RoutingGeneration) VideoCapabilitiesForModel(model string) *VideoCapabi
 			cloned := caps.Clone()
 			result = &cloned
 			continue
+		}
+		if result.Modes == nil || caps.Modes == nil {
+			result.Modes = nil
+		} else {
+			result.Modes = slices.DeleteFunc(result.Modes, func(value string) bool { return !slices.Contains(caps.Modes, value) })
+			if len(result.Modes) == 0 {
+				return nil
+			}
 		}
 		for _, pair := range [][2]*[]string{{&result.Resolutions, &caps.Resolutions}, {&result.Ratios, &caps.Ratios}} {
 			if *pair[0] == nil {

@@ -469,6 +469,9 @@ func videoCapabilityLimitations(caps *jsplugin.VideoCapabilities) []string {
 	if len(caps.Resolutions) > 0 {
 		limits = append(limits, "分辨率 "+strings.Join(caps.Resolutions, "/"))
 	}
+	if len(caps.Modes) > 0 {
+		limits = append(limits, "模式 "+strings.Join(caps.Modes, "/"))
+	}
 	if len(caps.Ratios) > 0 {
 		limits = append(limits, "比例 "+strings.Join(caps.Ratios, "/"))
 	}

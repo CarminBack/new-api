@@ -6845,6 +6845,21 @@
     "{{name}} (disabled)": "{{name}} (désactivé)",
     "Filter by video channel": "Filtrer par canal vidéo",
     "This video channel has no models": "Ce canal vidéo n'a aucun modèle",
-    "Mapped names without their own price are billed at the upstream model price: {{pairs}}": "Les noms mappés sans prix propre sont facturés au prix du modèle amont : {{pairs}}"
+    "Mapped names without their own price are billed at the upstream model price: {{pairs}}": "Les noms mappés sans prix propre sont facturés au prix du modèle amont : {{pairs}}",
+    "Model capabilities": "Model capabilities",
+    "Resolution": "Resolution",
+    "Aspect ratio": "Aspect ratio",
+    "Generation mode": "Generation mode",
+    "Duration options": "Duration options",
+    "Minimum duration": "Minimum duration",
+    "Maximum duration": "Maximum duration",
+    "Maximum reference images": "Maximum reference images",
+    "Maximum reference videos": "Maximum reference videos",
+    "Maximum reference audios": "Maximum reference audios",
+    "Synchronize Channel 17 models, mappings, billing formulas, model prices, and capabilities from AistarsLab": "Synchronize Channel 17 models, mappings, billing formulas, model prices, and capabilities from AistarsLab",
+    "This applies the previewed model additions, removals, prices, mappings, and capabilities to Channel 17 using a {{profit}}% profit margin. Changed upstream data requires a new preview.": "This applies the previewed model additions, removals, prices, mappings, and capabilities to Channel 17 using a {{profit}}% profit margin. Changed upstream data requires a new preview.",
+    "Task plugin version": "Task plugin version",
+    "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.": "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.",
+    "Removed models leave this channel, but their historical pricing is preserved.": "Removed models leave this channel, but their historical pricing is preserved."
   }
 }

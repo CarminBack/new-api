@@ -486,6 +486,7 @@ export type AistarsLabSyncRequest = {
   dry_run: boolean
   markup_rate: number
   channel_id?: number
+  preview_token?: string
 }
 
 export type AistarsLabValueChange<T> = {
@@ -504,6 +505,12 @@ export type AistarsLabSyncResult = {
   removed_models: string[]
   expression_changes: AistarsLabValueChange<string>[]
   price_changes: AistarsLabValueChange<number>[]
+  warnings: string[]
+  plugin_version: string
+  previous_plugin_version: string
+  preview_token: string
+  mode_changes: AistarsLabValueChange<string>[]
+  capability_changes: AistarsLabValueChange<string>[]
   mapping_changes: AistarsLabValueChange<string>[]
 }
 

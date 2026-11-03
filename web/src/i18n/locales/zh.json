@@ -6869,6 +6869,21 @@
     "{{name}} (disabled)": "{{name}}（已停用）",
     "Filter by video channel": "按视频渠道筛选",
     "This video channel has no models": "该视频渠道没有模型",
-    "Mapped names without their own price are billed at the upstream model price: {{pairs}}": "映射名称未单独定价时，按上游模型价格计费：{{pairs}}"
+    "Mapped names without their own price are billed at the upstream model price: {{pairs}}": "映射名称未单独定价时，按上游模型价格计费：{{pairs}}",
+    "Model capabilities": "模型能力",
+    "Resolution": "分辨率",
+    "Aspect ratio": "画面比例",
+    "Generation mode": "生成模式",
+    "Duration options": "可选时长（秒）",
+    "Minimum duration": "最短时长（秒）",
+    "Maximum duration": "最长时长（秒）",
+    "Maximum reference images": "参考图上限",
+    "Maximum reference videos": "参考视频上限",
+    "Maximum reference audios": "参考音频上限",
+    "Synchronize Channel 17 models, mappings, billing formulas, model prices, and capabilities from AistarsLab": "根据 AistarsLab 同步渠道 17 的模型、映射、计费公式、价格及能力参数",
+    "This applies the previewed model additions, removals, prices, mappings, and capabilities to Channel 17 using a {{profit}}% profit margin. Changed upstream data requires a new preview.": "将按 {{profit}}% 利润率应用预览中的模型增删、价格、映射和能力参数。上游或本地配置变化后须重新预览。",
+    "Task plugin version": "任务插件版本",
+    "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.": "本次同步会替换当前 AistarsLab 插件源码及请求校验；请先核对手动修改。",
+    "Removed models leave this channel, but their historical pricing is preserved.": "下架模型会从此渠道移除，历史价格配置保留。"
   }
 }

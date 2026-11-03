@@ -6845,6 +6845,21 @@
     "{{name}} (disabled)": "{{name}} (đã tắt)",
     "Filter by video channel": "Lọc theo kênh video",
     "This video channel has no models": "Kênh video này không có mô hình",
-    "Mapped names without their own price are billed at the upstream model price: {{pairs}}": "Tên ánh xạ chưa có giá riêng sẽ tính theo giá mô hình gốc: {{pairs}}"
+    "Mapped names without their own price are billed at the upstream model price: {{pairs}}": "Tên ánh xạ chưa có giá riêng sẽ tính theo giá mô hình gốc: {{pairs}}",
+    "Model capabilities": "Model capabilities",
+    "Resolution": "Resolution",
+    "Aspect ratio": "Aspect ratio",
+    "Generation mode": "Generation mode",
+    "Duration options": "Duration options",
+    "Minimum duration": "Minimum duration",
+    "Maximum duration": "Maximum duration",
+    "Maximum reference images": "Maximum reference images",
+    "Maximum reference videos": "Maximum reference videos",
+    "Maximum reference audios": "Maximum reference audios",
+    "Synchronize Channel 17 models, mappings, billing formulas, model prices, and capabilities from AistarsLab": "Synchronize Channel 17 models, mappings, billing formulas, model prices, and capabilities from AistarsLab",
+    "This applies the previewed model additions, removals, prices, mappings, and capabilities to Channel 17 using a {{profit}}% profit margin. Changed upstream data requires a new preview.": "This applies the previewed model additions, removals, prices, mappings, and capabilities to Channel 17 using a {{profit}}% profit margin. Changed upstream data requires a new preview.",
+    "Task plugin version": "Task plugin version",
+    "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.": "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.",
+    "Removed models leave this channel, but their historical pricing is preserved.": "Removed models leave this channel, but their historical pricing is preserved."
   }
 }

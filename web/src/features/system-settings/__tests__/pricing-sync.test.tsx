@@ -120,6 +120,20 @@ describe('Channel 17 profit synchronization', () => {
         success: true,
         data: {
           dry_run: true,
+          preview_token: 'preview-v1',
+          plugin_version: '1.1.0+sync.preview',
+          previous_plugin_version: '1.0.2',
+          warnings: [],
+          capability_changes: [
+            {
+              model: 'seedance-720p-c47',
+              new: JSON.stringify({
+                resolutions: ['720p'],
+                secondsSteps: [5, 10, 15, 30],
+                maxVideos: 0,
+              }),
+            },
+          ],
           channel_id: 17,
           credit_rate: 100,
           markup_rate: 1.45,
@@ -155,6 +169,9 @@ describe('Channel 17 profit synchronization', () => {
         <AistarsLabSync />
       </QueryClientProvider>
     )
+    expect(
+      screen.getByRole('button', { name: 'Sync Channel 17' })
+    ).toBeDisabled()
     expect(await screen.findByDisplayValue('45')).toBeVisible()
     await userEvent
       .setup()
@@ -166,10 +183,25 @@ describe('Channel 17 profit synchronization', () => {
         channel_id: 17,
       })
     )
-    expect(await screen.findAllByText('seedance-720p-c47')).toHaveLength(3)
+    expect(await screen.findAllByText('seedance-720p-c47')).toHaveLength(4)
     expect(screen.getByText('0.78')).toBeVisible()
     expect(screen.getByText('Billing formula')).toBeVisible()
     expect(screen.getByText('Channel mapping')).toBeVisible()
+    expect(screen.getByText(/5 \/ 10 \/ 15 \/ 30/)).toBeVisible()
+    const apply = screen.getByRole('button', { name: 'Sync Channel 17' })
+    expect(apply).toBeEnabled()
+    await userEvent.setup().click(apply)
+    await userEvent
+      .setup()
+      .click(await screen.findByRole('button', { name: 'Apply Sync' }))
+    await waitFor(() =>
+      expect(post).toHaveBeenLastCalledWith('/api/ratio_sync/aistarslab/sync', {
+        dry_run: false,
+        markup_rate: 1.45,
+        channel_id: 17,
+        preview_token: 'preview-v1',
+      })
+    )
   })
 })
 
