@@ -292,10 +292,11 @@ func SetApiRouter(router *gin.Engine) {
 		}
 
 		usageRoute := apiRouter.Group("/usage")
-		usageRoute.Use(middleware.CORS(), middleware.CriticalRateLimit())
+		usageRoute.Use(middleware.CORS())
 		{
 			tokenUsageRoute := usageRoute.Group("/token")
-			tokenUsageRoute.Use(middleware.TokenAuthReadOnly())
+			// Limit per token, not per IP: shared backends call these for many users.
+			tokenUsageRoute.Use(middleware.TokenAuthReadOnly(), middleware.TokenCriticalRateLimit("usage"))
 			{
 				tokenUsageRoute.GET("/", controller.GetTokenUsage)
 				tokenUsageRoute.GET("/balance", middleware.DisableCache(), controller.GetTokenUserBalance)

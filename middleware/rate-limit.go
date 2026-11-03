@@ -189,6 +189,43 @@ func UserCriticalRateLimit(scope string) func(c *gin.Context) {
 	)
 }
 
+// TokenCriticalRateLimit applies the critical limit per authenticated API token
+// instead of per client IP. Token-authenticated read endpoints are often called
+// by a shared backend (for example Canvas), where every user shares one egress
+// IP; an IP bucket would let one busy user starve the rest. Must run AFTER
+// TokenAuthReadOnly, which sets token_id.
+func TokenCriticalRateLimit(scope string) func(c *gin.Context) {
+	if !common.CriticalRateLimitEnable {
+		return defNext
+	}
+	mark := "TC:" + scope
+	maxRequestNum, duration := common.CriticalRateLimitNum, common.CriticalRateLimitDuration
+	if common.RedisEnabled {
+		return func(c *gin.Context) {
+			tokenID := c.GetInt("token_id")
+			if tokenID == 0 {
+				c.Status(http.StatusUnauthorized)
+				c.Abort()
+				return
+			}
+			userRedisRateLimiter(c, maxRequestNum, duration, fmt.Sprintf("%s:token:%s:%d", redisRateLimitNamespace, mark, tokenID))
+		}
+	}
+	// It's safe to call multi times.
+	inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
+	return func(c *gin.Context) {
+		tokenID := c.GetInt("token_id")
+		if tokenID == 0 {
+			c.Status(http.StatusUnauthorized)
+			c.Abort()
+			return
+		}
+		if !inMemoryRateLimiter.Request(fmt.Sprintf("%s:token:%d", mark, tokenID), maxRequestNum, duration) {
+			writeRateLimited(c, duration)
+		}
+	}
+}
+
 func DownloadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.DownloadRateLimitNum, common.DownloadRateLimitDuration, "DW")
 }
