@@ -218,10 +218,23 @@ func TestYeepayCapturedCatalogCandidate(t *testing.T) {
 			body["aspect_ratio"] = c.Ratios[0]
 		}
 		ctx := map[string]any{"requestBody": body, "upstreamModel": item.PublicModel, "baseUrl": "https://www.yeepay.top", "apiKey": "fixture"}
-		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
-			_, err = loaded.Engine.Call(t.Context(), hook, ctx)
-			require.NoError(t, err, item.PublicModel)
+		raw, err := loaded.Engine.Call(t.Context(), "buildSubmitRequest", ctx)
+		require.NoError(t, err, item.PublicModel)
+		encoded, err := common.Marshal(raw)
+		require.NoError(t, err)
+		var descriptor struct {
+			Body struct {
+				Resolution string `json:"resolution"`
+			} `json:"body"`
 		}
+		require.NoError(t, common.Unmarshal(encoded, &descriptor))
+		for _, catalogModel := range snapshot.Upstream.Data {
+			if catalogModel.ID == item.PublicModel && len(catalogModel.Capabilities.Resolutions) > 0 {
+				assert.Contains(t, catalogModel.Capabilities.Resolutions, descriptor.Body.Resolution, item.PublicModel)
+			}
+		}
+		_, err = loaded.Engine.Call(t.Context(), "extractUsage", ctx)
+		require.NoError(t, err, item.PublicModel)
 	}
 	again, _, _, _, err := buildYeepaySyncedPlugin(string(candidate.Source), snapshot.Upstream.Data, req)
 	require.NoError(t, err)

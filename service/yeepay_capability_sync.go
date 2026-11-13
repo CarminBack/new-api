@@ -55,6 +55,18 @@ func buildYeepaySyncedPlugin(source string, catalog []yeepayCatalogModel, reques
 		indexes[name] = i
 	}
 	capsMap := map[string]jsplugin.VideoCapabilities{}
+	wireResolutions := map[string]map[string]string{}
+	const wirePrefix = "const YEEPAY_SYNC_WIRE_RESOLUTIONS = "
+	if at := strings.Index(source, wirePrefix); at >= 0 {
+		tail := source[at+len(wirePrefix):]
+		end := strings.Index(tail, ";")
+		if end < 0 {
+			return nil, nil, nil, nil, errors.New("invalid stored resolution adapter")
+		}
+		if err := common.UnmarshalJsonStr(tail[:end], &wireResolutions); err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
 	var warnings []string
 	var models []AistarsLabSeedanceModel
 	seen := map[string]bool{}
@@ -86,6 +98,10 @@ func buildYeepaySyncedPlugin(source string, catalog []yeepayCatalogModel, reques
 			return nil, nil, nil, nil, fmt.Errorf("%s: inconsistent duration options", name)
 		}
 		caps := jsplugin.VideoCapabilities{RequestFormat: "unified_video_v1", MinSeconds: c.MinSeconds, MaxSeconds: c.MaxSeconds, SecondsSteps: steps, Resolutions: slices.Clone(c.Resolutions)}
+		wireResolutions[name] = map[string]string{}
+		for _, resolution := range c.Resolutions {
+			wireResolutions[name][strings.ToLower(resolution)] = resolution
+		}
 		for i, resolution := range caps.Resolutions {
 			if strings.EqualFold(resolution, "2k") || strings.EqualFold(resolution, "4k") {
 				caps.Resolutions[i] = strings.ToUpper(resolution)
@@ -187,6 +203,10 @@ func buildYeepaySyncedPlugin(source string, catalog []yeepayCatalogModel, reques
 			capsMap[name] = c
 		}
 	}
+	wireJSON, err := common.Marshal(wireResolutions)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 	capsJSON, err := common.Marshal(capsMap)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -195,11 +215,13 @@ func buildYeepaySyncedPlugin(source string, catalog []yeepayCatalogModel, reques
 	if strings.Count(source, anchor) != 1 || strings.Count(source, "  if (references.length) body.references = references;") != 1 {
 		return nil, nil, nil, nil, errors.New("Yeepay plugin template changed; review manual edits")
 	}
-	source = strings.Replace(source, anchor, yeepaySyncStart+"const YEEPAY_SYNC_CAPS = "+string(capsJSON)+";\nObject.assign(CAPABILITIES, YEEPAY_SYNC_CAPS);\n"+yeepaySyncEnd+anchor, 1)
+	source = strings.Replace(source, anchor, yeepaySyncStart+"const YEEPAY_SYNC_CAPS = "+string(capsJSON)+";\n"+wirePrefix+string(wireJSON)+";\nObject.assign(CAPABILITIES, YEEPAY_SYNC_CAPS);\n"+yeepaySyncEnd+anchor, 1)
 	validation := `  const caps = YEEPAY_SYNC_CAPS[body.model];
   if (caps) {
     if (body.duration !== undefined && caps.secondsSteps && !caps.secondsSteps.includes(body.duration)) throw new Error("duration is not supported by this model");
     if (body.resolution && caps.resolutions && !caps.resolutions.some(function (v) { return v.toLowerCase() === body.resolution.toLowerCase(); })) throw new Error("resolution is not supported by this model");
+    const wireResolution = YEEPAY_SYNC_WIRE_RESOLUTIONS[body.model];
+    if (body.resolution && wireResolution) body.resolution = wireResolution[body.resolution.toLowerCase()] || body.resolution;
     if (body.ratio && caps.ratios && !caps.ratios.includes(body.ratio)) throw new Error("aspect ratio is not supported by this model");
     if ((first || last) && caps.frames === false) throw new Error("frame references are not supported by this model");
     for (const pair of [["image", "maxImages"], ["audio", "maxAudios"], ["video", "maxVideos"]]) {
