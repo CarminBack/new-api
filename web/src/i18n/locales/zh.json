@@ -6885,5 +6885,18 @@
     "Task plugin version": "任务插件版本",
     "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.": "本次同步会替换当前 AistarsLab 插件源码及请求校验；请先核对手动修改。",
     "Removed models leave this channel, but their historical pricing is preserved.": "下架模型会从此渠道移除，历史价格配置保留。"
-  }
+  },
+    "{{provider}} price sync failed": "{{provider}} 价格同步失败",
+    "Channel {{channel}} price preview completed": "渠道 {{channel}} 价格预览完成",
+    "Channel {{channel}} prices synced": "渠道 {{channel}} 价格已同步",
+    "Channel {{channel}} profit price sync": "渠道 {{channel}} 利润价格同步",
+    "Synchronize Channel {{channel}} models, mappings, billing formulas, prices and capabilities from {{provider}}": "根据 {{provider}} 同步渠道 {{channel}} 的模型、映射、计费公式、价格及能力参数",
+    "Sync Channel {{channel}}": "同步渠道 {{channel}}",
+    "Confirm Channel {{channel}} price sync": "确认同步渠道 {{channel}} 价格",
+    "Credits per USD": "每美元对应积分",
+    "Round prices upward to decimal places": "向上取整保留小数位数",
+    "Include all available models, including manually excluded models": "加入全部可用模型（包含手工排除的型号）",
+    "Update existing Yeepay prices": "更新已有 Yeepay 售价",
+    "Apply the previewed model, mapping, capability and price changes to channel {{channel}} with a {{profit}}% cost markup. Changed upstream data requires a new preview.": "将按成本加价 {{profit}}% 应用渠道 {{channel}} 预览中的模型、映射、能力与价格变更。上游数据变化后须重新预览。",
+    "Cost markup percentage": "成本加价百分比"
 }

@@ -284,6 +284,7 @@ export function UpstreamRatioSync() {
   return (
     <div className='flex h-full min-h-0 flex-col gap-3'>
       <AistarsLabSync />
+      <AistarsLabSync yeepay />
       <div className='min-h-0 flex-1'>
         {fetchMutation.isError ? (
           <ErrorState

@@ -205,6 +205,89 @@ describe('Channel 17 profit synchronization', () => {
   })
 })
 
+describe('Yeepay channel synchronization', () => {
+  it('previews explicit sale settings and invalidates apply when settings change', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: [] },
+    })
+    const post = vi.spyOn(api, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          dry_run: true,
+          preview_token: 'yeepay-preview',
+          plugin_version: '1.0.3+sync.test',
+          previous_plugin_version: '1.0.2',
+          warnings: [],
+          capability_changes: [],
+          channel_id: 282,
+          credit_rate: 10,
+          markup_rate: 1.35,
+          total_models: 26,
+          added_models: ['new-video'],
+          removed_models: [],
+          price_changes: [],
+          expression_changes: [
+            { model: 'new-video', new: 'tier("base", u("seconds") * 0.3)' },
+          ],
+          mapping_changes: [],
+          mode_changes: [],
+        },
+      },
+    })
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <AistarsLabSync yeepay />
+      </QueryClientProvider>
+    )
+    const user = userEvent.setup()
+    const apply = screen.getByRole('button', { name: 'Sync Channel 282' })
+    expect(apply).toBeDisabled()
+    expect(
+      screen.getByRole('checkbox', { name: 'Update existing Yeepay prices' })
+    ).not.toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Preview' }))
+    await waitFor(() => expect(apply).toBeEnabled())
+    expect(post).toHaveBeenCalledWith('/api/ratio_sync/yeepay/sync', {
+      dry_run: true,
+      channel_id: 282,
+      credit_rate: 10,
+      markup_rate: 1.35,
+      decimal_places: 2,
+      all_models: false,
+      update_prices: false,
+    })
+    expect(screen.getAllByText('new-video')).toHaveLength(2)
+    await user.click(apply)
+    await user.click(await screen.findByRole('button', { name: 'Apply Sync' }))
+    await waitFor(() =>
+      expect(post).toHaveBeenLastCalledWith('/api/ratio_sync/yeepay/sync', {
+        dry_run: false,
+        channel_id: 282,
+        credit_rate: 10,
+        markup_rate: 1.35,
+        decimal_places: 2,
+        all_models: false,
+        update_prices: false,
+        preview_token: 'yeepay-preview',
+      })
+    )
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Update existing Yeepay prices' })
+    )
+    expect(apply).toBeDisabled()
+    const rate = screen.getByRole('spinbutton', { name: 'Credits per USD' })
+    await user.clear(rate)
+    expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled()
+  })
+})
+
 describe('pricing synchronization', () => {
   it('shows every dollar price inline, including explicit zero cache and audio prices', () => {
     render(<TableFixture prices={prices} />)

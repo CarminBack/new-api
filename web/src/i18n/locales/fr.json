@@ -6861,5 +6861,18 @@
     "Task plugin version": "Task plugin version",
     "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.": "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.",
     "Removed models leave this channel, but their historical pricing is preserved.": "Removed models leave this channel, but their historical pricing is preserved."
-  }
+  },
+    "{{provider}} price sync failed": "Échec de synchronisation des prix {{provider}}",
+    "Channel {{channel}} price preview completed": "Aperçu des prix du canal {{channel}} terminé",
+    "Channel {{channel}} prices synced": "Prix du canal {{channel}} synchronisés",
+    "Channel {{channel}} profit price sync": "Synchronisation des prix et marges du canal {{channel}}",
+    "Synchronize Channel {{channel}} models, mappings, billing formulas, prices and capabilities from {{provider}}": "Synchroniser les modèles, correspondances, formules, prix et capacités du canal {{channel}} depuis {{provider}}",
+    "Sync Channel {{channel}}": "Synchroniser le canal {{channel}}",
+    "Confirm Channel {{channel}} price sync": "Confirmer la synchronisation du canal {{channel}}",
+    "Credits per USD": "Crédits par USD",
+    "Round prices upward to decimal places": "Décimales pour arrondir les prix au supérieur",
+    "Include all available models, including manually excluded models": "Inclure tous les modèles disponibles, même exclus manuellement",
+    "Update existing Yeepay prices": "Mettre à jour les prix Yeepay existants",
+    "Apply the previewed model, mapping, capability and price changes to channel {{channel}} with a {{profit}}% cost markup. Changed upstream data requires a new preview.": "Appliquer les modifications prévisualisées au canal {{channel}} avec une majoration de {{profit}} %. Refaire l’aperçu si les données changent.",
+    "Cost markup percentage": "Majoration du coût en pourcentage"
 }

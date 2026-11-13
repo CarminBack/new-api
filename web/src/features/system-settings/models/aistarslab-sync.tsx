@@ -15,11 +15,12 @@ import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { invalidateModelPricing } from '@/features/model-pricing/api'
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { syncAistarsLabConfig } from '../api'
+import { syncAistarsLabConfig, syncYeepayConfig } from '../api'
 import { useSystemOptions } from '../hooks/use-system-options'
 import type { AistarsLabSyncResult } from '../types'
 
@@ -31,54 +32,127 @@ type ChangeRow = {
   newValue: string
 }
 
-export function AistarsLabSync() {
+export function AistarsLabSync(props: { yeepay?: boolean }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { data: systemOptions } = useSystemOptions()
   const [profitPercent, setProfitPercent] = useState<string | null>(null)
   const [result, setResult] = useState<AistarsLabSyncResult | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [creditOverride, setCreditRate] = useState<string | null>(null)
+  const [precisionOverride, setPrecision] = useState<string | null>(null)
+  const [allModels, setAllModels] = useState(false)
+  const [updatePrices, setUpdatePrices] = useState(false)
+  const [previewForm, setPreviewForm] = useState('')
+  const provider = props.yeepay ? 'Yeepay' : 'AistarsLab'
+  const channelId = props.yeepay ? 282 : 17
+
   const configuredProfit = useMemo(() => {
     const options = Array.isArray(systemOptions?.data) ? systemOptions.data : []
-    const stored = Number(
+    let stored = Number(
       options.find((item) => item.key === 'AistarsLabMarkupRate')?.value
     )
+    if (props.yeepay) {
+      stored = 1.35
+      try {
+        const saved = JSON.parse(
+          options.find((item) => item.key === 'YeepaySyncSettings')?.value ||
+            '{}'
+        ) as { markup_rate?: number }
+        stored = saved.markup_rate ?? stored
+      } catch {
+        /* Keep the explicit editable preview default. */
+      }
+    }
     return Number.isFinite(stored) && stored > 0
       ? String(Math.round((stored - 1) * 10000) / 100)
       : '30'
+  }, [systemOptions, props.yeepay])
+  const savedYeepayRates = useMemo(() => {
+    const options = Array.isArray(systemOptions?.data) ? systemOptions.data : []
+    try {
+      return JSON.parse(
+        options.find((item) => item.key === 'YeepaySyncSettings')?.value || '{}'
+      ) as { credit_rate?: number; decimal_places?: number }
+    } catch {
+      return {}
+    }
   }, [systemOptions])
+  const creditRate =
+    creditOverride ?? String(savedYeepayRates.credit_rate ?? 10)
+  const precision =
+    precisionOverride ?? String(savedYeepayRates.decimal_places ?? 2)
   const displayedProfit = profitPercent ?? configuredProfit
   const profit = Number(displayedProfit)
   const valid =
-    displayedProfit.trim() !== '' && Number.isFinite(profit) && profit >= 0
+    displayedProfit.trim() !== '' &&
+    Number.isFinite(profit) &&
+    profit >= 0 &&
+    (!props.yeepay ||
+      (creditRate.trim() !== '' &&
+        Number.isFinite(Number(creditRate)) &&
+        Number(creditRate) > 0 &&
+        precision.trim() !== '' &&
+        Number.isInteger(Number(precision)) &&
+        Number(precision) >= 0 &&
+        Number(precision) <= 6))
+  const formKey = JSON.stringify([
+    displayedProfit,
+    creditRate,
+    precision,
+    allModels,
+    updatePrices,
+  ])
 
   const syncMutation = useMutation({
     mutationFn: async (dryRun: boolean) => {
-      const response = await syncAistarsLabConfig({
+      const request = {
         dry_run: dryRun,
         markup_rate: 1 + profit / 100,
-        channel_id: 17,
+        channel_id: channelId,
         ...(!dryRun ? { preview_token: result?.preview_token } : {}),
-      })
-      if (!response.success || !response.data) {
-        throw new Error(response.message || t('AistarsLab price sync failed'))
       }
-      return response.data
+      const response = props.yeepay
+        ? await syncYeepayConfig({
+            ...request,
+            credit_rate: Number(creditRate),
+            decimal_places: Number(precision),
+            all_models: allModels,
+            update_prices: updatePrices,
+          })
+        : await syncAistarsLabConfig(request)
+      if (!response.success || !response.data) {
+        throw new Error(
+          response.message || t('{{provider}} price sync failed', { provider })
+        )
+      }
+      return { data: response.data, requestForm: formKey }
     },
-    onSuccess: async (data, dryRun) => {
+    onSuccess: async ({ data, requestForm }, dryRun) => {
       setResult(data)
-      if (dryRun) toast.success(t('Channel 17 price preview completed'))
-      else {
+      if (dryRun) {
+        setPreviewForm(requestForm)
+        toast.success(
+          t('Channel {{channel}} price preview completed', {
+            channel: channelId,
+          })
+        )
+      } else {
         setProfitPercent(
           String(Math.round((data.markup_rate - 1) * 10000) / 100)
         )
         setConfirmOpen(false)
-        toast.success(t('Channel 17 prices synced'))
+        toast.success(
+          t('Channel {{channel}} prices synced', { channel: channelId })
+        )
         await invalidateModelPricing(queryClient)
       }
     },
     onError: (error: Error) =>
-      handleServerError(error, t('AistarsLab price sync failed')),
+      handleServerError(
+        error,
+        t('{{provider}} price sync failed', { provider })
+      ),
   })
 
   const run = (dryRun: boolean) => {
@@ -125,7 +199,7 @@ export function AistarsLabSync() {
             {
               key: 'plugin',
               type: t('Task plugin version'),
-              model: 'AistarsLab',
+              model: provider,
               oldValue: value(result.previous_plugin_version),
               newValue: value(result.plugin_version),
             },
@@ -181,24 +255,71 @@ export function AistarsLabSync() {
         newValue: value(item.new),
       })),
     ]
-  }, [result, t])
+  }, [result, t, provider])
 
   return (
     <section className='border-border/70 space-y-3 border-b pb-4'>
       <div className='flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between'>
         <div className='space-y-1'>
           <h3 className='text-sm font-semibold'>
-            {t('Channel 17 profit price sync')}
+            {t('Channel {{channel}} profit price sync', { channel: channelId })}
           </h3>
           <p className='text-muted-foreground text-xs'>
             {t(
-              'Synchronize Channel 17 models, mappings, billing formulas, model prices, and capabilities from AistarsLab'
+              'Synchronize Channel {{channel}} models, mappings, billing formulas, prices and capabilities from {{provider}}',
+              { channel: channelId, provider }
             )}
           </p>
         </div>
         <div className='flex flex-wrap items-end gap-2'>
+          {props.yeepay && (
+            <>
+              <label className='grid gap-1 text-xs'>
+                <span>{t('Credits per USD')}</span>
+                <Input
+                  className='h-9 w-28'
+                  type='number'
+                  min='0.000001'
+                  value={creditRate}
+                  onChange={(event) => setCreditRate(event.target.value)}
+                />
+              </label>
+              <label className='grid gap-1 text-xs'>
+                <span>{t('Round prices upward to decimal places')}</span>
+                <Input
+                  className='h-9 w-24'
+                  type='number'
+                  min='0'
+                  max='6'
+                  step='1'
+                  value={precision}
+                  onChange={(event) => setPrecision(event.target.value)}
+                />
+              </label>
+              <label className='flex items-center gap-2 text-xs'>
+                <Checkbox
+                  checked={allModels}
+                  onCheckedChange={(checked) => setAllModels(checked === true)}
+                />
+                {t(
+                  'Include all available models, including manually excluded models'
+                )}
+              </label>
+              <label className='flex items-center gap-2 text-xs'>
+                <Checkbox
+                  checked={updatePrices}
+                  onCheckedChange={(checked) =>
+                    setUpdatePrices(checked === true)
+                  }
+                />
+                {t('Update existing Yeepay prices')}
+              </label>
+            </>
+          )}
           <label className='grid gap-1 text-xs'>
-            <span>{t('Profit percentage')}</span>
+            <span>
+              {t(props.yeepay ? 'Cost markup percentage' : 'Profit percentage')}
+            </span>
             <div className='relative w-32'>
               <Input
                 type='number'
@@ -229,11 +350,12 @@ export function AistarsLabSync() {
               syncMutation.isPending ||
               !result?.dry_run ||
               !result.preview_token ||
-              result.markup_rate !== 1 + profit / 100
+              result.markup_rate !== 1 + profit / 100 ||
+              previewForm !== formKey
             }
           >
             <CheckSquare className='size-4' />
-            {t('Sync Channel 17')}
+            {t('Sync Channel {{channel}}', { channel: channelId })}
           </Button>
         </div>
       </div>
@@ -249,8 +371,8 @@ export function AistarsLabSync() {
               {t('Models')}: {result.total_models}
             </Badge>
             <Badge variant='secondary'>
-              {t('Profit percentage')}:{' '}
-              {Math.round((result.markup_rate - 1) * 10000) / 100}%
+              {t(props.yeepay ? 'Cost markup percentage' : 'Profit percentage')}
+              : {Math.round((result.markup_rate - 1) * 10000) / 100}%
             </Badge>
             <Badge variant={result.dry_run ? 'outline' : 'default'}>
               {result.dry_run ? t('Preview') : t('Applied')}
@@ -283,11 +405,14 @@ export function AistarsLabSync() {
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        title={t('Confirm Channel 17 price sync')}
+        title={t('Confirm Channel {{channel}} price sync', {
+          channel: channelId,
+        })}
         desc={t(
-          'This applies the previewed model additions, removals, prices, mappings, and capabilities to Channel 17 using a {{profit}}% profit margin. Changed upstream data requires a new preview.',
-          { profit: displayedProfit }
+          'Apply the previewed model, mapping, capability and price changes to channel {{channel}} with a {{profit}}% cost markup. Changed upstream data requires a new preview.',
+          { channel: channelId, profit: displayedProfit }
         )}
+        disabled={!valid || previewForm !== formKey || !result?.dry_run}
         confirmText={t('Apply Sync')}
         handleConfirm={() => run(false)}
         isLoading={syncMutation.isPending}

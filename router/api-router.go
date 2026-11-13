@@ -253,6 +253,7 @@ func SetApiRouter(router *gin.Engine) {
 			ratioSyncRoute.GET("/channels", controller.GetSyncableChannels)
 			ratioSyncRoute.POST("/fetch", controller.FetchUpstreamRatios)
 			ratioSyncRoute.POST("/aistarslab/sync", controller.SyncAistarsLabConfig)
+			ratioSyncRoute.POST("/yeepay/sync", controller.SyncYeepayConfig)
 			ratioSyncRoute.POST("/task-pricing/migrate", controller.MigrateTaskPricing)
 		}
 		taskPluginRoute := apiRouter.Group("/plugin/task")

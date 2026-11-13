@@ -6861,5 +6861,18 @@
     "Task plugin version": "Task plugin version",
     "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.": "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.",
     "Removed models leave this channel, but their historical pricing is preserved.": "Removed models leave this channel, but their historical pricing is preserved."
-  }
+  },
+    "{{provider}} price sync failed": "{{provider}} の価格同期に失敗しました",
+    "Channel {{channel}} price preview completed": "チャネル {{channel}} の価格プレビューが完了しました",
+    "Channel {{channel}} prices synced": "チャネル {{channel}} の価格を同期しました",
+    "Channel {{channel}} profit price sync": "チャネル {{channel}} の利益価格同期",
+    "Synchronize Channel {{channel}} models, mappings, billing formulas, prices and capabilities from {{provider}}": "{{provider}} からチャネル {{channel}} のモデル、マッピング、課金式、価格、機能を同期",
+    "Sync Channel {{channel}}": "チャネル {{channel}} を同期",
+    "Confirm Channel {{channel}} price sync": "チャネル {{channel}} の価格同期を確認",
+    "Credits per USD": "1 USD あたりのクレジット",
+    "Round prices upward to decimal places": "価格を切り上げる小数桁数",
+    "Include all available models, including manually excluded models": "手動で除外したモデルを含む全モデルを追加",
+    "Update existing Yeepay prices": "既存の Yeepay 価格を更新",
+    "Apply the previewed model, mapping, capability and price changes to channel {{channel}} with a {{profit}}% cost markup. Changed upstream data requires a new preview.": "コストに {{profit}}% 加算し、チャネル {{channel}} のプレビュー変更を適用します。上流データ変更時は再プレビューが必要です。",
+    "Cost markup percentage": "コスト加算率"
 }

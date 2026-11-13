@@ -135,3 +135,18 @@ export async function syncAistarsLabConfig(request: AistarsLabSyncRequest) {
   )
   return res.data
 }
+
+export async function syncYeepayConfig(
+  request: AistarsLabSyncRequest & {
+    credit_rate: number
+    decimal_places: number
+    all_models: boolean
+    update_prices: boolean
+  }
+) {
+  const res = await api.post<AistarsLabSyncResponse>(
+    '/api/ratio_sync/yeepay/sync',
+    request
+  )
+  return res.data
+}

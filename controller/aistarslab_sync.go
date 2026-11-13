@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,39 @@ func SyncAistarsLabConfig(c *gin.Context) {
 		}
 	}
 	recordManageAudit(c, "aistarslab.config.sync", map[string]any{
+		"dry_run": request.DryRun, "channel_id": result.ChannelID, "models": result.TotalModels,
+	})
+	common.ApiSuccess(c, result)
+}
+
+func SyncYeepayConfig(c *gin.Context) {
+	var request service.YeepaySyncRequest
+	if c.Request.Body != nil {
+		if err := common.DecodeJson(c.Request.Body, &request); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request"})
+			return
+		}
+	}
+	result, err := service.SyncYeepayConfig(c.Request.Context(), request)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	if !request.DryRun {
+		if err := syncTaskPluginsOnceContext(c.Request.Context()); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "configuration saved, but plugin publication failed; check runtime status before retrying"})
+			return
+		}
+		plugin, ok := jsplugin.DefaultRegistry.Get("yeepay")
+		if !ok || plugin.Meta.Version != result.PluginVersion {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "configuration saved, but the expected Yeepay plugin is not active; inspect plugin runtime status"})
+			return
+		}
+	}
+	if !request.DryRun {
+		model.RefreshPricing()
+	}
+	recordManageAudit(c, "yeepay.config.sync", map[string]any{
 		"dry_run": request.DryRun, "channel_id": result.ChannelID, "models": result.TotalModels,
 	})
 	common.ApiSuccess(c, result)

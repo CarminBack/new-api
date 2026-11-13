@@ -6861,5 +6861,18 @@
     "Task plugin version": "Task plugin version",
     "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.": "This sync replaces the current AistarsLab plugin source and validation. Review any manual plugin changes before applying.",
     "Removed models leave this channel, but their historical pricing is preserved.": "Removed models leave this channel, but their historical pricing is preserved."
-  }
+  },
+    "{{provider}} price sync failed": "Не удалось синхронизировать цены {{provider}}",
+    "Channel {{channel}} price preview completed": "Предпросмотр цен канала {{channel}} готов",
+    "Channel {{channel}} prices synced": "Цены канала {{channel}} синхронизированы",
+    "Channel {{channel}} profit price sync": "Синхронизация цен с наценкой канала {{channel}}",
+    "Synchronize Channel {{channel}} models, mappings, billing formulas, prices and capabilities from {{provider}}": "Синхронизировать модели, сопоставления, формулы, цены и возможности канала {{channel}} из {{provider}}",
+    "Sync Channel {{channel}}": "Синхронизировать канал {{channel}}",
+    "Confirm Channel {{channel}} price sync": "Подтвердить синхронизацию цен канала {{channel}}",
+    "Credits per USD": "Кредитов за USD",
+    "Round prices upward to decimal places": "Знаков после запятой при округлении вверх",
+    "Include all available models, including manually excluded models": "Добавить все доступные модели, включая исключённые вручную",
+    "Update existing Yeepay prices": "Обновить существующие цены Yeepay",
+    "Apply the previewed model, mapping, capability and price changes to channel {{channel}} with a {{profit}}% cost markup. Changed upstream data requires a new preview.": "Применить изменения канала {{channel}} с наценкой {{profit}}%. При изменении данных нужен новый предпросмотр.",
+    "Cost markup percentage": "Процент наценки к себестоимости"
 }
