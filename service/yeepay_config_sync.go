@@ -192,7 +192,6 @@ func syncYeepaySnapshot(request YeepaySyncRequest, channel *model.Channel, curre
 		}
 	}
 	prices := map[string]model.PricingValues{}
-	overrides := billing_setting.GetPluginBillingExprCopy()
 	for _, item := range models {
 		n := item.PublicModel
 		if !slices.Contains(names, n) {
@@ -204,7 +203,10 @@ func syncYeepaySnapshot(request YeepaySyncRequest, channel *model.Channel, curre
 			result.Warnings = append(result.Warnings, n+": mapping preserved; mapped pricing needs manual review")
 			continue
 		}
-		oldExpr := overrides["yeepay::"+n]
+		oldExpr := ""
+		if variants, ok := entries[n].Configured[billing_setting.PluginBillingExprOption].(map[string]any); ok {
+			oldExpr, _ = variants["yeepay"].(string)
+		}
 		if oldExpr == "" {
 			oldExpr, _ = entries[n].Configured["billing_setting.billing_expr"].(string)
 		}
