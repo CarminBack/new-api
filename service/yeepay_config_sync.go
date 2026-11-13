@@ -52,14 +52,15 @@ type yeepayCatalogModel struct {
 		VideoModes      []string        `json:"video_reference_modes"`
 	} `json:"capabilities"`
 	Pricing struct {
-		Currency    string   `json:"currency"`
-		Mode        string   `json:"mode"`
-		Base        *float64 `json:"base_price"`
-		Seconds     *float64 `json:"generated_second_price"`
-		WithVideo   *float64 `json:"generated_second_price_with_video"`
-		Reference   *float64 `json:"reference_video_second_price"`
-		Tokens      *float64 `json:"token_price_no_video_per_million"`
-		VideoTokens *float64 `json:"token_price_with_video_per_million"`
+		Currency         string   `json:"currency"`
+		Mode             string   `json:"mode"`
+		Base             *float64 `json:"base_price"`
+		Seconds          *float64 `json:"generated_second_price"`
+		WithVideo        *float64 `json:"generated_second_price_with_video"`
+		ReferenceBilling string   `json:"reference_video_billing"`
+		Reference        *float64 `json:"reference_video_second_price"`
+		Tokens           *float64 `json:"token_price_no_video_per_million"`
+		VideoTokens      *float64 `json:"token_price_with_video_per_million"`
 	} `json:"pricing"`
 }
 

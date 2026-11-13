@@ -84,9 +84,9 @@ func buildYeepaySyncedPlugin(source string, catalog []yeepayCatalogModel, reques
 		if p.Currency != "credits" || (p.Mode != "per_request" && p.Mode != "per_generated_second") {
 			return nil, nil, nil, nil, fmt.Errorf("%s: unsupported pricing currency or mode; manual adaptation required", name)
 		}
-		for _, v := range []*float64{p.Tokens, p.VideoTokens, p.Reference} {
+		for _, v := range []*float64{p.Tokens, p.VideoTokens} {
 			if v != nil && *v != 0 {
-				return nil, nil, nil, nil, fmt.Errorf("%s: token/reference-second pricing needs manual adaptation", name)
+				return nil, nil, nil, nil, fmt.Errorf("%s: token pricing needs manual adaptation", name)
 			}
 		}
 		if c.MinSeconds == nil || c.MaxSeconds == nil || *c.MinSeconds < 1 || *c.MaxSeconds > constant.MaxTaskDurationSeconds || *c.MinSeconds > *c.MaxSeconds || len(c.DurationOptions) == 0 {
@@ -168,7 +168,33 @@ func buildYeepaySyncedPlugin(source string, catalog []yeepayCatalogModel, reques
 			}
 			expression = fmt.Sprintf(`u("video_input") == "video" ? tier("with_video", u("seconds") * %s) : %s`, withPrice, expression)
 		}
-		row := []any{name, caps.Resolutions, *caps.MinSeconds, *caps.MaxSeconds, steps, caps.MaxImages, caps.MaxAudios, caps.MaxVideos, unit, false}
+		referenceBilling := p.Reference != nil && *p.Reference != 0
+		if referenceBilling {
+			if p.Mode != "per_generated_second" || p.ReferenceBilling != "separate_seconds" {
+				return nil, nil, nil, nil, fmt.Errorf("%s: inconsistent reference-second pricing; manual review required", name)
+			}
+			referencePrice, err := yeepaySalePrice(p.Reference, request)
+			if err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("%s: %w", name, err)
+			}
+			output := fmt.Sprintf(`u("seconds") * %s`, price)
+			if p.WithVideo != nil && *p.WithVideo != 0 {
+				withPrice, err := yeepaySalePrice(p.WithVideo, request)
+				if err != nil {
+					return nil, nil, nil, nil, err
+				}
+				output = fmt.Sprintf(`(u("video_input") == "video" ? u("seconds") * %s : u("seconds") * %s)`, withPrice, price)
+			}
+			expression = fmt.Sprintf(`tier("base", %s + u("reference_seconds") * %s)`, output, referencePrice)
+			if c.Support["video"] {
+				required := true
+				caps.ReferenceDurationRequired = &required
+			} else {
+				warnings = append(warnings, name+": reference video is explicitly disabled; reference-second price is not exercisable")
+			}
+			capsMap[name] = caps
+		}
+		row := []any{name, caps.Resolutions, *caps.MinSeconds, *caps.MaxSeconds, steps, caps.MaxImages, caps.MaxAudios, caps.MaxVideos, unit, referenceBilling}
 		if i, ok := indexes[name]; ok {
 			rows[i] = row
 		} else {

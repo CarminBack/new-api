@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -240,4 +241,48 @@ func TestYeepayCapturedCatalogCandidate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, candidate.SourceHash, again.SourceHash)
 	t.Logf("%d captured models compiled and validated without generation", len(models))
+}
+
+func TestYeepaySeparateReferenceSecondPricing(t *testing.T) {
+	source, catalog := yeepaySyncFixture(t)
+	for i := range catalog {
+		if catalog[i].ID == "new-video" {
+			catalog[i].Pricing.ReferenceBilling = "separate_seconds"
+			catalog[i].Pricing.Reference = common.GetPointer(1.0)
+		}
+	}
+	req := YeepaySyncRequest{CreditRate: 10, MarkupRate: 1.35, DecimalPlaces: 1}
+	_, loaded, models, _, err := buildYeepaySyncedPlugin(source, catalog, req)
+	require.NoError(t, err)
+	require.True(t, *loaded.Meta.VideoCapabilities["new-video"].ReferenceDurationRequired)
+	var expression string
+	for _, item := range models {
+		if item.PublicModel == "new-video" {
+			expression = item.BillingExpression
+		}
+	}
+	body := map[string]any{"model": "new-video", "prompt": "waves", "seconds": 10, "resolution": "480p"}
+	ctx := map[string]any{"requestBody": body, "upstreamModel": "new-video"}
+	for _, withReference := range []bool{false, true} {
+		if withReference {
+			body["references"] = []any{map[string]any{"type": "video", "role": "reference", "url": "https://cdn.example/ref.mp4", "duration_seconds": 6}}
+		}
+		raw, err := loaded.Engine.Call(t.Context(), "extractUsage", ctx)
+		require.NoError(t, err)
+		encoded, err := common.Marshal(raw)
+		require.NoError(t, err)
+		var usage map[string]any
+		require.NoError(t, common.Unmarshal(encoded, &usage))
+		expected := 3.0
+		if withReference {
+			expected = 6.2
+			assert.Equal(t, 6.0, usage["reference_seconds"])
+		}
+		cost, _, err := billingexpr.RunExprWithRequest(expression, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: usage})
+		require.NoError(t, err)
+		assert.InDelta(t, expected, cost, 0.00001)
+	}
+	body["references"] = []any{map[string]any{"type": "video", "role": "reference", "url": "https://cdn.example/ref.mp4"}}
+	_, err = loaded.Engine.Call(t.Context(), "extractUsage", ctx)
+	require.ErrorContains(t, err, "duration_seconds")
 }
